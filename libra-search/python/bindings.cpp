@@ -2,6 +2,7 @@
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include "libra/dfpn.h"
 #include "libra/selfplay.h"
 
 namespace py = pybind11;
@@ -27,6 +28,10 @@ SearchConfig config_from_dict(const py::dict& d) {
   getb("count_from_41", c.count_from_41);
   geti("policy_topk", c.policy_topk);
   geti("max_moves_per_game", c.max_moves_per_game);
+  geti("mate_nodes_root", c.mate_nodes_root);
+  geti("proof_nodes", c.proof_nodes);
+  geti("proof_min_ply", c.proof_min_ply);
+  getb("external", c.external);
   return c;
 }
 
@@ -76,7 +81,37 @@ py::dict record_to_dict(const GameRecord& r) {
 }  // namespace
 
 PYBIND11_MODULE(_search, m) {
-  m.doc() = "libra-search: 自己対局エンジン（MCGS/MCTS、Gumbel ルート、バッチ評価）";
+  m.doc() = "libra-search: 自己対局エンジン（MCGS/MCTS、Gumbel ルート、バッチ評価）と df-pn";
+  // libra_sim は _sim と _search の両方に静的リンクされ、利きと Zobrist の表がモジュールごとにある。
+  // _sim 側で作った Position をこちらの関数に渡しても正しく動くよう、こちらの表をここで初期化する
+  static Position init_tables;
+  (void)init_tables;
+  // df-pn を局面に対して直接呼ぶ（テスト・USI エンジン用）。problem: "mate" | "ruling41" | "mate41"。
+  // 戻り値: (result: "proven"|"disproven"|"unknown", best_move_usi, nodes)
+  m.def("solve",
+        [](Position& pos, const std::string& problem, std::uint64_t max_nodes, int tt_bits) {
+          DfPn d(tt_bits);
+          Move best = MOVE_NONE;
+          ProofResult r;
+          bool or_node;
+          if (problem == "mate") {
+            MateProblem p;
+            r = d.solve(pos, p, true, max_nodes, &best);
+          } else if (problem == "ruling41") {
+            Ruling41Problem p;
+            or_node = pos.turn() == BLACK;
+            r = d.solve(pos, p, or_node, max_nodes, &best);
+          } else if (problem == "mate41") {
+            Mate41Problem p;
+            or_node = pos.turn() == WHITE;
+            r = d.solve(pos, p, or_node, max_nodes, &best);
+          } else {
+            throw py::value_error("problem must be mate | ruling41 | mate41");
+          }
+          const char* name = r == PROOF_PROVEN ? "proven" : r == PROOF_DISPROVEN ? "disproven" : "unknown";
+          return py::make_tuple(std::string(name), move_to_usi(best), d.nodes());
+        },
+        py::arg("pos"), py::arg("problem"), py::arg("max_nodes") = 10000, py::arg("tt_bits") = 18);
   py::class_<SelfPlay>(m, "SelfPlay")
       .def(py::init([](const py::dict& cfg, int n_games, std::uint64_t seed, int threads) {
              return std::make_unique<SelfPlay>(config_from_dict(cfg), n_games, seed, threads);
@@ -115,6 +150,33 @@ PYBIND11_MODULE(_search, m) {
              return out;
            })
       .def("set_active", &SelfPlay::set_active)
+      .def("set_position", &SelfPlay::set_position, py::arg("slot"), py::arg("usi_line"), py::arg("sims"), py::arg("full") = true)
+      .def("idle", &SelfPlay::idle, py::arg("slot"))
+      .def("finish_now", &SelfPlay::finish_now, py::arg("slot"))
+      .def("result",
+           [](const SelfPlay& s, int slot) {
+             const SearchResult& r = s.result(slot);
+             py::dict d;
+             d["ready"] = r.ready;
+             d["best"] = move_to_usi(Move(r.best));
+             d["root_q"] = r.root_q;
+             d["sims"] = r.sims;
+             py::list cands;
+             for (const Candidate& c : r.cands) {
+               py::dict cd;
+               cd["move"] = move_to_usi(Move(c.move));
+               cd["visits"] = c.visits;
+               cd["q"] = c.q;
+               cd["prior"] = c.prior;
+               cands.append(cd);
+             }
+             d["cands"] = cands;
+             py::list pv;
+             for (std::uint32_t m : r.pv) pv.append(move_to_usi(Move(m)));
+             d["pv"] = pv;
+             return d;
+           },
+           py::arg("slot"))
       .def("root_turns",
            [](const SelfPlay& s) {
              py::array_t<std::int8_t> out(s.n_games());
@@ -139,6 +201,10 @@ PYBIND11_MODULE(_search, m) {
         d["max_ply"] = st.max_ply;
         d["timeout"] = st.timeout;
         d["plies_sum"] = st.plies_sum;
+        d["mate_found"] = st.mate_found;
+        d["proof_found"] = st.proof_found;
+        d["proof_calls"] = st.proof_calls;
+        d["proof_nodes"] = st.proof_nodes;
         return d;
       });
 }

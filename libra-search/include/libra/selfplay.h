@@ -29,6 +29,26 @@ struct SearchConfig {
   bool count_from_41 = true;
   int policy_topk = 32;     // 方策ターゲットとして保存する上位数
   int max_moves_per_game = 400;  // 安全弁（規定上は max_ply で終わる）
+  int mate_nodes_root = 200;     // 本将棋の各手の根で df-pn 詰み探索に使う節点数（0 で無効）
+  int proof_nodes = 1000;        // 布石終盤の証明探索（41 手目の裁定・先手詰み）の節点数（0 で無効）
+  int proof_min_ply = 36;        // 証明探索を始める手数
+  bool external = false;         // 外部駆動（USI エンジン用）: 局面は set_position で与え、手は指さず結果を返す
+};
+
+struct Candidate {
+  std::uint32_t move;
+  int visits;
+  float q;      // 手番側から見た値（−1..1）
+  float prior;
+};
+
+struct SearchResult {
+  bool ready = false;
+  std::uint32_t best = MOVE_NONE;
+  float root_q = 0;
+  std::vector<Candidate> cands;   // 訪問数の多い順
+  std::vector<std::uint32_t> pv;  // 最善手から辿った主変化
+  std::uint64_t sims = 0;
 };
 
 struct MoveRecord {
@@ -51,6 +71,7 @@ struct GameRecord {
 
 struct SelfPlayStats {
   std::uint64_t games = 0, moves = 0, sims = 0, evals = 0;
+  std::uint64_t mate_found = 0, proof_found = 0, proof_nodes = 0, proof_calls = 0;  // 証明探索の統計
   std::uint64_t results[3] = {0, 0, 0};  // 先手勝ち・引き分け・後手勝ち
   std::uint64_t ruling41 = 0, no_legal = 0, sennichite = 0, perpetual = 0, max_ply = 0, timeout = 0;
   double plies_sum = 0;
@@ -72,6 +93,11 @@ class SelfPlay {
   int active() const { return active_; }
   // 各対局のルート（いま考えている手番）の色を書く（0 先手、1 後手）。評価対局で「どちらのネットで読むか」を決めるのに使う
   void root_turns(std::int8_t* out) const;
+  // 外部駆動（cfg.external）: 枠 slot に局面を与えて sims 回読む。読み終わると idle になり result が取れる
+  bool set_position(int slot, const std::string& usi_line, int sims, bool full);
+  bool idle(int slot) const;
+  void finish_now(int slot);  // 今の訪問数で打ち切って結果を出す（stop）
+  const SearchResult& result(int slot) const;
 
   struct Game;  // 実装の詳細（selfplay.cpp）
 
@@ -87,6 +113,7 @@ class SelfPlay {
   void step_game(Game& g);  // 次の葉まで進める（終局・着手・新規対局を含む）
   void apply_game(Game& g, const float* logits, const float* wdl);
   void finish_move(Game& g);
+  void play_forced(Game& g, Move m, float value);
   void start_game(Game& g);
   void end_game(Game& g);
   void parallel_for(int n, const std::function<void(int)>& f);

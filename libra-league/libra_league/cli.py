@@ -33,6 +33,16 @@ def main(argv: list[str] | None = None) -> int:
     p_ev.add_argument("--threads", type=int, default=8)
     p_ev.add_argument("--seed", type=int, default=0)
     p_ev.add_argument("--out", default=None, help="結果 JSON の出力先（既定: <run>/eval/<時刻>.json）")
+    p_m = sub.add_parser("match", help="計測: Libra（USI）と外部エンジンを無人対局させ棋譜を JSONL に残す")
+    p_m.add_argument("--games", type=int, default=20)
+    p_m.add_argument("--go", default="movetime 3000", help="go の引数（例: 'movetime 3000' / 'btime 60000 wtime 60000 byoyomi 10000'）")
+    p_m.add_argument("--opponent", default=None, help="相手エンジンの起動コマンド（既定: fuseki_usi_server.py）")
+    p_m.add_argument("--opponent-cwd", default=str(Path.home() / "fuseki-shogi-ai"))
+    p_m.add_argument("--opponent-opt", action="append", default=[], help="相手の setoption（name=value）")
+    p_m.add_argument("--libra-opt", action="append", default=[], help="Libra の setoption（name=value）")
+    p_m.add_argument("--model", default=None, help="Libra のチェックポイント（既定: <run>/checkpoints/latest.pt）")
+    p_m.add_argument("--out", default=None, help="棋譜 JSONL（既定: <run>/matches/<時刻>.jsonl）")
+    p_m.add_argument("--first-placer", default="a", choices=["a", "b"], help="第 1 局で両玉を置く側（a=Libra）")
     a = ap.parse_args(argv)
     sd = StateDir(Path(a.root) / a.run)
     if a.cmd == "run":
@@ -74,6 +84,57 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({k: v for k, v in res.items() if not k.startswith("calibration")}, ensure_ascii=False))
         for side in ("a", "b"):
             print(f"calibration_{side}:", " ".join(f"[{c['lo']:.1f},{c['hi']:.1f}) n={c['n']} pred={c['pred']:.2f} act={c['actual']:.2f}" for c in res[f"calibration_{side}"]))
+        print("written:", out)
+        return 0
+    if a.cmd == "match":
+        import time
+
+        from .harness import run_match
+        from .usi_client import UsiEngine
+
+        root = Path(__file__).resolve().parents[2]
+        out = Path(a.out) if a.out else sd.root / "matches" / (time.strftime("%Y%m%d-%H%M%S") + ".jsonl")
+        logf = open(out.with_suffix(".log"), "a", encoding="utf-8") if out.parent.exists() or not out.parent.mkdir(parents=True, exist_ok=True) else None
+
+        def log(s: str) -> None:
+            print(s, flush=True)
+            if logf:
+                logf.write(s + "\n")
+                logf.flush()
+
+        lopts = {"Declare_Win": "true"}
+        if a.model:
+            lopts["DNN_Model"] = a.model
+        else:
+            lopts["DNN_Model"] = str(sd.checkpoints / "latest.pt")
+        for kv in a.libra_opt:
+            k, v = kv.split("=", 1)
+            lopts[k] = v
+        oopts = {}
+        for kv in a.opponent_opt:
+            k, v = kv.split("=", 1)
+            oopts[k] = v
+        if a.opponent:
+            ocmd = a.opponent.split()
+        else:
+            ocmd = [str(Path(a.opponent_cwd) / ".venv" / "bin" / "python"), "scripts/fuseki_usi_server.py"]
+        libra = UsiEngine("libra", [str(root / "bin" / "libra-usi")], cwd=str(root), options=lopts, log=lambda s: logf and logf.write(s + "\n"))
+        opp = UsiEngine("opp", ocmd, cwd=a.opponent_cwd, options=oopts, log=lambda s: logf and logf.write(s + "\n"))
+        log(f"starting engines: libra={libra.cmd} opp={ocmd}")
+        libra.start()
+        opp.start()
+        log(f"libra: {libra.id_name}  opp: {opp.id_name}")
+        try:
+            summary = run_match(libra, opp, a.games, a.go, out, log=log, first_placer=a.first_placer)
+        finally:
+            libra.quit()
+            opp.quit()
+        summary["go"] = a.go
+        summary["libra_options"] = lopts
+        summary["opponent_options"] = oopts
+        summary["opponent_cmd"] = ocmd
+        out.with_suffix(".summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(json.dumps({k: v for k, v in summary.items() if k != "games"}, ensure_ascii=False))
         print("written:", out)
         return 0
     if a.cmd == "status":

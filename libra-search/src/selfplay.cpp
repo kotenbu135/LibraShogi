@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "libra/selfplay.h"
 
+#include "libra/dfpn.h"
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -68,8 +70,17 @@ struct SelfPlay::Game {
   std::vector<Move> path_moves;
   int moves_made = 0;
   int slot = 0;
+  bool idle = false;         // 外部駆動で局面待ち
+  int forced_budget = -1;    // 外部駆動の読みの回数
+  bool forced_full = true;
+  SearchResult result;
   std::vector<GameRecord> done;  // 終局した記録（gather で集める）
   SelfPlayStats st;              // この対局の統計（gather で集める）
+  DfPn dfpn{12};
+  MateProblem mate_prob;
+  Ruling41Problem ruling_prob;
+  Mate41Problem mate41_prob;
+  std::unordered_map<std::uint64_t, float> proof_cache;  // 鍵 → 手番側の値（±1）。この手の探索内
 
   float root_q() const {
     const Node& r = nodes[0];
@@ -94,6 +105,16 @@ void SelfPlay::set_active(int n) { active_ = std::max(1, std::min(n, int(games_.
 void SelfPlay::start_game(Game& g) {
   g.pos.reset(MODE_TENBIN);
   g.pos.set_max_ply(cfg_.max_ply, cfg_.count_from_41);
+  if (cfg_.external) {
+    g.idle = true;
+    g.pending = false;
+    g.nodes.clear();
+    g.table.clear();
+    g.proof_cache.clear();
+    g.root_ready = false;
+    g.sims = 0;
+    return;
+  }
   // 玉配置のペア: 一様（後で libra-scale の重点サンプルに置き換える）
   std::uniform_int_distribution<int> d(0, 35);
   int kb = make_sq(d(g.rng) % 9, 5 + d(g.rng) / 9);
@@ -108,6 +129,7 @@ void SelfPlay::start_game(Game& g) {
   g.moves_made = 0;
   g.nodes.clear();
   g.table.clear();
+  g.proof_cache.clear();
   g.root_ready = false;
   g.pending = false;
   g.sims = 0;
@@ -142,6 +164,10 @@ static void init_root_search(SelfPlay::Game& g, const SearchConfig& cfg) {
   std::uniform_real_distribution<float> u(0.0f, 1.0f);
   g.full = u(g.rng) < cfg.full_prob;
   g.budget = g.full ? cfg.full_sims : cfg.fast_sims;
+  if (g.forced_budget >= 0) {
+    g.full = g.forced_full;
+    g.budget = g.forced_budget;
+  }
   int m = std::min(g.full ? cfg.gumbel_m_full : cfg.gumbel_m_fast, int(root.edges.size()));
   g.gumbel.assign(root.edges.size(), 0.0f);
   std::vector<int> order(root.edges.size());
@@ -241,6 +267,46 @@ void SelfPlay::finish_move(Game& g) {
     for (int i = 0; i < k; ++i) kept += sc[i].first;
     for (int i = 0; i < k; ++i) mr.policy.push_back({std::uint16_t(root.edges[sc[i].second].index), sc[i].first / kept});
   }
+  if (cfg_.external) {
+    // 手は指さず、結果を残して局面待ちに戻る
+    SearchResult& r = g.result;
+    r = SearchResult();
+    r.ready = true;
+    r.best = root.edges[best].move;
+    r.root_q = mr.root_q;
+    r.sims = g.sims;
+    std::vector<int> order(root.edges.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = int(i);
+    std::sort(order.begin(), order.end(), [&](int a, int b) {
+      if (root.edges[a].visits != root.edges[b].visits) return root.edges[a].visits > root.edges[b].visits;
+      return root.edges[a].prior > root.edges[b].prior;
+    });
+    for (int i : order) {
+      const Edge& e = root.edges[i];
+      r.cands.push_back({e.move, e.visits, e.visits ? e.wsum / e.visits : mr.root_q, e.prior});
+    }
+    // 主変化: 最善手から訪問数最大の枝を辿る
+    r.pv.push_back(r.best);
+    std::uint32_t ni = root.edges[best].child;
+    while (ni != NONE && ni < g.nodes.size()) {
+      const Node& n = g.nodes[ni];
+      int bi = -1;
+      for (size_t i = 0; i < n.edges.size(); ++i)
+        if (n.edges[i].visits > 0 && (bi < 0 || n.edges[i].visits > n.edges[bi].visits)) bi = int(i);
+      if (bi < 0) break;
+      r.pv.push_back(n.edges[bi].move);
+      ni = n.edges[bi].child;
+    }
+    g.st.moves++;
+    g.st.sims += g.sims;
+    g.nodes.clear();
+    g.table.clear();
+    g.proof_cache.clear();
+    g.root_ready = false;
+    g.sims = 0;
+    g.idle = true;
+    return;
+  }
   // 41 手目の局面（40 手完了、手番 先手）の探索値
   if (g.pos.phase() == PHASE_NORMAL && g.pos.ply() == 40) {
     g.rec.v41 = mr.root_q;
@@ -253,6 +319,7 @@ void SelfPlay::finish_move(Game& g) {
   g.st.sims += g.sims;
   g.nodes.clear();
   g.table.clear();
+  g.proof_cache.clear();
   g.root_ready = false;
   g.sims = 0;
   if (g.pos.outcome().result != ONGOING || g.moves_made >= cfg_.max_moves_per_game) {
@@ -261,21 +328,135 @@ void SelfPlay::finish_move(Game& g) {
   }
 }
 
+// 布石終盤の証明探索。解けたら手番側から見た値（±1）を返し、best に証明手（手番側が勝つ側なら）を入れる
+static bool fuseki_proof(SelfPlay::Game& g, Position& pos, const SearchConfig& cfg, float& value, Move* best) {
+  if (cfg.proof_nodes <= 0 || pos.phase() != PHASE_FUSEKI || pos.ply() < cfg.proof_min_ply) return false;
+  auto it = g.proof_cache.find(pos.key());
+  if (it != g.proof_cache.end()) {
+    value = it->second;
+    return value != 0.0f;
+  }
+  Color mover = pos.turn();
+  float v = 0.0f;
+  // 先手の裁定（後手玉が当たったまま 40 手完了）
+  {
+    Move m = MOVE_NONE;
+    ProofResult r = g.dfpn.solve(pos, g.ruling_prob, mover == BLACK, cfg.proof_nodes, &m);
+    g.st.proof_calls++;
+    g.st.proof_nodes += g.dfpn.nodes();
+    if (r == PROOF_PROVEN) {
+      v = mover == BLACK ? 1.0f : -1.0f;
+      if (best && mover == BLACK) *best = m;
+    }
+  }
+  // 41 手目に先手に合法手なし（後手の勝ち）
+  if (v == 0.0f) {
+    Move m = MOVE_NONE;
+    ProofResult r = g.dfpn.solve(pos, g.mate41_prob, mover == WHITE, cfg.proof_nodes, &m);
+    g.st.proof_calls++;
+    g.st.proof_nodes += g.dfpn.nodes();
+    if (r == PROOF_PROVEN) {
+      v = mover == WHITE ? 1.0f : -1.0f;
+      if (best && mover == WHITE) *best = m;
+    }
+  }
+  g.proof_cache[pos.key()] = v;
+  if (v != 0.0f) {
+    g.st.proof_found++;
+    value = v;
+    return true;
+  }
+  return false;
+}
+
+// 証明済みの手をそのまま指す（探索しない）。方策ターゲットはその手の one-hot
+void SelfPlay::play_forced(Game& g, Move m, float value) {
+  if (cfg_.external) {
+    g.result = SearchResult();
+    g.result.ready = true;
+    g.result.best = m;
+    g.result.root_q = value;
+    g.result.cands.push_back({m, 1, value, 1.0f});
+    g.result.pv.push_back(m);
+    g.nodes.clear();
+    g.table.clear();
+    g.proof_cache.clear();
+    g.root_ready = false;
+    g.sims = 0;
+    g.idle = true;
+    return;
+  }
+  MoveRecord mr;
+  mr.move = m;
+  mr.full = true;
+  mr.root_q = value;
+  mr.policy.push_back({std::uint16_t(move_index(g.pos, m)), 1.0f});
+  if (g.pos.phase() == PHASE_NORMAL && g.pos.ply() == 40) {
+    g.rec.v41 = value;
+    g.rec.sfen41 = g.pos.sfen();
+  }
+  g.rec.moves.push_back(std::move(mr));
+  g.pos.do_move(m);
+  g.moves_made++;
+  g.st.moves++;
+  g.nodes.clear();
+  g.table.clear();
+  g.proof_cache.clear();
+  g.root_ready = false;
+  g.sims = 0;
+  if (g.pos.outcome().result != ONGOING || g.moves_made >= cfg_.max_moves_per_game) {
+    if (g.pos.outcome().result == ONGOING) g.pos.timeout(g.pos.turn());
+    end_game(g);
+  }
+}
+
 // 次の葉まで進める。終端は即座に逆伝播し、必要なら着手・終局・新規対局も行う
 void SelfPlay::step_game(Game& g) {
+  if (g.idle) return;
   for (int guard = 0; guard < 4096; ++guard) {
+    if (g.idle) return;
     if (g.nodes.empty()) {
       // ルートを作る（未評価）
+      Outcome o = g.pos.outcome();
+      if (o.result != ONGOING) {  // 起こらないはず（着手後に終局を見る）
+        if (cfg_.external) {
+          g.result = SearchResult();
+          g.result.ready = true;
+          g.result.best = MOVE_NONE;
+          g.result.root_q = 0;
+          g.idle = true;
+          return;
+        }
+        end_game(g);
+        continue;
+      }
+      // 根での証明探索: 本将棋の詰み、布石終盤の裁定・先手詰み。手番側の勝ちが証明できればその手を指す
+      Move forced = MOVE_NONE;
+      float fv = 0.0f;
+      if (g.pos.phase() == PHASE_NORMAL && cfg_.mate_nodes_root > 0) {
+        Move m = MOVE_NONE;
+        if (g.dfpn.solve(g.pos, g.mate_prob, true, cfg_.mate_nodes_root, &m) == PROOF_PROVEN && m != MOVE_NONE) {
+          forced = m;
+          fv = 1.0f;
+          g.st.mate_found++;
+        }
+      } else if (g.pos.phase() == PHASE_FUSEKI) {
+        Move m = MOVE_NONE;
+        float v;
+        if (fuseki_proof(g, g.pos, cfg_, v, &m) && v > 0 && m != MOVE_NONE) {
+          forced = m;
+          fv = v;
+        }
+      }
+      if (forced != MOVE_NONE) {
+        play_forced(g, forced, fv);
+        continue;
+      }
       g.nodes.push_back(make_node(g.pos.key()));
       g.sp = g.pos;
       g.path.clear();
       g.path_moves.clear();
       g.leaf = 0;
-      Outcome o = g.pos.outcome();
-      if (o.result != ONGOING) {  // 起こらないはず（着手後に終局を見る）
-        end_game(g);
-        continue;
-      }
       g.pending = true;
       return;
     }
@@ -339,6 +520,13 @@ void SelfPlay::step_game(Game& g) {
             Color mover = sp.turn();
             leaf.terminal_value = o.result == DRAW ? cfg_.draw_value
                                   : ((o.result == BLACK_WIN) == (mover == BLACK)) ? 1.0f : -1.0f;
+          } else {
+            float pv;
+            if (fuseki_proof(g, sp, cfg_, pv, nullptr)) {
+              leaf.terminal = true;
+              leaf.expanded = true;
+              leaf.terminal_value = pv;
+            }
           }
         }
         for (size_t i = 0; i < g.path_moves.size(); ++i) sp.undo_move();
@@ -394,6 +582,10 @@ void SelfPlayStats::add(const SelfPlayStats& o) {
   moves += o.moves;
   sims += o.sims;
   evals += o.evals;
+  mate_found += o.mate_found;
+  proof_found += o.proof_found;
+  proof_nodes += o.proof_nodes;
+  proof_calls += o.proof_calls;
   for (int i = 0; i < 3; ++i) results[i] += o.results[i];
   ruling41 += o.ruling41;
   no_legal += o.no_legal;
@@ -435,7 +627,7 @@ int SelfPlay::collect(float* sq, float* glob) {
   int n = int(games_.size());
   parallel_for(n, [&](int i) {
     Game& g = *games_[i];
-    if (i >= active_) {
+    if (i >= active_ || g.idle) {
       // 止めている対局: 特徴はゼロのまま（apply で無視する）
       std::fill(sq + size_t(i) * SQ_NB * SQ_FEATS, sq + size_t(i + 1) * SQ_NB * SQ_FEATS, 0.0f);
       std::fill(glob + size_t(i) * GLOB_FEATS, glob + size_t(i + 1) * GLOB_FEATS, 0.0f);
@@ -491,12 +683,55 @@ void SelfPlay::apply(const float* logits, const float* wdl) {
   int n = std::min(active_, int(games_.size()));
   parallel_for(n, [&](int i) {
     Game& g = *games_[i];
-    if (!g.pending) return;
+    if (g.idle || !g.pending) return;
     apply_game(g, logits + size_t(i) * POLICY_SIZE, wdl + size_t(i) * 3);
     step_game(g);  // 次の葉まで進める（終局・着手を含む）
   });
   gather();
 }
+
+bool SelfPlay::set_position(int slot, const std::string& usi_line, int sims, bool full) {
+  Game& g = *games_[slot];
+  if (!g.pos.set_position(usi_line, MODE_TENBIN)) return false;
+  g.pos.set_max_ply(cfg_.max_ply, cfg_.count_from_41);
+  g.forced_budget = sims;
+  g.forced_full = full;
+  g.result = SearchResult();
+  g.nodes.clear();
+  g.table.clear();
+  g.proof_cache.clear();
+  g.root_ready = false;
+  g.pending = false;
+  g.sims = 0;
+  g.idle = false;
+  step_game(g);
+  return true;
+}
+
+bool SelfPlay::idle(int slot) const { return games_[slot]->idle; }
+
+void SelfPlay::finish_now(int slot) {
+  Game& g = *games_[slot];
+  if (g.idle) return;
+  if (g.pending) {
+    // 評価待ちの葉は捨てて、今の訪問数で決める
+    for (size_t i = 0; i < g.path_moves.size(); ++i) g.sp.undo_move();
+    g.pending = false;
+  }
+  if (g.nodes.empty() || !g.root_ready) {
+    g.forced_budget = 0;
+    g.budget = 0;
+    if (g.nodes.empty()) {
+      // ルート未評価: 読まずに合法手の先頭を返す代わりに、1 回だけ評価させる（budget 0 で次の apply 後に確定）
+      step_game(g);
+      return;
+    }
+  }
+  g.budget = g.sims;
+  step_game(g);
+}
+
+const SearchResult& SelfPlay::result(int slot) const { return games_[slot]->result; }
 
 void SelfPlay::root_turns(std::int8_t* out) const {
   for (size_t i = 0; i < games_.size(); ++i) out[i] = games_[i]->pos.turn() == BLACK ? 0 : 1;

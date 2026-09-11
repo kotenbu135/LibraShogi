@@ -11,7 +11,9 @@ import librashogi as ls
 n_games = int(sys.argv[1]) if len(sys.argv) > 1 else 64
 threads = int(sys.argv[2]) if len(sys.argv) > 2 else 8
 rounds = int(sys.argv[3]) if len(sys.argv) > 3 else 400
+import json, os
 cfg = {"full_sims": 96, "fast_sims": 24, "full_prob": 0.25, "max_ply": 256}
+cfg.update(json.loads(os.environ.get("LIBRA_SMOKE_CFG", "{}")))
 sp = librasearch.SelfPlay(cfg, n_games, seed=1, threads=threads)
 sq = np.zeros((n_games, 81, ls.SQ_FEATS), np.float32)
 glob = np.zeros((n_games, ls.GLOB_FEATS), np.float32)

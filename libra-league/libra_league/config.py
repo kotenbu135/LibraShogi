@@ -25,6 +25,9 @@ DEFAULTS: dict[str, Any] = {
         "count_from_41": True,
         "policy_topk": 32,
         "max_moves_per_game": 400,
+        "mate_nodes_root": 200,
+        "proof_nodes": 1000,
+        "proof_min_ply": 36,
     },
     "selfplay": {"n_games": 512, "threads": 12, "infer_dtype": "float16"},
     "train": {
