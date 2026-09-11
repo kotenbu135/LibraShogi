@@ -19,6 +19,11 @@ $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
+# 非表示の PowerShell で起動されるので、途中の例外はメッセージボックスで見せる
+trap {
+    [System.Windows.Forms.MessageBox]::Show(($_.ToString() + "`r`n" + $_.ScriptStackTrace), "Libra 管理コンソール エラー", "OK", "Error") | Out-Null
+    exit 1
+}
 
 $script:RunTitles = @{ ls = "ls  本体 L-S"; lx = "lx  搾取者" }
 $script:TaskNames = @{ ls = "LibraShogi run"; lx = "LibraShogi run lx" }
