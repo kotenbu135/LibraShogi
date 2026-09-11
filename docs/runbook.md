@@ -30,11 +30,11 @@ docs/libra-local.md §7〜8 の実装。状態はすべて `~/libra-run/<run-id>
 `--run <id>` で run-id、`--root <dir>` で親ディレクトリを変えられる（既定 `~/libra-run/ls`）。
 `run --config path.toml` は初回だけ有効。
 
-Windows 側: `C:\Users\sakis\libra\` に `libra-run.bat` / `libra-pause.bat` / `libra-resume.bat` / `libra-stop.bat` / `libra-status.bat` / `libra-throttle.bat`。デスクトップに pause / resume / status / stop の写し。
+Windows 側: `C:\Users\sakis\libra\` に `libra-run.bat`（本体 ls）/ `libra-run-lx.bat`（搾取者 lx）と、**ls と lx の両方に効く** `libra-pause.bat` / `libra-resume.bat` / `libra-stop.bat` / `libra-status.bat` / `libra-throttle.bat`。デスクトップに pause / resume / status / stop の写し。
 
 ## 3. Windows Update で再起動しても続くようにする
 
-1. タスク スケジューラに「LibraShogi run」を登録済み（`C:\Users\sakis\libra\LibraShogi-run.xml`）。ログオン 1 分後に `wscript.exe libra-run-hidden.vbs` → `wsl.exe -d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra run` を非表示で起動し、失敗時は 1 分後に再起動（999 回まで）。実行時間の上限なし。
+1. タスク スケジューラに「LibraShogi run」（本体 ls、ログオン 1 分後）と「LibraShogi run lx」（搾取者 lx、ログオン 2 分後）を登録済み（`C:\Users\sakis\libra\LibraShogi-run.xml` / `LibraShogi-run-lx.xml`）。それぞれ `wscript.exe libra-run-hidden.vbs` / `libra-run-lx-hidden.vbs` → `wsl.exe -d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra [--run lx] run` を非表示で起動し、失敗時は 1 分後に再起動（999 回まで）。実行時間の上限なし。
 2. **自動ログオンは利用者が設定する**（`netplwiz`）。設定しないと再起動後にログオンするまで止まる。
 3. 再起動後の損失はチェックポイント間隔（10 分）＋進行中の対局分。
 4. Windows Update の「アクティブ時間」を広めに設定する。
@@ -44,7 +44,10 @@ Windows 側: `C:\Users\sakis\libra\` に `libra-run.bat` / `libra-pause.bat` / `
 
 ```powershell
 schtasks /Create /TN "LibraShogi run" /XML "C:\Users\sakis\libra\LibraShogi-run.xml" /F
+schtasks /Create /TN "LibraShogi run lx" /XML "C:\Users\sakis\libra\LibraShogi-run-lx.xml" /F
 ```
+
+再起動・一時停止の手順: 一時停止はデスクトップの `libra-pause.bat`（両 run が待機）、復帰は `libra-resume.bat`。PC を再起動するときは `libra-stop.bat` で両 run を止めて（`libra-status.bat` で `not running` を確認）から再起動し、ログオン後に両タスクが自動で再開する。搾取者を止めたままにしたいときは WSL で `bin/libra --run lx stop` だけ実行する（本体は openings を読むだけなので影響しない）。
 
 ## 4. 別作業でリソースを空けるとき
 
