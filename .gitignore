@@ -1,0 +1,56 @@
+# ビルド生成物
+build/
+build-*/
+dist/
+*.o
+*.a
+*.so
+*.dll
+*.exe
+*.pyd
+*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+
+# Python 環境
+.venv/
+venv/
+
+# 実行状態・データ（状態ディレクトリは ~/libra-run/ に置く。リポジトリには入れない）
+runs/
+*.jsonl
+*.parquet
+*.safetensors
+*.onnx
+*.engine
+*.plan
+*.bin
+*.ckpt
+
+# 秘密情報（絶対にコミットしない）
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+vast_api_key*
+*.secret
+
+# エディタ・OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# 外部プロジェクトの clone は置かない（GPL 混入防止）
+external/
+third_party/

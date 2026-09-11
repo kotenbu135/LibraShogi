@@ -1,0 +1,20 @@
+LibraShogi
+Copyright 2026 kotenbu (LibraShogi contributors)
+
+This product is developed from scratch for 天秤将棋 (Tenbin Shogi).
+It contains no code, evaluation functions, weights, or game records from
+any existing shogi engine (YaneuraOu, Apery, dlshogi, Lc0, Suisho, Stockfish,
+fuseki-shogi-ai, fuseki-shogi-web, etc.).
+
+Licenses:
+  - Source code:               Apache License 2.0 (see LICENSE)
+  - Documentation (docs/):     CC BY 4.0
+  - Self-play game data:       CC0 1.0
+  - Trained weights:           Apache License 2.0 (with model card)
+  - King-placement table JSON: CC0 1.0
+
+Third-party components and their licenses are listed in LICENSES/README.md.
+If any code is adapted from KataGo (MIT), the attribution is recorded below.
+
+Attributions:
+  (none yet)

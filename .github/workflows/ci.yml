@@ -1,0 +1,31 @@
+name: ci
+# 非公開の間は Linux のテストだけ（Windows ランナーは消費が 2 倍）。公開後に windows-latest のビルドを足す。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: python -m pip install --upgrade pip cmake ninja pybind11 pytest
+      - name: Build libra-sim
+        if: hashFiles('libra-sim/CMakeLists.txt') != ''
+        run: |
+          cmake -S libra-sim -B build/libra-sim -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/libra-sim
+      - name: C++ tests (perft, rules)
+        if: hashFiles('libra-sim/CMakeLists.txt') != ''
+        run: ctest --test-dir build/libra-sim --output-on-failure
+      - name: Python tests
+        if: hashFiles('libra-sim/pyproject.toml') != ''
+        run: |
+          python -m pip install ./libra-sim
+          python -m pytest -q libra-sim/tests
