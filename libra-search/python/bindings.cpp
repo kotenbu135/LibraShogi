@@ -36,6 +36,11 @@ SearchConfig config_from_dict(const py::dict& d) {
       c.king_pairs.push_back(pr[1].cast<int>());
     }
   }
+  if (d.contains("openings")) {
+    c.openings.clear();
+    for (auto item : d["openings"].cast<py::list>()) c.openings.push_back(item.cast<std::vector<std::uint32_t>>());
+  }
+  getf("openings_prob", c.openings_prob);
   geti("mate_nodes_root", c.mate_nodes_root);
   geti("proof_nodes", c.proof_nodes);
   geti("proof_min_ply", c.proof_min_ply);
@@ -158,6 +163,7 @@ PYBIND11_MODULE(_search, m) {
              return out;
            })
       .def("set_active", &SelfPlay::set_active)
+      .def("set_openings", &SelfPlay::set_openings, py::arg("openings"), py::arg("prob"))
       .def("set_position", [](SelfPlay& s, int slot, const std::string& line, int sims, bool full, const std::string& mode) { return s.set_position(slot, line, sims, full, mode == "fuseki" ? MODE_FUSEKI : MODE_TENBIN); }, py::arg("slot"), py::arg("usi_line"), py::arg("sims"), py::arg("full") = true, py::arg("mode") = "tenbin")
       .def("idle", &SelfPlay::idle, py::arg("slot"))
       .def("finish_now", &SelfPlay::finish_now, py::arg("slot"))

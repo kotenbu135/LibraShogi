@@ -100,6 +100,11 @@ SelfPlay::SelfPlay(const SearchConfig& cfg, int n_games, std::uint64_t seed, int
 
 SelfPlay::~SelfPlay() = default;
 
+void SelfPlay::set_openings(std::vector<std::vector<std::uint32_t>> openings, float prob) {
+  cfg_.openings = std::move(openings);
+  cfg_.openings_prob = prob;
+}
+
 void SelfPlay::set_active(int n) { active_ = std::max(1, std::min(n, int(games_.size()))); }
 
 void SelfPlay::start_game(Game& g) {
@@ -114,6 +119,43 @@ void SelfPlay::start_game(Game& g) {
     g.root_ready = false;
     g.sims = 0;
     return;
+  }
+  // 開始局面: 確率 openings_prob で openings（玉 2 手を含む手順）から始める。手順の手は探索しないので方策ターゲットは無し
+  std::uniform_real_distribution<float> u01(0.0f, 1.0f);
+  if (!cfg_.openings.empty() && u01(g.rng) < cfg_.openings_prob) {
+    std::uniform_int_distribution<int> d(0, int(cfg_.openings.size()) - 1);
+    const std::vector<std::uint32_t>& op = cfg_.openings[d(g.rng)];
+    g.rec = GameRecord();
+    g.rec.slot = g.slot;
+    g.rec.v41 = 0;
+    g.moves_made = 0;
+    bool ok = op.size() >= 2;
+    for (size_t i = 0; ok && i < op.size(); ++i) {
+      Move m = Move(op[i]);
+      if (!g.pos.is_legal(m) || g.pos.outcome().result != ONGOING) { ok = false; break; }
+      g.pos.do_move(m);
+      if (i == 0) g.rec.kb = to_sq(m);
+      else if (i == 1) g.rec.kw = to_sq(m);
+      else {
+        MoveRecord mr;
+        mr.move = m;
+        mr.full = false;
+        mr.root_q = 0;
+        g.rec.moves.push_back(std::move(mr));
+        g.moves_made++;
+      }
+    }
+    if (ok) {
+      g.nodes.clear();
+      g.table.clear();
+      g.proof_cache.clear();
+      g.root_ready = false;
+      g.pending = false;
+      g.sims = 0;
+      return;
+    }
+    g.pos.reset(MODE_TENBIN);
+    g.pos.set_max_ply(cfg_.max_ply, cfg_.count_from_41);
   }
   // 玉配置のペア: 既定は 36×36 から一様。cfg.king_pairs があればその中から一様（libra-scale の検証対局）
   int kb, kw;

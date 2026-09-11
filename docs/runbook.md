@@ -81,3 +81,18 @@ Windows 単体版: `C:\Users\sakis\libra\engine\libra.exe`（`onnxruntime.dll` �
 `bin/libra-scale build --sims 1600` で `~/libra-run/ls/scale/scale.json` を作り、`bin/libra-scale verify --top 48 --games 100` で
 釣り合い集合を検証対局の信頼区間で決め直す。エンジンには `setoption name Scale_Table value <path>` で渡す（`bin/libra match` は
 `--libra-opt Scale_Table=<path>`）。表は世代ごとに作り直す（探索値は数分、検証対局は最終世代だけ本格的に）。
+
+## 搾取者リーグ（Main exploiter）
+
+`~/libra-run/lx/` に別 run を置く。`config.toml` の `[exploiter] main_ckpt` に凍結した本体（`main.pt`、L-S の latest.pt の写し）を指定すると、
+偶数枠は搾取者が先手・奇数枠は後手で本体と対局し、搾取者は自分の手だけを学習する（相手の手は方策ターゲットにしない）。
+`status` に搾取者の対本体勝率が出る（設計書 §4.2 の収束指標）。計算は本体の約 1/10（同時 64 局）。
+
+```bash
+bin/libra --run lx run --config ~/libra-run/lx/lx.toml   # 初回。以後は bin/libra --run lx run
+bin/libra --run lx status
+bin/libra --run lx openings --chunks 50 --moves 12       # 搾取者が勝った布石 → ~/libra-run/lx/openings.json
+```
+
+本体（L-S）の `config.toml` の `[selfplay] openings = "~/libra-run/lx/openings.json"`, `openings_prob = 0.1` で、新規対局の 10% を
+その布石から始める（ファイルは 10 分ごとに読み直す。無ければ何もしない）。本体が強くなったら `main.pt` を差し替えて搾取者を回し直す。

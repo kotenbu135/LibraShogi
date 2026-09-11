@@ -46,6 +46,10 @@ def main(argv: list[str] | None = None) -> int:
     p_ex = sub.add_parser("export", help="チェックポイント（.pt）を推論用 ONNX に書き出す（libra / libra.exe 用）")
     p_ex.add_argument("--ckpt", default=None, help="既定: <run>/checkpoints/latest.pt")
     p_ex.add_argument("--out", default=None, help="既定: <run>/checkpoints/latest.onnx（同じ場所に一時ファイルを書いてから置き換える）")
+    p_op = sub.add_parser("openings", help="搾取者の run から、搾取者が勝った布石を openings.json に書き出す")
+    p_op.add_argument("--chunks", type=int, default=50, help="新しい側から何チャンク（100 局単位）見るか")
+    p_op.add_argument("--moves", type=int, default=12, help="玉 2 手のあとに残す布石の手数")
+    p_op.add_argument("--out", default=None, help="既定: <run>/openings.json")
     a = ap.parse_args(argv)
     sd = StateDir(Path(a.root) / a.run)
     if a.cmd == "run":
@@ -66,6 +70,14 @@ def main(argv: list[str] | None = None) -> int:
         diff = check(model, tmp)
         os.replace(tmp, out)
         print(f"exported {out} step {meta['libra_step']} max|ort-torch| {diff:.1e}")
+        return 0
+    if a.cmd == "openings":
+        from .openings import openings_from_replay, write_openings
+
+        lines = openings_from_replay(sd.replay, a.chunks, a.moves)
+        out = Path(a.out) if a.out else sd.root / "openings.json"
+        write_openings(out, lines, str(sd.root))
+        print(f"wrote {out}: {len(lines)} openings")
         return 0
     if a.cmd == "pause":
         sd.set_flag("PAUSE")

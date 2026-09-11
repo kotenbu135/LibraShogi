@@ -22,10 +22,10 @@ from .trainer import Trainer
 
 
 class Runner:
-    def __init__(self, sd: StateDir, cfg: dict):
+    def __init__(self, sd: StateDir, cfg: dict, device: torch.device | None = None):
         self.sd = sd
         self.cfg = cfg
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = LibraNet(NetConfig.from_dict(cfg["net"])).to(self.device)
         self.trainer = Trainer(self.model, cfg["train"], self.device)
         tr, sr, rr = cfg["train"], cfg["search"], cfg["run"]
@@ -43,6 +43,9 @@ class Runner:
         self.rate_hist: list[tuple[float, int]] = []
         self.last_train: dict = {}
         self.pool = ThreadPoolExecutor(max_workers=1)
+        self.exploiter_stats = {"games": 0, "wins": 0, "draws": 0, "losses": 0}
+        self.openings_mtime: float | None = None
+        self.openings_checked = 0.0
 
     # ---- 永続化 ----
     def log(self, msg: str) -> None:
@@ -103,6 +106,42 @@ class Runner:
     def elapsed(self) -> float:
         return self.session_elapsed_offset + (time.time() - self.started)
 
+    def load_opponent(self) -> None:
+        """搾取者モード: 凍結した本体を読む（cfg.exploiter.main_ckpt）。"""
+        ex = self.cfg.get("exploiter", {})
+        path = ex.get("main_ckpt") or ""
+        if not path:
+            return
+        sd = torch.load(Path(path).expanduser(), map_location=self.device, weights_only=False)
+        m = LibraNet(NetConfig.from_dict(sd.get("config", {}).get("net", {}))).to(self.device)
+        m.load_state_dict(sd["model"])
+        assert self.loop is not None
+        self.loop.set_opponent(m)
+        self.log(f"exploiter: opponent {path} step {sd.get('step', '?')} params {m.n_params()/1e6:.1f}M (even slots: exploiter sente)")
+
+    def reload_openings(self, force: bool = False) -> None:
+        """cfg.selfplay.openings（openings.json）が更新されていればエンジンに渡す。"""
+        sp = self.cfg["selfplay"]
+        path = sp.get("openings") or ""
+        if not path or self.loop is None:
+            return
+        now = time.time()
+        if not force and now - self.openings_checked < sp.get("openings_reload_seconds", 600):
+            return
+        self.openings_checked = now
+        p = Path(path).expanduser()
+        if not p.exists():
+            return
+        mt = p.stat().st_mtime
+        if mt == self.openings_mtime:
+            return
+        from .openings import load_openings
+
+        ops = load_openings(p)
+        self.loop.engine.set_openings(ops, float(sp.get("openings_prob", 0.0)))
+        self.openings_mtime = mt
+        self.log(f"openings: {len(ops)} lines from {p} (prob {sp.get('openings_prob', 0.0)})")
+
     def write_status(self) -> None:
         now = time.time()
         self.rate_hist.append((now, self.replay.total_games))
@@ -131,6 +170,10 @@ class Runner:
             "gpu": gpu,
             "restarts": self.state.get("restarts", [])[-5:],
         }
+        if self.loop and self.loop.opponent is not None:
+            es = dict(self.exploiter_stats)
+            es["winrate"] = round((es["wins"] + 0.5 * es["draws"]) / max(1, es["games"]), 4)
+            status["exploiter"] = es
         write_json_atomic(self.sd.status_json, status)
 
     # ---- メインループ ----
@@ -143,6 +186,8 @@ class Runner:
         sp = self.cfg["selfplay"]
         self.loop = SelfPlayLoop(self.cfg["search"], sp["n_games"], sp["threads"], int(self.rng.integers(0, 2**63)), self.device, sp["infer_dtype"])
         self.loop.set_model(self.model)
+        self.load_opponent()
+        self.reload_openings(force=True)
         tr, rr = self.cfg["train"], self.cfg["run"]
         last_ck = time.time()
         last_status = 0.0
@@ -179,6 +224,11 @@ class Runner:
             # 自己対局
             finished = self.loop.round()
             if finished:
+                for g in finished:
+                    if "exploiter_result" in g:
+                        r = int(g["exploiter_result"])
+                        self.exploiter_stats["games"] += 1
+                        self.exploiter_stats["wins" if r > 0 else "draws" if r == 0 else "losses"] += 1
                 self.replay.add_games(finished)
                 new_games += len(finished)
                 self.session_games += len(finished)
@@ -204,6 +254,7 @@ class Runner:
                 self.state["step"] = self.trainer.step_count
                 new_games = 0
             now = time.time()
+            self.reload_openings()
             if now - last_status > rr["status_seconds"]:
                 self.write_status()
                 last_status = now

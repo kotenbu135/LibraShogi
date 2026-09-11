@@ -25,6 +25,7 @@ def game_to_jsonl(g: dict) -> str:
             "plies": int(g["plies"]),
             "sfen41": g["sfen41"],
             "v41": round(float(g["v41"]), 4),
+            **({"exploiter": g["exploiter_side"]} if "exploiter_side" in g else {}),
         },
         ensure_ascii=False,
     )

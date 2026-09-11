@@ -29,7 +29,16 @@ DEFAULTS: dict[str, Any] = {
         "proof_nodes": 1000,
         "proof_min_ply": 36,
     },
-    "selfplay": {"n_games": 512, "threads": 12, "infer_dtype": "float16"},
+    "selfplay": {
+        "n_games": 512,
+        "threads": 12,
+        "infer_dtype": "float16",
+        "openings": "",            # 搾取者が見つけた布石（openings.json）。空なら使わない
+        "openings_prob": 0.1,      # 新規対局が openings から始まる確率
+        "openings_reload_seconds": 600,
+    },
+    # 搾取者（docs/libra-design.md §4.2）: main_ckpt を凍結した相手にして、自分の手だけを学習する
+    "exploiter": {"main_ckpt": "", "main_dtype": "float16"},
     "train": {
         "batch_size": 1024,
         "lr": 2e-4,

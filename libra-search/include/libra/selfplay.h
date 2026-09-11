@@ -34,6 +34,8 @@ struct SearchConfig {
   int proof_min_ply = 36;        // 証明探索を始める手数
   bool external = false;         // 外部駆動（USI エンジン用）: 局面は set_position で与え、手は指さず結果を返す
   std::vector<int> king_pairs;   // 自己対局の玉配置を限定する（kb0, kw0, kb1, kw1, ...）。空なら 36×36 から一様
+  std::vector<std::vector<std::uint32_t>> openings;  // 開始局面の手順（玉 2 手を含む）。搾取者が見つけた布石を本体の分布に混ぜる
+  float openings_prob = 0.0f;    // 新規対局が openings から始まる確率
 };
 
 struct Candidate {
@@ -91,6 +93,7 @@ class SelfPlay {
   std::vector<GameRecord> take_finished();
   SelfPlayStats stats() const { return stats_; }
   void set_active(int n);  // 同時進行数を絞る（throttle）。n 以降の対局は止めたまま保持する
+  void set_openings(std::vector<std::vector<std::uint32_t>> openings, float prob);  // 対局の合間（collect/apply の外）に呼ぶ
   int active() const { return active_; }
   // 各対局のルート（いま考えている手番）の色を書く（0 先手、1 後手）。評価対局で「どちらのネットで読むか」を決めるのに使う
   void root_turns(std::int8_t* out) const;
@@ -103,7 +106,7 @@ class SelfPlay {
   struct Game;  // 実装の詳細（selfplay.cpp）
 
  private:
-  const SearchConfig cfg_;
+  SearchConfig cfg_;
   std::vector<std::unique_ptr<Game>> games_;
   std::vector<GameRecord> finished_;
   SelfPlayStats stats_;
