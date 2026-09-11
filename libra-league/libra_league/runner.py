@@ -102,6 +102,25 @@ class Runner:
         self.state["elapsed"] = self.elapsed()
         self.sd.write_state(self.state)
         self.log(f"checkpoint step={step} games={self.state['games_total']} ({time.time() - t0:.1f}s)")
+        if self.cfg["run"].get("export_onnx", False):
+            self.export_onnx(latest)
+
+    def export_onnx(self, ckpt: Path) -> None:
+        """latest.pt → latest.onnx（原子的に置き換え）。失敗してもランは止めない。"""
+        try:
+            import copy
+
+            from libra_net.export_onnx import export_model
+
+            t0 = time.time()
+            m = copy.deepcopy(self.model).float().cpu().eval()
+            out = ckpt.with_suffix(".onnx")
+            tmp = out.with_suffix(".onnx.tmp")
+            export_model(m, tmp, {"libra_step": str(self.trainer.step_count), "libra_net": self.cfg["net"], "libra_source": ckpt.name, "license": "Apache-2.0"})
+            os.replace(tmp, out)
+            self.log(f"export: {out.name} ({time.time() - t0:.1f}s)")
+        except Exception as e:  # noqa: BLE001
+            self.log(f"export failed: {e}")
 
     def elapsed(self) -> float:
         return self.session_elapsed_offset + (time.time() - self.started)

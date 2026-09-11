@@ -55,7 +55,8 @@ DEFAULTS: dict[str, Any] = {
         "mirror_prob": 0.5,
         "grad_clip": 1.0,
     },
-    "run": {"checkpoint_minutes": 10, "status_seconds": 30, "chunk_games": 100, "keep_checkpoints": 3, "archive_every_steps": 50000},
+    "run": {"checkpoint_minutes": 10, "status_seconds": 30, "chunk_games": 100, "keep_checkpoints": 3, "archive_every_steps": 50000,
+            "export_onnx": True},  # チェックポイントごとに latest.onnx も書く（libra / libra.exe 用）
 }
 
 
