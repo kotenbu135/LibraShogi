@@ -15,7 +15,7 @@ endif()
 option(LIBRA_BUILD_PYTHON "Build the pybind11 module" ON)
 option(LIBRA_BUILD_TESTS "Build the C++ tests" ON)
 
-add_library(libra_sim STATIC src/types.cpp src/bitboard.cpp src/position.cpp)
+add_library(libra_sim STATIC src/types.cpp src/bitboard.cpp src/position.cpp src/encoding.cpp)
 target_include_directories(libra_sim PUBLIC include)
 set_target_properties(libra_sim PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
