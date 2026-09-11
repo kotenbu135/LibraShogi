@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: Apache-2.0
+import json
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+import librasearch
+import librashogi as ls
+from libra_league.config import DEFAULTS, dump_toml, load_config
+from libra_league.replay import MIRROR_TABLE, ReplayBuffer, game_to_jsonl, soft_wdl
+from libra_league.state import StateDir
+
+
+def test_config_merge(tmp_path: Path):
+    p = tmp_path / "c.toml"
+    p.write_text('run_id = "x"\n[train]\nbatch_size = 64\n', encoding="utf-8")
+    cfg = load_config(p)
+    assert cfg["run_id"] == "x" and cfg["train"]["batch_size"] == 64
+    assert cfg["train"]["lr"] == DEFAULTS["train"]["lr"] and cfg["search"]["max_ply"] == 256
+    # dump → load で往復
+    q = tmp_path / "d.toml"
+    q.write_text(dump_toml(cfg), encoding="utf-8")
+    assert load_config(q) == cfg
+
+
+def test_state_flags(tmp_path: Path):
+    sd = StateDir(tmp_path / "r")
+    sd.create()
+    assert not sd.flag("PAUSE")
+    sd.set_flag("PAUSE")
+    assert sd.flag("PAUSE")
+    sd.clear_flag("PAUSE")
+    assert not sd.flag("PAUSE")
+    sd.set_flag("THROTTLE", "64")
+    assert sd.throttle_value() == 64
+    sd.write_state({"a": 1})
+    assert sd.read_state() == {"a": 1}
+
+
+def test_soft_wdl():
+    t = np.array([1.0, 0.0, -1.0, 0.5])
+    w = soft_wdl(t)
+    assert np.allclose(w.sum(1), 1) and np.allclose(w[:, 0] - w[:, 2], t)
+    assert w[1].tolist() == [0, 1, 0]
+
+
+def _dummy_games(n: int, seed: int) -> list[dict]:
+    cfg = {"full_sims": 8, "fast_sims": 4, "full_prob": 0.5, "max_ply": 256}
+    sp = librasearch.SelfPlay(cfg, 8, seed=seed, threads=2)
+    sq = np.zeros((8, 81, ls.SQ_FEATS), np.float32)
+    glob = np.zeros((8, ls.GLOB_FEATS), np.float32)
+    rng = np.random.default_rng(seed)
+    out: list[dict] = []
+    while len(out) < n:
+        sp.collect(sq, glob)
+        sp.apply(rng.standard_normal((8, ls.POLICY_SIZE), dtype=np.float32), np.tile(np.array([0.4, 0.2, 0.4], np.float32), (8, 1)))
+        out += sp.take_finished()
+    return out[:n]
+
+
+def test_replay_chunks_and_sampling(tmp_path: Path):
+    games = _dummy_games(25, 5)
+    rb = ReplayBuffer(tmp_path / "replay", tmp_path / "games", window_games=20, chunk_games=10, max_ply=256, count_from_41=True)
+    (tmp_path / "replay").mkdir()
+    (tmp_path / "games").mkdir()
+    assert rb.add_games(games) == 2
+    assert rb.chunk_index == 2 and rb.n_games() == 20 and rb.total_games == 25
+    assert sorted(p.name for p in (tmp_path / "replay").iterdir()) == ["chunk_000000.pkl", "chunk_000001.pkl"]
+    lines = (tmp_path / "games" / "games_000000.jsonl").read_text().splitlines()
+    assert len(lines) == 10
+    rec = json.loads(lines[0])
+    assert rec["tokens"].startswith("K*") and rec["result"] in ("sente", "gote", "draw")
+    # 棋譜行を再生して同じ結果
+    p = ls.Position()
+    for tok in rec["tokens"].split():
+        p.do_move(tok)
+    assert p.outcome() == (rec["result"], rec["reason"])
+    # 再読込は窓の分だけ
+    rb2 = ReplayBuffer(tmp_path / "replay", tmp_path / "games", window_games=15, chunk_games=10, max_ply=256, count_from_41=True)
+    rb2.load(2, 25)
+    assert rb2.n_games() == 15 and rb2.chunk_index == 2
+    rng = np.random.default_rng(0)
+    b = rb.sample(64, rng, mirror_prob=0.5, lambda_z=0.5)
+    assert b["sq"].shape == (64, 81, ls.SQ_FEATS) and b["wdl"].shape == (64, 3) and b["policy_idx"].shape == (64, 32)
+    assert np.allclose(b["wdl"].sum(1), 1)
+    assert b["policy_valid"].any()
+    for i in np.flatnonzero(b["policy_valid"]):
+        k = (b["policy_idx"][i] >= 0).sum()
+        assert abs(b["policy_p"][i, :k].sum() - 1) < 1e-3
+    # 鏡映の表は対合
+    assert (MIRROR_TABLE[MIRROR_TABLE] == np.arange(ls.POLICY_SIZE)).all()

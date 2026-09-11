@@ -118,12 +118,52 @@ PYBIND11_MODULE(_sim, m) {
              return move_index(p, m);
            })
       .def("move_from_index", [](const Position& p, int idx) { return move_to_usi(move_from_index(p, idx)); })
-      .def("features", [](const Position& p) {
+      .def("features", [](const Position& p, bool mirror) {
              py::array_t<float> sq({SQ_NB, SQ_FEATS});
              py::array_t<float> glob({GLOB_FEATS});
-             write_features(p, sq.mutable_data(), glob.mutable_data());
+             write_features(p, sq.mutable_data(), glob.mutable_data(), mirror);
              return py::make_tuple(sq, glob);
-           });
+           }, py::arg("mirror") = false);
+  // 学習用: 玉配置と手順から ply 手目の局面を再生し、特徴をバッチの行に書く。
+  // kb/kw: 玉のマス、moves: uint32 の手、plies: 取り出す手数（玉 2 手を含む通算）、mirror: 行ごとの鏡映。
+  // sq_out [N,81,SQ_FEATS]、glob_out [N,GLOB_FEATS]、side_out [N]（手番が先手なら 1）、fuseki_out [N]
+  m.def("replay_features",
+        [](py::array_t<std::int32_t> kb, py::array_t<std::int32_t> kw, py::list moves_list, py::array_t<std::int32_t> plies,
+           py::array_t<std::uint8_t> mirror, py::array_t<float, py::array::c_style> sq_out,
+           py::array_t<float, py::array::c_style> glob_out, py::array_t<std::uint8_t> side_out,
+           py::array_t<std::uint8_t> fuseki_out, int max_ply, bool count_from_41) {
+          int n = int(plies.shape(0));
+          std::vector<py::array_t<std::uint32_t, py::array::c_style | py::array::forcecast>> mv;
+          mv.reserve(n);
+          for (int i = 0; i < n; ++i) mv.push_back(moves_list[i].cast<py::array_t<std::uint32_t, py::array::c_style | py::array::forcecast>>());
+          auto kb_ = kb.unchecked<1>();
+          auto kw_ = kw.unchecked<1>();
+          auto pl_ = plies.unchecked<1>();
+          auto mi_ = mirror.unchecked<1>();
+          auto side_ = side_out.mutable_unchecked<1>();
+          auto fu_ = fuseki_out.mutable_unchecked<1>();
+          float* sq = sq_out.mutable_data();
+          float* gl = glob_out.mutable_data();
+          std::vector<const std::uint32_t*> ptrs(n);
+          std::vector<int> lens(n);
+          for (int i = 0; i < n; ++i) {
+            ptrs[i] = mv[i].data();
+            lens[i] = int(mv[i].shape(0));
+          }
+          py::gil_scoped_release nogil;
+          Position pos;
+          for (int i = 0; i < n; ++i) {
+            pos.reset(MODE_TENBIN);
+            pos.set_max_ply(max_ply, count_from_41);
+            pos.do_move(make_drop(KING, kb_(i)));
+            pos.do_move(make_drop(KING, kw_(i)));
+            int target = pl_(i);
+            for (int k = 0; k + 2 < target && k < lens[i]; ++k) pos.do_move(Move(ptrs[i][k]));
+            write_features(pos, sq + size_t(i) * SQ_NB * SQ_FEATS, gl + size_t(i) * GLOB_FEATS, mi_(i) != 0);
+            side_(i) = pos.turn() == BLACK ? 1 : 0;
+            fu_(i) = pos.phase() == PHASE_FUSEKI ? 1 : 0;
+          }
+        });
   m.def("mirror_index", &mirror_index);
   m.attr("POLICY_SIZE") = POLICY_SIZE;
   m.attr("POLICY_CLASSES") = POLICY_CLASSES;
