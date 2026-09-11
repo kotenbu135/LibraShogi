@@ -15,7 +15,8 @@
 |---|---|
 | `libra-sim/` | C++ シミュレータ（ビットボード、pybind11）、perft、ルールテスト |
 | `libra-net/` | ネットワーク定義、学習、ONNX 変換 |
-| `libra-search/` | MCGS、df-pn、配置詰み探索、USI 拡張エンジン |
+| `libra-search/` | MCGS、df-pn、配置詰み探索 |
+| `libra-engine/` | USI 拡張エンジン `libra` / `libra.exe`（ONNX Runtime） |
 | `libra-league/` | 自己対局、リーグ、評価・計測ハーネス |
 | `libra-scale/` | 玉配置表（天秤）の生成・検証、`scale.json` |
 | `libra-cloud/` | vast.ai テンプレート、費用モデル |
