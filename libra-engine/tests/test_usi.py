@@ -128,7 +128,7 @@ def test_scale_table_places_kings(engine, tmp_path):
     path.write_text(json.dumps(table))
     engine.send(f"setoption name Scale_Table value {path}")
     seen = set()
-    for _ in range(6):
+    for _ in range(20):  # 2 択なので 20 回で両方出ない確率は 2^-19
         bm, _ = engine.go("position fuseki", "nodes 5", timeout=60)
         assert bm in ("K*5i", "K*4i")
         seen.add(bm)
