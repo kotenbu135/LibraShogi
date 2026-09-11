@@ -75,3 +75,9 @@ GPU を L-S と共有するので、計測中は `libra pause` するか、局/�
 「エンジン」→「実行ファイルを選んで追加」で `C:\Windows\System32\wsl.exe` を選び、引数に `-d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra-usi` を入れる。`usi` の申告から「布石にも対応」「GPU で読む」が自動で付く。`bin/libra-usi` は C++ 版 `build/libra-engine/libra`（ONNX Runtime、CUDA EP）を起動し、モデルは `~/libra-run/ls/checkpoints/latest.onnx`。学習中の最新にするには `bin/libra export`（latest.pt → latest.onnx）を実行する。
 
 Windows 単体版: `C:\Users\sakis\libra\engine\libra.exe`（`onnxruntime.dll` と `libra.onnx` を同じ場所に置く。CPU 実行）。`libra-engine/README.md` のクロスビルド手順で作る。desktop にはこの exe を直接登録できる。
+
+## 玉配置表（libra-scale）
+
+`bin/libra-scale build --sims 1600` で `~/libra-run/ls/scale/scale.json` を作り、`bin/libra-scale verify --top 48 --games 100` で
+釣り合い集合を検証対局の信頼区間で決め直す。エンジンには `setoption name Scale_Table value <path>` で渡す（`bin/libra match` は
+`--libra-opt Scale_Table=<path>`）。表は世代ごとに作り直す（探索値は数分、検証対局は最終世代だけ本格的に）。

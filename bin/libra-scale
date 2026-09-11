@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# 玉配置表 scale.json の生成・検証（libra-scale/libra_scale/cli.py）。
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$ROOT/libra-sim/python:$ROOT/libra-search/python:$ROOT/libra-net:$ROOT/libra-league:$ROOT/libra-scale${PYTHONPATH:+:$PYTHONPATH}"
+exec nice -n 10 "$ROOT/.venv/bin/python" -m libra_scale.cli "$@"

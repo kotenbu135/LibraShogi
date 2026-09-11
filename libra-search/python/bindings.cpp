@@ -28,6 +28,14 @@ SearchConfig config_from_dict(const py::dict& d) {
   getb("count_from_41", c.count_from_41);
   geti("policy_topk", c.policy_topk);
   geti("max_moves_per_game", c.max_moves_per_game);
+  if (d.contains("king_pairs")) {
+    c.king_pairs.clear();
+    for (auto item : d["king_pairs"].cast<py::list>()) {
+      auto pr = item.cast<py::sequence>();
+      c.king_pairs.push_back(pr[0].cast<int>());
+      c.king_pairs.push_back(pr[1].cast<int>());
+    }
+  }
   geti("mate_nodes_root", c.mate_nodes_root);
   geti("proof_nodes", c.proof_nodes);
   geti("proof_min_ply", c.proof_min_ply);

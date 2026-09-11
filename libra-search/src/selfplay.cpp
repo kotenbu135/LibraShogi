@@ -115,10 +115,18 @@ void SelfPlay::start_game(Game& g) {
     g.sims = 0;
     return;
   }
-  // 玉配置のペア: 一様（後で libra-scale の重点サンプルに置き換える）
-  std::uniform_int_distribution<int> d(0, 35);
-  int kb = make_sq(d(g.rng) % 9, 5 + d(g.rng) / 9);
-  int kw = make_sq(d(g.rng) % 9, d(g.rng) / 9);
+  // 玉配置のペア: 既定は 36×36 から一様。cfg.king_pairs があればその中から一様（libra-scale の検証対局）
+  int kb, kw;
+  if (cfg_.king_pairs.size() >= 2) {
+    std::uniform_int_distribution<int> d(0, int(cfg_.king_pairs.size() / 2) - 1);
+    int i = d(g.rng);
+    kb = cfg_.king_pairs[2 * i];
+    kw = cfg_.king_pairs[2 * i + 1];
+  } else {
+    std::uniform_int_distribution<int> d(0, 35);
+    kb = make_sq(d(g.rng) % 9, 5 + d(g.rng) / 9);
+    kw = make_sq(d(g.rng) % 9, d(g.rng) / 9);
+  }
   g.pos.do_move(make_drop(KING, kb));
   g.pos.do_move(make_drop(KING, kw));
   g.rec = GameRecord();

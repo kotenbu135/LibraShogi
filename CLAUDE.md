@@ -10,7 +10,7 @@
 - 終局規定は docs/rules.md（大会規定: 千日手4回＝引き分け、連続王手は王手側負け、入玉宣言法27点、本将棋 320 手で引き分け。41 手目を 1 手目として数える）が唯一の正。マッチの裁定はハーネスが行う。
 
 ## 構成
-libra-sim（C++ シミュレータ、pybind11）/ libra-net / libra-search（MCGS、df-pn、配置詰み、USI 拡張エンジン）/ libra-league（自己対局、リーグ、評価）/ libra-scale（玉配置表）/ libra-cloud（vast.ai）/ docs / data（マニフェストのみ）
+libra-sim（C++ シミュレータ、pybind11）/ libra-net / libra-search（MCGS、df-pn、配置詰み）/ libra-engine（USI 拡張エンジン libra / libra.exe、ONNX Runtime）/ libra-league（自己対局、リーグ、評価、計測ハーネス）/ libra-scale（玉配置表）/ libra-cloud（vast.ai）/ docs / data（マニフェストのみ）
 
 ## 作業ルール
 - テストを先に書く。perft とルールテストは変更のたびに全部通す。

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import queue
+import random
 import sys
 import threading
 import time
@@ -52,6 +53,41 @@ class Engine:
         self.pos = ls.Position()
         self.stop_flag = threading.Event()
         self.inbox: queue.Queue[str] = queue.Queue()
+        self.scale: list[tuple[str, str]] = []
+        self.scale_loaded: str | None = None
+        self.rng = random.Random()
+
+    # ---- 玉配置表 ----
+    def load_scale(self) -> None:
+        path = self.opts["Scale_Table"]
+        if path == self.scale_loaded:
+            return
+        self.scale_loaded = path
+        self.scale = []
+        if not path:
+            return
+        try:
+            import json
+
+            table = json.loads(Path(path).read_text())
+            self.scale = [(a, b) for a, b in table["balanced"]]
+        except Exception as e:  # noqa: BLE001
+            self.out(f"info string cannot read Scale_Table {path}: {e}")
+
+    def scale_move(self, pos: ls.Position) -> str | None:
+        """1・2 手目: 釣り合い集合から一様に選ぶ（2 手目は置いた先手玉に合うペアから）。"""
+        self.load_scale()
+        if not self.scale or pos.phase != "fuseki" or pos.ply > 1:
+            return None
+        if pos.ply == 0:
+            cands = self.scale
+        else:
+            kb = ls.sq_to_usi(pos.king_sq("sente"))
+            cands = [p for p in self.scale if p[0] == kb]
+        if not cands:
+            return None
+        p = self.rng.choice(cands)
+        return "K*" + (p[0] if pos.ply == 0 else p[1])
 
     # ---- 出力 ----
     @staticmethod
@@ -146,6 +182,12 @@ class Engine:
             return
         if not pos.legal_moves():
             self.out("bestmove resign")
+            return
+        sm = self.scale_move(pos)
+        if sm is not None and pos.is_legal(sm):
+            self.out(f"info depth 1 multipv 1 score cp 0 winrate 0.5000 nodes 0 time 0 pv {sm}")
+            self.out(f"info string phase fuseki ply {ply} method scale")
+            self.out(f"bestmove {sm}")
             return
         # 思考量
         sims = int(self.opts["Sims_Fuseki"] if phase == "fuseki" else self.opts["Sims_Normal"])

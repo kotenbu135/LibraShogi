@@ -2,6 +2,7 @@
 #include "engine.h"
 
 #include <chrono>
+#include <fstream>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -92,6 +93,7 @@ void Engine::setoption(const std::vector<std::string>& t) {
   it->second = value;
   if (name == "Threads" || name == "Mate_Nodes") eng_.reset();
   if (name == "DNN_Model" || name == "DNN_Provider") loaded_model_.clear();
+  if (name == "Scale_Table") scale_loaded_ = "\x01";  // 次の go で読み直す
 }
 
 bool Engine::ready(std::string* err) {
@@ -137,6 +139,65 @@ void Engine::info_lines(const SearchResult& r, double elapsed_s, const char* pha
     out(s.str());
   }
   out(std::string("info string phase ") + phase + " ply " + std::to_string(ply) + " method " + method);
+}
+
+// scale.json（libra-scale）の "balanced": [["5i","5a"], ...] だけを読む最小の走査
+bool Engine::load_scale(std::string* err) {
+  const std::string path = opts_.at("Scale_Table");
+  if (path == scale_loaded_) return true;
+  scale_.clear();
+  scale_loaded_ = path;
+  if (path.empty()) return true;
+  std::ifstream f(path, std::ios::binary);
+  if (!f) {
+    if (err) *err = "cannot open Scale_Table " + path;
+    return false;
+  }
+  std::string s((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  size_t k = s.find("\"balanced\"");
+  if (k == std::string::npos) {
+    if (err) *err = "no \"balanced\" in " + path;
+    return false;
+  }
+  k = s.find('[', k);
+  int depth = 0;
+  std::vector<int> sqs;
+  for (size_t i = k; i < s.size(); ++i) {
+    char c = s[i];
+    if (c == '[') ++depth;
+    else if (c == ']') {
+      if (--depth == 0) break;
+    } else if (c == '"') {
+      size_t e = s.find('"', i + 1);
+      if (e == std::string::npos) break;
+      int sq = sq_from_usi(s.substr(i + 1, e - i - 1));
+      if (sq != SQ_NONE) sqs.push_back(sq);
+      i = e;
+    }
+  }
+  for (size_t i = 0; i + 1 < sqs.size(); i += 2) scale_.push_back({sqs[i], sqs[i + 1]});
+  if (scale_.empty()) {
+    if (err) *err = "empty balanced set in " + path;
+    return false;
+  }
+  return true;
+}
+
+bool Engine::scale_move(const Position& pos, std::string* move) {
+  if (scale_.empty() || pos.phase() != PHASE_FUSEKI || pos.ply() > 1) return false;
+  std::vector<std::pair<int, int>> c;
+  if (pos.ply() == 0) c = scale_;
+  else {
+    int kb = pos.king_sq(BLACK);
+    for (auto& p : scale_)
+      if (p.first == kb) c.push_back(p);
+  }
+  if (c.empty()) return false;
+  std::uniform_int_distribution<int> d(0, int(c.size()) - 1);
+  auto& p = c[d(rng_)];
+  int sq = pos.ply() == 0 ? p.first : p.second;
+  *move = "K*" + sq_to_usi(sq);
+  return true;
 }
 
 static int arg_int(const std::vector<std::string>& a, const char* key, int def) {
@@ -187,6 +248,15 @@ void Engine::go(const std::vector<std::string>& args) {
   pos.legal_moves(ml);
   if (ml.n == 0) {
     out("bestmove resign");
+    return;
+  }
+  // 両玉の配置: 玉配置表（Scale_Table）があれば釣り合い集合から一様に選ぶ
+  if (!load_scale(&err)) out("info string " + err);
+  std::string sm;
+  if (scale_move(pos, &sm) && pos.is_legal(move_from_usi(sm))) {
+    out("info depth 1 multipv 1 score cp 0 winrate 0.5000 nodes 0 time 0 pv " + sm);
+    out("info string phase fuseki ply " + std::to_string(ply) + " method scale");
+    out("bestmove " + sm);
     return;
   }
   // 思考量

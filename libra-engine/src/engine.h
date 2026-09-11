@@ -2,6 +2,8 @@
 // Libra の USI 拡張エンジン本体（docs/protocol.md）。libra-search の外部駆動 MCGS/MCTS ＋ ONNX Runtime 推論。
 #pragma once
 #include <atomic>
+#include <random>
+#include <utility>
 #include <map>
 #include <memory>
 #include <string>
@@ -30,6 +32,11 @@ class Engine {
   std::unique_ptr<libra::SelfPlay> eng_;
   int eng_threads_ = 0, eng_mate_ = -1;
   std::vector<float> sq_, glob_, logits_, wdl_;
+  std::vector<std::pair<int, int>> scale_;  // Scale_Table の釣り合い集合（kb, kw）
+  std::string scale_loaded_;
+  std::mt19937 rng_{std::random_device{}()};
+  bool load_scale(std::string* err);
+  bool scale_move(const libra::Position& pos, std::string* move);  // 1・2 手目を表から決める
 
   int geti(const std::string& k) const;
   bool getb(const std::string& k) const;

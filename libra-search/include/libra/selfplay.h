@@ -33,6 +33,7 @@ struct SearchConfig {
   int proof_nodes = 1000;        // 布石終盤の証明探索（41 手目の裁定・先手詰み）の節点数（0 で無効）
   int proof_min_ply = 36;        // 証明探索を始める手数
   bool external = false;         // 外部駆動（USI エンジン用）: 局面は set_position で与え、手は指さず結果を返す
+  std::vector<int> king_pairs;   // 自己対局の玉配置を限定する（kb0, kw0, kb1, kw1, ...）。空なら 36×36 から一様
 };
 
 struct Candidate {

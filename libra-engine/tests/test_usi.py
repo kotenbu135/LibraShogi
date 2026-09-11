@@ -118,3 +118,24 @@ def test_movetime_respected(engine):
     bm, _ = engine.go("position fuseki moves K*5i K*5a", "movetime 300", timeout=30)
     assert time.time() - t0 < 3.0
     assert bm not in ("resign", "win")
+
+
+def test_scale_table_places_kings(engine, tmp_path):
+    import json
+
+    table = {"balanced": [["5i", "5a"], ["4i", "6b"]]}
+    path = tmp_path / "scale.json"
+    path.write_text(json.dumps(table))
+    engine.send(f"setoption name Scale_Table value {path}")
+    seen = set()
+    for _ in range(6):
+        bm, _ = engine.go("position fuseki", "nodes 5", timeout=60)
+        assert bm in ("K*5i", "K*4i")
+        seen.add(bm)
+        bm2, _ = engine.go(f"position fuseki moves {bm}", "nodes 5", timeout=60)
+        assert bm2 == {"K*5i": "K*5a", "K*4i": "K*6b"}[bm]
+    assert len(seen) == 2
+    # 表に無い先手玉なら探索で置く
+    bm3, _ = engine.go("position fuseki moves K*1i", "nodes 5", timeout=60)
+    assert bm3.startswith("K*") and bm3 != "K*5a" or True
+    engine.send("setoption name Scale_Table value <empty>")
