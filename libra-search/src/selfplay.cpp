@@ -167,7 +167,13 @@ void SelfPlay::start_game(Game& g) {
   } else {
     std::uniform_int_distribution<int> d(0, 35);
     kb = make_sq(d(g.rng) % 9, 5 + d(g.rng) / 9);
-    kw = make_sq(d(g.rng) % 9, d(g.rng) / 9);
+    if (cfg_.prune_gote_rank4) {
+      std::uniform_int_distribution<int> d27(0, 26);
+      int x = d27(g.rng);
+      kw = make_sq(x % 9, x / 9);
+    } else {
+      kw = make_sq(d(g.rng) % 9, d(g.rng) / 9);
+    }
   }
   g.pos.do_move(make_drop(KING, kb));
   g.pos.do_move(make_drop(KING, kw));

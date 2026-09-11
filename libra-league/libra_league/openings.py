@@ -19,6 +19,8 @@ def extract_openings(games, k_moves: int = 12, min_plies: int = 0) -> list[list[
             continue
         if int(g.get("plies", 0)) < min_plies:
             continue
+        if int(g["kw"]) % 9 == 3:  # 後手玉が四段目: 桂打ちで先手の裁定勝ちが決まる自明なペア（libra-scale の剪定）
+            continue
         moves = [f"K*{ls.sq_to_usi(int(g['kb']))}", f"K*{ls.sq_to_usi(int(g['kw']))}"]
         moves += [ls.move_to_usi(int(m)) for m in list(g["moves"])[:k_moves]]
         key = tuple(moves)

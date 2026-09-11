@@ -41,6 +41,7 @@ SearchConfig config_from_dict(const py::dict& d) {
     for (auto item : d["openings"].cast<py::list>()) c.openings.push_back(item.cast<std::vector<std::uint32_t>>());
   }
   getf("openings_prob", c.openings_prob);
+  getb("prune_gote_rank4", c.prune_gote_rank4);
   geti("mate_nodes_root", c.mate_nodes_root);
   geti("proof_nodes", c.proof_nodes);
   geti("proof_min_ply", c.proof_min_ply);

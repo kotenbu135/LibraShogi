@@ -36,6 +36,7 @@ struct SearchConfig {
   std::vector<int> king_pairs;   // 自己対局の玉配置を限定する（kb0, kw0, kb1, kw1, ...）。空なら 36×36 から一様
   std::vector<std::vector<std::uint32_t>> openings;  // 開始局面の手順（玉 2 手を含む）。搾取者が見つけた布石を本体の分布に混ぜる
   float openings_prob = 0.0f;    // 新規対局が openings から始まる確率
+  bool prune_gote_rank4 = false; // 後手玉を一〜三段目に限る（四段目は桂打ちで先手の裁定勝ち。libra-scale の剪定と同じ）
 };
 
 struct Candidate {
