@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
 #include <pybind11/stl.h>
+#include "libra/encoding.h"
 #include "libra/position.h"
 
 namespace py = pybind11;
@@ -109,7 +111,24 @@ PYBIND11_MODULE(_sim, m) {
       .def("repetition_count", &Position::repetition_count)
       .def("set_max_ply", &Position::set_max_ply, py::arg("n"), py::arg("count_from_41") = true)
       .def_property_readonly("max_ply", &Position::max_ply)
-      .def("perft", &Position::perft, py::arg("depth"));
+      .def("perft", &Position::perft, py::arg("depth"))
+      .def("move_index", [](const Position& p, const std::string& usi) {
+             Move m = move_from_usi(usi);
+             if (m == MOVE_NONE) throw py::value_error("bad move: " + usi);
+             return move_index(p, m);
+           })
+      .def("move_from_index", [](const Position& p, int idx) { return move_to_usi(move_from_index(p, idx)); })
+      .def("features", [](const Position& p) {
+             py::array_t<float> sq({SQ_NB, SQ_FEATS});
+             py::array_t<float> glob({GLOB_FEATS});
+             write_features(p, sq.mutable_data(), glob.mutable_data());
+             return py::make_tuple(sq, glob);
+           });
+  m.def("mirror_index", &mirror_index);
+  m.attr("POLICY_SIZE") = POLICY_SIZE;
+  m.attr("POLICY_CLASSES") = POLICY_CLASSES;
+  m.attr("SQ_FEATS") = SQ_FEATS;
+  m.attr("GLOB_FEATS") = GLOB_FEATS;
   m.def("move_to_usi", [](std::uint32_t m) { return move_to_usi(Move(m)); });
   m.def("move_from_usi", [](const std::string& s) { return std::uint32_t(move_from_usi(s)); });
   m.def("sq_from_usi", &sq_from_usi);

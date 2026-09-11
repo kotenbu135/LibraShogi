@@ -86,3 +86,75 @@ def test_cp_winrate_roundtrip():
         assert abs(cp_to_winrate(cp) - 1 / (1 + math.exp(-(cp - 34) / 435))) < 1e-12
         assert winrate_to_cp(cp_to_winrate(cp)) == cp
     assert winrate_to_cp(0.6120) == 232 and winrate_to_cp(0.25) == -444 and winrate_to_cp(0.75) == 512
+
+
+def _mirror_sfen(sfen):
+    """SFEN の盤面を 1↔9 筋で鏡映する（テスト用）。"""
+    board, rest = sfen.split(" ", 1)
+    rows = []
+    for row in board.split("/"):
+        cells, i = [], 0
+        while i < len(row):
+            if row[i].isdigit():
+                cells.extend([""] * int(row[i]))
+                i += 1
+            elif row[i] == "+":
+                cells.append(row[i : i + 2])
+                i += 2
+            else:
+                cells.append(row[i])
+                i += 1
+        cells.reverse()
+        out, empty = "", 0
+        for c in cells:
+            if c == "":
+                empty += 1
+            else:
+                if empty:
+                    out += str(empty)
+                    empty = 0
+                out += c
+        if empty:
+            out += str(empty)
+        rows.append(out)
+    return "/".join(rows) + " " + rest
+
+
+def test_policy_index_bijection_and_mirror():
+    rng = random.Random(7)
+    checked = 0
+    for g in range(30):
+        p = ls.Position("tenbin" if g % 2 else "fuseki")
+        while not p.is_over() and p.ply < 140:
+            moves = p.legal_moves()
+            idx = [p.move_index(m) for m in moves]
+            assert len(set(idx)) == len(idx), "policy index must be unique per legal move"
+            assert all(0 <= i < ls.POLICY_SIZE for i in idx)
+            assert [p.move_from_index(i) for i in idx] == moves
+            # 鏡映局面の合法手の添字は mirror_index で写る
+            q = ls.Position(p.mode)
+            q.set_sfen(_mirror_sfen(p.sfen()), p.phase)
+            assert q.turn == p.turn and q.ply == p.ply
+            assert sorted(ls.mirror_index(i) for i in idx) == sorted(q.move_index(m) for m in q.legal_moves())
+            assert q.key == p.mirror_key and q.norm_key == p.norm_key
+            checked += len(moves)
+            p.do_move(rng.choice(moves))
+    assert checked > 10000
+
+
+def test_features_shape_and_frame():
+    p = ls.Position()
+    p.set_position("position fuseki moves K*5i K*5a P*7g")
+    sq, glob = p.features()
+    assert sq.shape == (81, ls.SQ_FEATS) and glob.shape == (ls.GLOB_FEATS,)
+    # 後手番: 180° 回転した座標系。後手玉 5a → 手番側の座標では 5i（添字 80-4=76）に自玉として立つ
+    assert p.turn == "gote"
+    k_own = 8 - 1  # KING=8 → 添字 7
+    assert sq[80 - ls.sq_from_usi("5a"), k_own] == 1.0
+    assert sq[80 - ls.sq_from_usi("5i"), 14 + k_own] == 1.0
+    assert glob[16] == 1.0 and abs(glob[17] - 3 / 40) < 1e-6 and glob[25] == 0.0
+    q = ls.Position()
+    q.set_position("position startpos")
+    sq, glob = q.features()
+    assert glob[16] == 0.0 and glob[25] == 1.0
+    assert sq[ls.sq_from_usi("5i"), k_own] == 1.0 and sq[ls.sq_from_usi("5a"), 14 + k_own] == 1.0
