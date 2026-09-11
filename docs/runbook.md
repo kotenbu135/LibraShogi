@@ -72,4 +72,6 @@ GPU を L-S と共有するので、計測中は `libra pause` するか、局/�
 
 ## 8. desktop で Libra を動かす（暫定・Python 版）
 
-「エンジン」→「実行ファイルを選んで追加」で `C:\Windows\System32\wsl.exe` を選び、引数に `-d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra-usi` を入れる。`usi` の申告から「布石にも対応」「GPU で読む」が自動で付く。`DNN_Model` は `~/libra-run/ls/checkpoints/latest.pt`（学習中の最新）。
+「エンジン」→「実行ファイルを選んで追加」で `C:\Windows\System32\wsl.exe` を選び、引数に `-d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra-usi` を入れる。`usi` の申告から「布石にも対応」「GPU で読む」が自動で付く。`bin/libra-usi` は C++ 版 `build/libra-engine/libra`（ONNX Runtime、CUDA EP）を起動し、モデルは `~/libra-run/ls/checkpoints/latest.onnx`。学習中の最新にするには `bin/libra export`（latest.pt → latest.onnx）を実行する。
+
+Windows 単体版: `C:\Users\sakis\libra\engine\libra.exe`（`onnxruntime.dll` と `libra.onnx` を同じ場所に置く。CPU 実行）。`libra-engine/README.md` のクロスビルド手順で作る。desktop にはこの exe を直接登録できる。

@@ -690,9 +690,9 @@ void SelfPlay::apply(const float* logits, const float* wdl) {
   gather();
 }
 
-bool SelfPlay::set_position(int slot, const std::string& usi_line, int sims, bool full) {
+bool SelfPlay::set_position(int slot, const std::string& usi_line, int sims, bool full, Mode mode) {
   Game& g = *games_[slot];
-  if (!g.pos.set_position(usi_line, MODE_TENBIN)) return false;
+  if (!g.pos.set_position(usi_line, mode)) return false;
   g.pos.set_max_ply(cfg_.max_ply, cfg_.count_from_41);
   g.forced_budget = sims;
   g.forced_full = full;
@@ -713,19 +713,23 @@ bool SelfPlay::idle(int slot) const { return games_[slot]->idle; }
 void SelfPlay::finish_now(int slot) {
   Game& g = *games_[slot];
   if (g.idle) return;
+  if (g.nodes.empty()) {
+    // ルート未作成: 1 回だけ評価させる（budget 0 なので次の apply 後に確定する）
+    g.forced_budget = 0;
+    g.budget = 0;
+    step_game(g);
+    return;
+  }
+  if (!g.root_ready) {
+    // ルートの評価待ち: この評価は捨てられない（候補が無い）。apply 後に budget 0 で確定する
+    g.forced_budget = 0;
+    g.budget = 0;
+    return;
+  }
   if (g.pending) {
     // 評価待ちの葉は捨てて、今の訪問数で決める
     for (size_t i = 0; i < g.path_moves.size(); ++i) g.sp.undo_move();
     g.pending = false;
-  }
-  if (g.nodes.empty() || !g.root_ready) {
-    g.forced_budget = 0;
-    g.budget = 0;
-    if (g.nodes.empty()) {
-      // ルート未評価: 読まずに合法手の先頭を返す代わりに、1 回だけ評価させる（budget 0 で次の apply 後に確定）
-      step_game(g);
-      return;
-    }
   }
   g.budget = g.sims;
   step_game(g);

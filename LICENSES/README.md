@@ -8,6 +8,8 @@ GPL 系のコードは一行も入れない（docs/libra-design.md §7.3〜7.4�
 | Apache License 2.0（本リポジトリのコード） | Apache-2.0 | — | `../LICENSE` | |
 | pybind11 | BSD-3-Clause | libra-sim の Python バインディング | （追加時に置く） | |
 | pytest | MIT | テスト | （追加時に置く） | 配布物に含めない |
+| ONNX Runtime 1.30.0 | MIT | libra / libra.exe の推論（C API を実行時にロード。`tools/fetch_onnxruntime.sh` で公式バイナリを取得、SHA-256 固定） | `onnxruntime-MIT.txt` | 配布物に `onnxruntime.dll` を同梱する。CUDA・cuDNN は同梱しない |
+| onnx | Apache-2.0 | ONNX 書き出し時のメタデータ付与（libra-net） | `onnx-Apache-2.0.txt` | 配布物に含めない |
 
 対戦相手（別プロセス・USI 経由でのみ使用。本リポジトリに同梱しない）:
 

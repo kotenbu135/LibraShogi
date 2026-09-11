@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
-# Libra の USI 拡張エンジン（Python 版）。desktop やハーネスから起動する。
+# Libra の USI 拡張エンジン（C++ 版 libra、ONNX Runtime）。desktop やハーネスから起動する。
+# モデルは環境変数 LIBRA_MODEL（既定 ~/libra-run/ls/checkpoints/latest.onnx。`bin/libra export` で作る）。
+# C++ 版が未ビルドなら Python 版（bin/libra-usi-py）にフォールバックする。
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export PYTHONPATH="$ROOT/libra-sim/python:$ROOT/libra-search/python:$ROOT/libra-net:$ROOT/libra-league${PYTHONPATH:+:$PYTHONPATH}"
-export PYTHONUNBUFFERED=1
-exec "$ROOT/.venv/bin/python" -m libra_league.usi_engine "$@"
+BIN="$ROOT/build/libra-engine/libra"
+export LIBRA_MODEL="${LIBRA_MODEL:-$HOME/libra-run/ls/checkpoints/latest.onnx}"
+if [ ! -x "$BIN" ] || [ ! -f "$LIBRA_MODEL" ]; then
+  exec "$ROOT/bin/libra-usi-py" "$@"
+fi
+# CUDA EP が使う cuDNN / cuBLAS などは PyTorch の pip 配布物のものを使う
+NV=""
+for d in "$ROOT"/.venv/lib/python3.*/site-packages/nvidia/*/lib; do NV="$NV:$d"; done
+export LD_LIBRARY_PATH="${NV#:}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+exec "$BIN" "$@"

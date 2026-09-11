@@ -16,15 +16,21 @@ jobs:
           python-version: "3.12"
       - name: Install build tools
         run: |
-          python -m pip install --upgrade pip cmake ninja pybind11 pytest numpy
+          python -m pip install --upgrade pip cmake ninja pybind11 pytest numpy onnx onnxruntime
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - name: Build (libra-sim, libra-search)
+      - name: Fetch ONNX Runtime (CPU, MIT; hash pinned in tools/fetch_onnxruntime.sh)
+        run: tools/fetch_onnxruntime.sh linux-cpu
+      - name: Build (libra-sim, libra-search, libra-engine)
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release             -Dpybind11_DIR=$(python -c "import pybind11;print(pybind11.get_cmake_dir())")
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -Dpybind11_DIR=$(python -c "import pybind11;print(pybind11.get_cmake_dir())") \
+            -DLIBRA_ORT_DIR=$PWD/third_party/onnxruntime/onnxruntime-linux-x64-1.30.0
           cmake --build build
       - name: C++ tests (perft, rules)
-        run: ctest --test-dir build/libra-sim --output-on-failure
+        run: |
+          ctest --test-dir build/libra-sim --output-on-failure
+          ctest --test-dir build/libra-search --output-on-failure
       - name: Python tests
         env:
           PYTHONPATH: libra-sim/python:libra-search/python:libra-net:libra-league
-        run: python -m pytest -q libra-sim/tests/test_python.py libra-league/tests
+        run: python -m pytest -q libra-sim/tests/test_python.py libra-league/tests libra-net/tests libra-engine/tests

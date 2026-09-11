@@ -43,12 +43,29 @@ def main(argv: list[str] | None = None) -> int:
     p_m.add_argument("--model", default=None, help="Libra のチェックポイント（既定: <run>/checkpoints/latest.pt）")
     p_m.add_argument("--out", default=None, help="棋譜 JSONL（既定: <run>/matches/<時刻>.jsonl）")
     p_m.add_argument("--first-placer", default="a", choices=["a", "b"], help="第 1 局で両玉を置く側（a=Libra）")
+    p_ex = sub.add_parser("export", help="チェックポイント（.pt）を推論用 ONNX に書き出す（libra / libra.exe 用）")
+    p_ex.add_argument("--ckpt", default=None, help="既定: <run>/checkpoints/latest.pt")
+    p_ex.add_argument("--out", default=None, help="既定: <run>/checkpoints/latest.onnx（同じ場所に一時ファイルを書いてから置き換える）")
     a = ap.parse_args(argv)
     sd = StateDir(Path(a.root) / a.run)
     if a.cmd == "run":
         from .runner import main_run
 
         main_run(sd.root, Path(a.config) if a.config else None)
+        return 0
+    if a.cmd == "export":
+        import os
+
+        from libra_net.export_onnx import check, export_checkpoint, load_checkpoint
+
+        ckpt = Path(a.ckpt) if a.ckpt else sd.root / "checkpoints" / "latest.pt"
+        out = Path(a.out) if a.out else sd.root / "checkpoints" / "latest.onnx"
+        tmp = out.with_suffix(".onnx.tmp")
+        meta = export_checkpoint(ckpt, tmp)
+        model, _ = load_checkpoint(ckpt)
+        diff = check(model, tmp)
+        os.replace(tmp, out)
+        print(f"exported {out} step {meta['libra_step']} max|ort-torch| {diff:.1e}")
         return 0
     if a.cmd == "pause":
         sd.set_flag("PAUSE")

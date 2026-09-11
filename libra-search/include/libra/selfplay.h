@@ -94,7 +94,7 @@ class SelfPlay {
   // 各対局のルート（いま考えている手番）の色を書く（0 先手、1 後手）。評価対局で「どちらのネットで読むか」を決めるのに使う
   void root_turns(std::int8_t* out) const;
   // 外部駆動（cfg.external）: 枠 slot に局面を与えて sims 回読む。読み終わると idle になり result が取れる
-  bool set_position(int slot, const std::string& usi_line, int sims, bool full);
+  bool set_position(int slot, const std::string& usi_line, int sims, bool full, Mode mode = MODE_TENBIN);
   bool idle(int slot) const;
   void finish_now(int slot);  // 今の訪問数で打ち切って結果を出す（stop）
   const SearchResult& result(int slot) const;

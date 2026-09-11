@@ -150,7 +150,7 @@ PYBIND11_MODULE(_search, m) {
              return out;
            })
       .def("set_active", &SelfPlay::set_active)
-      .def("set_position", &SelfPlay::set_position, py::arg("slot"), py::arg("usi_line"), py::arg("sims"), py::arg("full") = true)
+      .def("set_position", [](SelfPlay& s, int slot, const std::string& line, int sims, bool full, const std::string& mode) { return s.set_position(slot, line, sims, full, mode == "fuseki" ? MODE_FUSEKI : MODE_TENBIN); }, py::arg("slot"), py::arg("usi_line"), py::arg("sims"), py::arg("full") = true, py::arg("mode") = "tenbin")
       .def("idle", &SelfPlay::idle, py::arg("slot"))
       .def("finish_now", &SelfPlay::finish_now, py::arg("slot"))
       .def("result",

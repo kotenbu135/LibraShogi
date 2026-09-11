@@ -27,3 +27,7 @@
 - 2026-09-11 desktop への終局判定（宣言法・千日手・手数上限）追加と、GUI で Libra の玉配置表を使う改修は、Libra 側の準備ができた時点で tenbin-shogi-desktop に Issue を起票する。ルール設計者の決定。それまで GUI 対局は `Declare_Win=false`。
 - 2026-09-11 mingw-w64 をルール設計者が apt で導入（`x86_64-w64-mingw32-g++` 13-win32）。libra.exe のクロスビルドはこれを使う。
 - 2026-09-11 自動ログオン（netplwiz）と GPU 電力上限の変更は行わない。ルール設計者の決定。再起動後の再開は手動ログオン後に Task Scheduler が行う。
+- 2026-09-11 libra / libra.exe は ONNX Runtime 1.30.0（MIT）の C API を実行時に dlopen / LoadLibrary で読む（リンクしない）。EP は auto で CUDA → DirectML → CPU。公式バイナリは `tools/fetch_onnxruntime.sh` で取得し SHA-256 を固定、リポジトリには入れない（third_party/ は gitignore）。
+- 2026-09-11 Windows 版は WSL の mingw-w64 posix 版で静的リンクし、`onnxruntime.dll`（CPU 版）だけ同梱。CUDA・cuDNN の DLL は同梱しない。DirectML 版 DLL の同梱は Windows で GPU が要ると分かってから判断する。WSL 経由（`bin/libra-usi`）なら CUDA EP で動く。
+- 2026-09-11 ONNX は fp32・opset 17・バッチ可変。メタデータに step とネット設定を入れる。fp16 化と複数葉の同時評価（DNN_Batch_Size）は速度が要るときに入れる（現状は 1 葉ずつ評価）。
+- 2026-09-11 エンジンの `stop` は go を読んだ後に届いたものだけ効く（読み取りスレッドが go でフラグを消す）。探索結果が無いまま止められたら投了ではなく合法手の先頭を指す。

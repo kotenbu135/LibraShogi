@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Libra の USI 拡張エンジン（Python 版、PyTorch 推論）。C++ 版 bin/libra-usi の予備。
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$ROOT/libra-sim/python:$ROOT/libra-search/python:$ROOT/libra-net:$ROOT/libra-league${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONUNBUFFERED=1
+exec "$ROOT/.venv/bin/python" -m libra_league.usi_engine "$@"
