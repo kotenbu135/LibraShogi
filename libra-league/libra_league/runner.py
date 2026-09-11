@@ -69,6 +69,8 @@ class Runner:
             p.unlink()
         self.state["restarts"] = (self.state.get("restarts") or [])[-20:] + [time.strftime("%Y-%m-%d %H:%M:%S")]
         self.session_elapsed_offset = float(self.state.get("elapsed", 0.0))
+        if self.state.get("exploiter_stats"):
+            self.exploiter_stats.update(self.state["exploiter_stats"])
         self.log(f"resume: step={self.state['step']} games={self.state['games_total']} window={self.replay.n_games()} chunks={self.state['chunk_index']}")
 
     def checkpoint(self) -> None:
@@ -100,6 +102,8 @@ class Runner:
         self.state["generation"] = self.state.get("generation", 0) + 1
         self.state["last_checkpoint"] = time.time()
         self.state["elapsed"] = self.elapsed()
+        if self.exploiter_stats["games"]:
+            self.state["exploiter_stats"] = dict(self.exploiter_stats)
         self.sd.write_state(self.state)
         self.log(f"checkpoint step={step} games={self.state['games_total']} ({time.time() - t0:.1f}s)")
         if self.cfg["run"].get("export_onnx", False):
