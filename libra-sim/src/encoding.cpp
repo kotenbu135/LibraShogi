@@ -78,13 +78,14 @@ int mirror_index(int idx) {
   return to_mm * POLICY_CLASSES + cls;
 }
 
-void write_features(const Position& pos, float* sq_out, float* glob_out) {
+void write_features(const Position& pos, float* sq_out, float* glob_out, bool mirror) {
   std::memset(sq_out, 0, sizeof(float) * SQ_NB * SQ_FEATS);
   std::memset(glob_out, 0, sizeof(float) * GLOB_FEATS);
   Color us = pos.turn(), them = ~us;
   Bitboard occ = pos.pieces();
   for (int sq = 0; sq < SQ_NB; ++sq) {
-    float* f = sq_out + to_mover_frame(us, sq) * SQ_FEATS;
+    int t = to_mover_frame(us, sq);
+    float* f = sq_out + (mirror ? mirror_sq(t) : t) * SQ_FEATS;
     Piece p = pos.piece_on(sq);
     if (p != NO_PIECE) f[(color_of(p) == us ? 0 : 14) + type_of(p) - 1] = 1.0f;
     int a_us = pos.attackers_to(sq, us, occ).count();

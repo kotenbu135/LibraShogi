@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# libra コマンド。venv とビルド済みモジュールのパスを通して libra_league.cli を呼ぶ。
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$ROOT/libra-sim/python:$ROOT/libra-search/python:$ROOT/libra-net:$ROOT/libra-league${PYTHONPATH:+:$PYTHONPATH}"
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
+exec nice -n "${LIBRA_NICE:-10}" "$ROOT/.venv/bin/python" -m libra_league.cli "$@"

@@ -22,6 +22,6 @@ constexpr int to_mover_frame(Color turn, int sq) { return turn == BLACK ? sq : 8
 int move_index(const Position& pos, Move m);        // 手 → 方策の添字（手番側の座標系）
 Move move_from_index(const Position& pos, int idx); // 逆変換。解決できなければ MOVE_NONE（合法性は見ない）
 int mirror_index(int idx);                          // 1↔9 筋の鏡映（手番側の座標系での筋反転）
-void write_features(const Position& pos, float* sq_out, float* glob_out);  // sq_out: 81*SQ_FEATS, glob_out: GLOB_FEATS
+void write_features(const Position& pos, float* sq_out, float* glob_out, bool mirror = false);  // sq_out: 81*SQ_FEATS, glob_out: GLOB_FEATS。mirror で 1↔9 筋反転
 
 }  // namespace libra

@@ -15,17 +15,16 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install build tools
-        run: python -m pip install --upgrade pip cmake ninja pybind11 pytest
-      - name: Build libra-sim
-        if: hashFiles('libra-sim/CMakeLists.txt') != ''
         run: |
-          cmake -S libra-sim -B build/libra-sim -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/libra-sim
+          python -m pip install --upgrade pip cmake ninja pybind11 pytest numpy
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Build (libra-sim, libra-search)
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release             -Dpybind11_DIR=$(python -c "import pybind11;print(pybind11.get_cmake_dir())")
+          cmake --build build
       - name: C++ tests (perft, rules)
-        if: hashFiles('libra-sim/CMakeLists.txt') != ''
         run: ctest --test-dir build/libra-sim --output-on-failure
       - name: Python tests
-        if: hashFiles('libra-sim/pyproject.toml') != ''
-        run: |
-          python -m pip install ./libra-sim
-          python -m pytest -q libra-sim/tests
+        env:
+          PYTHONPATH: libra-sim/python:libra-search/python:libra-net:libra-league
+        run: python -m pytest -q libra-sim/tests/test_python.py libra-league/tests
