@@ -13,7 +13,7 @@
 | 種別の自動判定 | `option name` が `Fuseki_` で始まる項目が 1 つでもあれば `kind='fuseki'`（布石にも対応）。無ければ `id name` の既知パターン、それも無ければ `normal`（`engines.ts probeInto`） | `Fuseki_Mode` を申告する（下表）。利用者が手で「布石にも対応」に変えなくても済む |
 | GPU 判定 | `DNN_` で始まる項目があれば `gpu=true`。効果: (1) `isready` を既定 1200 秒待つ（通常 120 秒）、(2) 同時に 1 本だけ起動、(3) エンジン同士の対局では先後で同じ 1 本のプロセスを使い回す | `DNN_Model` を申告するので GPU 扱い。1 プロセスで両方の手番の `go` を受けられること（状態を手番に依存させない） |
 | 起動手順 | `usi` → `usiok` → 上書き分の `setoption`（既定と同じ値は送らない） → `isready` → `readyok` → `usinewgame`（`ensureStarted` → `newGame`）。`stop` を先に送ることがある | モデルの読み込みは `isready` で行う。`usinewgame` は毎局来るとは限らない（先後で共用するときは 1 回） |
-| 局面 | 布石: `position fuseki` ／ `position fuseki moves K*5i K*5a P*7g ...`。`choose:` は送らない（`game.ts positionCommand`）。本将棋: `position sfen <40 手完了時の SFEN> moves 7g7f ...`（`startpos` は来ない） | `choose:` が来ても読み飛ばす。SFEN は持ち駒なし・手番 b・手数 1 で来る |
+| 局面 | 布石: `position fuseki` ／ `position fuseki moves K*5i K*5a P*7g ...`。`choose:` は送らない（`game.ts positionCommand`）。本将棋: `position sfen <40 手完了時の SFEN> moves 7g7f ...`（`startpos` は来ない） | `choose:` が来ても読み飛ばす。SFEN は持ち駒なし・手番 b・手数 41（通算）で来る（wasm の `fw_to_sfen` と一致させた） |
 | `go` の語（対局） | 時計あり: `go btime B wtime W byoyomi Y`。時計なし: `go movetime T`（秒/手 × 1000）。**布石中も同じ**。`go nodes` は対局では来ない（`play.ts goArgs`） | `btime/wtime/byoyomi/binc/winc/movetime/nodes/infinite` をすべて受ける |
 | `go` の語（検討） | `go infinite` → `stop`。`bestmove` を 10 秒以内に返さないと以後のその探索の `bestmove` は捨てられる | `stop` から 10 秒以内に必ず `bestmove` を返す |
 | 毎手送られる `setoption` | `MultiPV`（申告していれば毎 `go` 前）、`Fuseki_Mode`（申告していれば布石の毎 `go` 前に `tenbin` か `fuseki`） | 走っていないときに来る前提。受けたら次の `go` から反映 |
