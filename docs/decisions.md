@@ -35,3 +35,4 @@
 - 2026-09-11 エンジンの `Scale_Table` は scale.json の `balanced` だけを読む（C++ は最小の走査で JSON 依存を持たない）。1 手目は一様、2 手目は置いた先手玉に合うペアから一様。表に無ければ探索で置く。自己対局（L-S）の玉配置は当面一様のまま。
 - 2026-09-11 搾取者リーグ v0: Main exploiter 1 体（d=192・4 層、ゼロから）を同時 64 局で凍結した本体と対局させる（偶数枠で先手）。学習は自分の手の方策と全局面の価値。搾取者が勝った対局の玉 2 手＋布石 12 手を openings.json にし、本体の新規対局の 10% をそこから始める（手順中の手は方策ターゲットなし）。League exploiter と PFSP は後回し。
 - 2026-09-11 搾取者 lx の玉配置は後手玉四段目を除く 36×27 から一様（`search.prune_gote_rank4`）。本体 L-S は設計どおり 36×36 一様のまま（選ぶ側が悪い配置も評価できるように）。openings の抽出でも四段目のペアは除く（桂打ちで決まる自明な勝ちを本体の分布に混ぜない）。
+- 2026-09-12 Windows の管理 GUI は PowerShell 5.1 + WinForms の単一スクリプト（tools/windows/libra-console.ps1、ビルド不要・依存なし）。データは `libra status --json` を wsl.exe 経由で取る（ロジックは Python 側に置き、GUI は表示と bat 相当の操作だけ）。「起動」はタスク スケジューラ経由にして失敗時の自動再起動を保つ。Windows 側の bat / vbs の正は tools/windows/ に置き install.sh で配る。

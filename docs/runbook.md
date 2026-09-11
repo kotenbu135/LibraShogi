@@ -47,7 +47,11 @@ schtasks /Create /TN "LibraShogi run" /XML "C:\Users\sakis\libra\LibraShogi-run.
 schtasks /Create /TN "LibraShogi run lx" /XML "C:\Users\sakis\libra\LibraShogi-run-lx.xml" /F
 ```
 
-再起動・一時停止の手順: 一時停止はデスクトップの `libra-pause.bat`（両 run が待機）、復帰は `libra-resume.bat`。PC を再起動するときは `libra-stop.bat` で両 run を止めて（`libra-status.bat` で `not running` を確認）から再起動し、ログオン後に両タスクが自動で再開する。搾取者を止めたままにしたいときは WSL で `bin/libra --run lx stop` だけ実行する（本体は openings を読むだけなので影響しない）。
+Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\Users\<user>\libra` とデスクトップへ写す）。
+
+**管理コンソール（GUI）**: デスクトップの `libra-console.bat`（`tools/windows/libra-console.ps1`、PowerShell 5.1 + WinForms、ビルド不要）。本体 ls と搾取者 lx の状態（稼働 / 一時停止 / 停止、step・世代・総局数、局/日の 1 時間平均と実測、終局内訳、loss、GPU メモリ、最終チェックポイント、搾取者の対本体勝率、log.txt の末尾）を 15 秒ごとに `wsl.exe -d Ubuntu-24.04 -- bin/libra --run <run> status --json --tail 8` で取り、局/日の推移を折れ線で出す。ボタンは bat と同じ操作（一時停止 / 再開 / 停止 / 起動 / 絞る、両 run 一括）。「起動」はタスク スケジューラの「LibraShogi run [lx]」を `schtasks /Run` で起動する（無ければ wsl.exe を直接起動）。局/日の履歴は `%LOCALAPPDATA%\LibraShogi\console-history.csv` に追記（7 日分を表示）。
+
+再起動・一時停止の手順（bat 版）: 一時停止はデスクトップの `libra-pause.bat`（両 run が待機）、復帰は `libra-resume.bat`。PC を再起動するときは `libra-stop.bat` で両 run を止めて（`libra-status.bat` で `not running` を確認）から再起動し、ログオン後に両タスクが自動で再開する。搾取者を止めたままにしたいときは WSL で `bin/libra --run lx stop` だけ実行する（本体は openings を読むだけなので影響しない）。
 
 ## 4. 別作業でリソースを空けるとき
 
@@ -61,7 +65,7 @@ schtasks /Create /TN "LibraShogi run lx" /XML "C:\Users\sakis\libra\LibraShogi-r
 
 ## 6. 監視
 
-`libra status` の `games/day(1h)` を docs/measurements.md に週 1 回記録する。`status.json` の `engine` に終局理由の内訳（ruling41、mate、sennichite、perpetual、max_ply）がある。
+`libra status` の `games/day(1h)` を docs/measurements.md に週 1 回記録する（Windows では管理コンソール `libra-console.bat` で常時見える。§3）。`libra status --json [--tail N]` は機械可読（`process`、`flags`、`throttle`、`state`、`status`、`log_tail`）。`status.json` の `engine` に終局理由の内訳（ruling41、mate、sennichite、perpetual、max_ply）がある。
 
 ## 7. 計測（外部エンジンとの対局）
 

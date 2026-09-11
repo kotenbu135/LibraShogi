@@ -85,6 +85,20 @@ bin/libra-scale show             # 玉配置表 ~/libra-run/ls/scale/scale.json
 
 起動は `nohup setsid bin/libra run >> ~/libra-run/ls/stdout.log 2>&1 &`（Windows ではタスク スケジューラ「LibraShogi run」/「LibraShogi run lx」がログオン時に起動）。
 
+### Windows の管理コンソール（tools/windows/libra-console.ps1）
+
+WinForms の GUI。人はデスクトップの `libra-console.bat` で開く。エージェントは WSL から `powershell.exe` で無人実行できる（`tools/windows/install.sh` で `C:\Users\sakis\libra\` に写してから。UNC パスからは実行しない）:
+
+```bash
+tools/windows/install.sh
+S='C:\Users\sakis\libra\libra-console.ps1'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot 'C:\Users\sakis\libra\console-shot.png'   # 1 回更新して PNG 保存、要約を表示して終了（約 5 秒）
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -Do 'lx:pause'      # ボタンと同じ呼び出しだけ実行（pause/resume/stop/throttle --games N）
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -Do 'lx:resume'
+```
+
+PNG は `/mnt/c/Users/sakis/libra/console-shot.png` を Read で見る。`-Do` の出力は `bin/libra` の出力そのもの（`PAUSE set` など）。
+
 ## Test
 
 ```bash
@@ -97,6 +111,9 @@ PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-sca
 pytest は 33 件、約 2〜3 分（ランナーのスモークと df-pn の乱数検証が重い。L-S 稼働中は CPU を取り合って伸びる）。CI（`.github/workflows/ci.yml`）は同じ手順を ubuntu-latest の CPU で回す。
 
 ## Gotchas
+
+- **.ps1 は UTF-8 BOM 付きで保存する。** PowerShell 5.1 は BOM が無いと ANSI（cp932）として読み、日本語のラベルが化ける。bat は ASCII のみ（cmd は UTF-8 の日本語コメントで壊れる）。
+- **PowerShell の stderr は cp932。** WSL 側で読むときは `2>&1 | iconv -f cp932 -t utf-8`。`wsl.exe` 経由の Python の出力は UTF-8 なので `StandardOutputEncoding = UTF8` を指定して読む。
 
 - **PYTHONPATH が要る。** パッケージは pip install しない（`libra-sim/python`, `libra-search/python`, `libra-net`, `libra-league`, `libra-scale`）。`bin/libra*` と driver は自分で通す。pytest を直接呼ぶときは上の環境変数を付ける。
 - **`_search` を単独で import すると libra-sim のテーブルが未初期化**になり得る（モジュール初期化で `static Position` を作って回避済み）。`librashogi` を先に import する必要はない。

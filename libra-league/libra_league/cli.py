@@ -23,7 +23,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("stop", help="STOP フラグを置く。チェックポイントを書いて終了")
     p_th = sub.add_parser("throttle", help="同時進行局数を絞る")
     p_th.add_argument("--games", type=int, required=True, help="同時進行局数（0 で解除）")
-    sub.add_parser("status", help="状態を表示")
+    p_st = sub.add_parser("status", help="状態を表示")
+    p_st.add_argument("--json", action="store_true", help="機械可読な JSON を 1 行で出す（Windows の管理コンソール用）")
+    p_st.add_argument("--tail", type=int, default=0, help="--json のとき log.txt の末尾 N 行も含める")
     p_ev = sub.add_parser("eval", help="2 つのチェックポイントを対局させて Elo 差と較正を出す")
     p_ev.add_argument("--a", required=True, help="チェックポイント A（.pt）")
     p_ev.add_argument("--b", required=True, help="チェックポイント B（.pt）")
@@ -169,15 +171,30 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "status":
         st = read_json(sd.status_json)
         state = sd.read_state()
-        if not st and not state:
-            print(f"no run at {sd.root}")
-            return 1
         lock = sd.root / "run.lock"
         running = False
         if lock.exists():
             pid = lock.read_text().strip()
             running = Path(f"/proc/{pid}").exists()
         flags = [f for f in StateDir.FLAGS if sd.flag(f)]
+        if a.json:
+            out = {
+                "run": a.run,
+                "root": str(sd.root),
+                "exists": bool(st or state),
+                "process": "running" if running else "not running",
+                "flags": flags,
+                "throttle": sd.throttle_value(),
+                "state": {k: state.get(k) for k in ("step", "generation", "games_total", "last_checkpoint", "elapsed")} if state else None,
+                "status": st or None,
+            }
+            if a.tail > 0 and sd.log.exists():
+                out["log_tail"] = sd.log.read_text(encoding="utf-8", errors="replace").splitlines()[-a.tail:]
+            print(json.dumps(out, ensure_ascii=False))
+            return 0
+        if not st and not state:
+            print(f"no run at {sd.root}")
+            return 1
         print(f"run: {sd.root}  process: {'running' if running else 'not running'}  flags: {flags or '-'}")
         if st:
             eng = st.get("engine", {})
