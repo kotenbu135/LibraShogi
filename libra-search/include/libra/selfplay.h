@@ -39,6 +39,7 @@ struct MoveRecord {
 };
 
 struct GameRecord {
+  int slot = 0;                     // どの同時進行枠の対局か（評価対局で先後の割り当てに使う）
   int kb, kw;                       // 先手玉・後手玉のマス
   std::vector<MoveRecord> moves;    // 3 手目から
   int result;                       // 先手から見て +1 / 0 / −1
@@ -69,6 +70,8 @@ class SelfPlay {
   SelfPlayStats stats() const { return stats_; }
   void set_active(int n);  // 同時進行数を絞る（throttle）。n 以降の対局は止めたまま保持する
   int active() const { return active_; }
+  // 各対局のルート（いま考えている手番）の色を書く（0 先手、1 後手）。評価対局で「どちらのネットで読むか」を決めるのに使う
+  void root_turns(std::int8_t* out) const;
 
   struct Game;  // 実装の詳細（selfplay.cpp）
 

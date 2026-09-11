@@ -24,6 +24,15 @@ def main(argv: list[str] | None = None) -> int:
     p_th = sub.add_parser("throttle", help="同時進行局数を絞る")
     p_th.add_argument("--games", type=int, required=True, help="同時進行局数（0 で解除）")
     sub.add_parser("status", help="状態を表示")
+    p_ev = sub.add_parser("eval", help="2 つのチェックポイントを対局させて Elo 差と較正を出す")
+    p_ev.add_argument("--a", required=True, help="チェックポイント A（.pt）")
+    p_ev.add_argument("--b", required=True, help="チェックポイント B（.pt）")
+    p_ev.add_argument("--games", type=int, default=200)
+    p_ev.add_argument("--sims", type=int, default=96)
+    p_ev.add_argument("--concurrent", type=int, default=128)
+    p_ev.add_argument("--threads", type=int, default=8)
+    p_ev.add_argument("--seed", type=int, default=0)
+    p_ev.add_argument("--out", default=None, help="結果 JSON の出力先（既定: <run>/eval/<時刻>.json）")
     a = ap.parse_args(argv)
     sd = StateDir(Path(a.root) / a.run)
     if a.cmd == "run":
@@ -50,6 +59,22 @@ def main(argv: list[str] | None = None) -> int:
         else:
             sd.set_flag("THROTTLE", str(a.games))
             print(f"THROTTLE {a.games}")
+        return 0
+    if a.cmd == "eval":
+        import time
+
+        from .config import load_config
+        from .evaluate import main_eval
+
+        cfg = load_config(sd.config_toml if sd.config_toml.exists() else None)
+        scfg = dict(cfg["search"])
+        scfg["full_sims"] = a.sims
+        out = Path(a.out) if a.out else sd.root / "eval" / (time.strftime("%Y%m%d-%H%M%S") + ".json")
+        res = main_eval(Path(a.a), Path(a.b), scfg, a.games, a.concurrent, a.threads, a.seed, out)
+        print(json.dumps({k: v for k, v in res.items() if not k.startswith("calibration")}, ensure_ascii=False))
+        for side in ("a", "b"):
+            print(f"calibration_{side}:", " ".join(f"[{c['lo']:.1f},{c['hi']:.1f}) n={c['n']} pred={c['pred']:.2f} act={c['actual']:.2f}" for c in res[f"calibration_{side}"]))
+        print("written:", out)
         return 0
     if a.cmd == "status":
         st = read_json(sd.status_json)

@@ -67,6 +67,7 @@ struct SelfPlay::Game {
   std::vector<std::pair<std::uint32_t, int>> path;  // (node, edge)
   std::vector<Move> path_moves;
   int moves_made = 0;
+  int slot = 0;
   std::vector<GameRecord> done;  // 終局した記録（gather で集める）
   SelfPlayStats st;              // この対局の統計（gather で集める）
 
@@ -81,6 +82,7 @@ SelfPlay::SelfPlay(const SearchConfig& cfg, int n_games, std::uint64_t seed, int
   for (int i = 0; i < n_games; ++i) {
     games_.push_back(std::make_unique<Game>());
     games_.back()->rng.seed(rng_());
+    games_.back()->slot = i;
     start_game(*games_.back());
   }
 }
@@ -99,6 +101,7 @@ void SelfPlay::start_game(Game& g) {
   g.pos.do_move(make_drop(KING, kb));
   g.pos.do_move(make_drop(KING, kw));
   g.rec = GameRecord();
+  g.rec.slot = g.slot;
   g.rec.kb = kb;
   g.rec.kw = kw;
   g.rec.v41 = 0;
@@ -493,6 +496,10 @@ void SelfPlay::apply(const float* logits, const float* wdl) {
     step_game(g);  // 次の葉まで進める（終局・着手を含む）
   });
   gather();
+}
+
+void SelfPlay::root_turns(std::int8_t* out) const {
+  for (size_t i = 0; i < games_.size(); ++i) out[i] = games_[i]->pos.turn() == BLACK ? 0 : 1;
 }
 
 std::vector<GameRecord> SelfPlay::take_finished() {

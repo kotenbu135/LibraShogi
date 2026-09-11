@@ -32,6 +32,7 @@ SearchConfig config_from_dict(const py::dict& d) {
 
 py::dict record_to_dict(const GameRecord& r) {
   py::dict d;
+  d["slot"] = r.slot;
   d["kb"] = r.kb;
   d["kw"] = r.kw;
   d["result"] = r.result;
@@ -114,6 +115,12 @@ PYBIND11_MODULE(_search, m) {
              return out;
            })
       .def("set_active", &SelfPlay::set_active)
+      .def("root_turns",
+           [](const SelfPlay& s) {
+             py::array_t<std::int8_t> out(s.n_games());
+             s.root_turns(out.mutable_data());
+             return out;
+           })
       .def_property_readonly("active", &SelfPlay::active)
       .def("stats", [](const SelfPlay& s) {
         SelfPlayStats st = s.stats();
