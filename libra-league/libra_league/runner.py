@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 import sys
 import time
 from pathlib import Path
@@ -41,6 +42,7 @@ class Runner:
         self.paused = False
         self.rate_hist: list[tuple[float, int]] = []
         self.last_train: dict = {}
+        self.pool = ThreadPoolExecutor(max_workers=1)
 
     # ---- 永続化 ----
     def log(self, msg: str) -> None:
@@ -188,9 +190,14 @@ class Runner:
                 avg_len = self.replay.n_positions() / max(1, self.replay.n_games())
                 steps = max(1, int(round(new_games * avg_len * tr["replay_ratio"] / tr["batch_size"])))
                 t0 = time.time()
+                # バッチ作成（CPU、replay_features は GIL を離す）と学習ステップ（GPU）を重ねる
+                sample = lambda: self.replay.sample(tr["batch_size"], self.rng, tr["mirror_prob"], tr["lambda_z"], self.cfg["search"]["policy_topk"])  # noqa: E731
+                fut = self.pool.submit(sample)
                 for _ in range(steps):
-                    batch = self.replay.sample(tr["batch_size"], self.rng, tr["mirror_prob"], tr["lambda_z"], self.cfg["search"]["policy_topk"])
+                    batch = fut.result()
+                    fut = self.pool.submit(sample)
                     self.last_train = self.trainer.step(batch)
+                fut.result()
                 self.last_train["steps"] = steps
                 self.last_train["sec"] = round(time.time() - t0, 1)
                 self.loop.set_model(self.model)

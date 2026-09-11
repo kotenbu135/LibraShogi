@@ -49,6 +49,7 @@ class ReplayBuffer:
         self.pending: list[dict] = []
         self.chunk_index = 0
         self.total_games = 0
+        self._lens_cache: np.ndarray | None = None
 
     # ---- 永続化 ----
     def load(self, chunk_index: int, total_games: int) -> None:
@@ -76,6 +77,7 @@ class ReplayBuffer:
             self.total_games += 1
         while len(self.games) > self.window_games:
             self.games.popleft()
+        self._lens_cache = None
         while len(self.pending) >= self.chunk_games:
             chunk, self.pending = self.pending[: self.chunk_games], self.pending[self.chunk_games :]
             self._write_chunk(chunk)
@@ -105,7 +107,9 @@ class ReplayBuffer:
     # ---- サンプリング ----
     def sample(self, batch: int, rng: np.random.Generator, mirror_prob: float, lambda_z: float, topk: int = 32) -> dict:
         games = list(self.games)
-        lens = np.array([len(g["moves"]) for g in games], dtype=np.int64)
+        if self._lens_cache is None or len(self._lens_cache) != len(games):
+            self._lens_cache = np.array([len(g["moves"]) for g in games], dtype=np.int64)
+        lens = self._lens_cache
         cum = np.cumsum(lens)
         pick = rng.integers(0, cum[-1], size=batch)
         gi = np.searchsorted(cum, pick, side="right")
