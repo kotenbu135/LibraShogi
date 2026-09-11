@@ -11,6 +11,7 @@
 
 int main() {
   std::ios::sync_with_stdio(false);
+  std::cin.tie(nullptr);  // 読み取りスレッドの getline が cout を flush して主スレッドの出力と競合しないように（行の重複の原因になる）
   libra_engine::Engine eng;
   std::mutex mu;
   std::condition_variable cv;
