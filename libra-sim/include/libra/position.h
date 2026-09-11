@@ -141,7 +141,7 @@ class Position {
   std::vector<HistEntry> hist_;
   Outcome outcome_;
   bool mate_checked_;
-  int max_ply_ = 256;
+  int max_ply_ = 320;
   bool count_from_41_ = true;
 };
 

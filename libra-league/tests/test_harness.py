@@ -20,7 +20,7 @@ def test_random_vs_random_match(tmp_path: Path):
     b.start(ready_timeout=30)
     try:
         out = tmp_path / "m.jsonl"
-        s = run_match(a, b, 4, "nodes 1", out, max_ply=256)
+        s = run_match(a, b, 4, "nodes 1", out, max_ply=320)
     finally:
         a.quit()
         b.quit()
@@ -35,7 +35,7 @@ def test_random_vs_random_match(tmp_path: Path):
         if g["reason"] in ("resign", "declaration", "illegal_declaration", "illegal_move", "timeout"):
             continue
         p = ls.Position()
-        p.set_max_ply(256, True)
+        p.set_max_ply(320, True)
         p.set_position("position fuseki moves " + g["tokens"])  # choose: は読み飛ばされる
         assert p.outcome() == (g["result"], g["reason"]), g["tokens"]
     # 置く側が交互

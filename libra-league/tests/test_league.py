@@ -17,7 +17,7 @@ def test_config_merge(tmp_path: Path):
     p.write_text('run_id = "x"\n[train]\nbatch_size = 64\n', encoding="utf-8")
     cfg = load_config(p)
     assert cfg["run_id"] == "x" and cfg["train"]["batch_size"] == 64
-    assert cfg["train"]["lr"] == DEFAULTS["train"]["lr"] and cfg["search"]["max_ply"] == 256
+    assert cfg["train"]["lr"] == DEFAULTS["train"]["lr"] and cfg["search"]["max_ply"] == 320
     # dump → load で往復
     q = tmp_path / "d.toml"
     q.write_text(dump_toml(cfg), encoding="utf-8")
@@ -46,7 +46,7 @@ def test_soft_wdl():
 
 
 def _dummy_games(n: int, seed: int) -> list[dict]:
-    cfg = {"full_sims": 8, "fast_sims": 4, "full_prob": 0.5, "max_ply": 256}
+    cfg = {"full_sims": 8, "fast_sims": 4, "full_prob": 0.5, "max_ply": 320}
     sp = librasearch.SelfPlay(cfg, 8, seed=seed, threads=2)
     sq = np.zeros((8, 81, ls.SQ_FEATS), np.float32)
     glob = np.zeros((8, ls.GLOB_FEATS), np.float32)
@@ -61,7 +61,7 @@ def _dummy_games(n: int, seed: int) -> list[dict]:
 
 def test_replay_chunks_and_sampling(tmp_path: Path):
     games = _dummy_games(25, 5)
-    rb = ReplayBuffer(tmp_path / "replay", tmp_path / "games", window_games=20, chunk_games=10, max_ply=256, count_from_41=True)
+    rb = ReplayBuffer(tmp_path / "replay", tmp_path / "games", window_games=20, chunk_games=10, max_ply=320, count_from_41=True)
     (tmp_path / "replay").mkdir()
     (tmp_path / "games").mkdir()
     assert rb.add_games(games) == 2
@@ -77,7 +77,7 @@ def test_replay_chunks_and_sampling(tmp_path: Path):
         p.do_move(tok)
     assert p.outcome() == (rec["result"], rec["reason"])
     # 再読込は窓の分だけ
-    rb2 = ReplayBuffer(tmp_path / "replay", tmp_path / "games", window_games=15, chunk_games=10, max_ply=256, count_from_41=True)
+    rb2 = ReplayBuffer(tmp_path / "replay", tmp_path / "games", window_games=15, chunk_games=10, max_ply=320, count_from_41=True)
     rb2.load(2, 25)
     assert rb2.n_games() == 15 and rb2.chunk_index == 2
     rng = np.random.default_rng(0)

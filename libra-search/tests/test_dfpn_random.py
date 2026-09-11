@@ -8,8 +8,8 @@ import librasearch
 import librashogi as ls
 
 
-def verify_mate(pos: ls.Position, depth: int = 24) -> bool:
-    """攻め方の手番。証明手を指し、受け方の全応手に対して再帰的に証明が続くか（詰みまで）。"""
+def verify_mate(pos: ls.Position, depth: int = 64) -> bool:
+    """攻め方の手番。証明手を指し、受け方の全応手に対して再帰的に証明が続くか（詰みまで）。乱数局面では一本道の 28 手詰みが出るので深さの上限は 64。"""
     res, best, _ = librasearch.solve(pos, "mate", 20000)
     assert res == "proven", res
     assert pos.is_legal(best), best

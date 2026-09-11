@@ -130,7 +130,7 @@ class Match:
         }
 
 
-def run_match(a: UsiEngine, b: UsiEngine, n_games: int, go_args: str, out_jsonl: Path, max_ply: int = 256,
+def run_match(a: UsiEngine, b: UsiEngine, n_games: int, go_args: str, out_jsonl: Path, max_ply: int = 320,
               count_from_41: bool = True, log=None, first_placer: str = "a") -> dict:
     m = Match(a, b, go_args, max_ply, count_from_41, log)
     summary = {"a": a.id_name, "b": b.id_name, "n": 0, "a_points": 0.0, "by_engine_side": {}, "reasons": {}, "games": []}

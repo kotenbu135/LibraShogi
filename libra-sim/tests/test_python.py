@@ -50,7 +50,7 @@ def test_startpos_perft():
 def test_random_game_ends():
     rng = random.Random(1)
     p = ls.Position()
-    p.set_max_ply(256, True)
+    p.set_max_ply(320, True)
     n = 0
     while not p.is_over():
         moves = p.legal_moves()

@@ -25,7 +25,7 @@ struct SearchConfig {
   float c_scale = 1.0f;
   float cpuct = 1.5f;       // ルート以外の PUCT
   float draw_value = 0.0f;  // 引き分けの値（手番側から）
-  int max_ply = 256;
+  int max_ply = 320;
   bool count_from_41 = true;
   int policy_topk = 32;     // 方策ターゲットとして保存する上位数
   int max_moves_per_game = 400;  // 安全弁（規定上は max_ply で終わる）

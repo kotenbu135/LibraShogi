@@ -21,7 +21,7 @@ DEFAULTS: dict[str, Any] = {
         "c_scale": 1.0,
         "cpuct": 1.5,
         "draw_value": 0.0,
-        "max_ply": 256,
+        "max_ply": 320,
         "count_from_41": True,
         "policy_topk": 32,
         "max_moves_per_game": 400,

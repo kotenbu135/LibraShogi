@@ -44,5 +44,5 @@ p.do_move("P*3c"); p.undo()
 p.sfen(); p.key; p.norm_key               # 拡張 SFEN、着手順非依存の鍵、鏡映で正規化した鍵
 p.outcome()                               # ('ongoing'|'sente'|'gote'|'draw', reason)
 p.can_declare("sente"); p.declare("sente"); p.resign("gote")
-p.set_max_ply(256, count_from_41=True)    # 手数上限（要確認事項。既定 256）
+p.set_max_ply(320, count_from_41=True)    # 手数上限（大会ルール 320 手。41 手目を 1 手目として数える）
 ```

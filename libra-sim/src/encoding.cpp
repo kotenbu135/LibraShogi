@@ -103,7 +103,7 @@ void write_features(const Position& pos, float* sq_out, float* glob_out, bool mi
   bool fuseki = pos.phase() == PHASE_FUSEKI;
   glob_out[16] = fuseki ? 1.0f : 0.0f;
   glob_out[17] = fuseki ? pos.ply() / 40.0f : 1.0f;
-  float np = fuseki ? 0.0f : pos.normal_ply() / float(pos.max_ply() > 0 ? pos.max_ply() : 256);
+  float np = fuseki ? 0.0f : pos.normal_ply() / float(pos.max_ply() > 0 ? pos.max_ply() : 320);
   glob_out[18] = np > 1.0f ? 1.0f : np;
   glob_out[19] = pos.in_check() ? 1.0f : 0.0f;
   glob_out[20] = fuseki ? 0.0f : (pos.repetition_count() - 1) / 3.0f;
