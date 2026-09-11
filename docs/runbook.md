@@ -59,3 +59,17 @@ schtasks /Create /TN "LibraShogi run" /XML "C:\Users\sakis\libra\LibraShogi-run.
 ## 6. 監視
 
 `libra status` の `games/day(1h)` を docs/measurements.md に週 1 回記録する。`status.json` の `engine` に終局理由の内訳（ruling41、mate、sennichite、perpetual、max_ply）がある。
+
+## 7. 計測（外部エンジンとの対局）
+
+```bash
+~/LibraShogi/bin/libra match --games 20 --go "movetime 3000"      # Libra（latest.pt）対 fuseki_usi_server.py（やねうら王＋水匠5 中継）
+~/LibraShogi/bin/libra eval --a ckpt1.pt --b ckpt2.pt --games 200  # 世代間 Elo と較正
+```
+
+`match` は `~/libra-run/ls/matches/<時刻>.jsonl`（1 局 1 行）と `.summary.json`、USI ログ `.log` を書く。裁定は libra-sim（docs/rules.md）。相手のバージョンとハッシュは docs/protocol.md §5。
+GPU を L-S と共有するので、計測中は `libra pause` するか、局/日が落ちることを承知で回す。
+
+## 8. desktop で Libra を動かす（暫定・Python 版）
+
+「エンジン」→「実行ファイルを選んで追加」で `C:\Windows\System32\wsl.exe` を選び、引数に `-d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra-usi` を入れる。`usi` の申告から「布石にも対応」「GPU で読む」が自動で付く。`DNN_Model` は `~/libra-run/ls/checkpoints/latest.pt`（学習中の最新）。

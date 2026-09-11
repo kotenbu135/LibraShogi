@@ -12,4 +12,6 @@
 | `libra_league/cli.py` | `libra run/pause/resume/stop/throttle/status` |
 | `tests/` | 設定・状態・リプレイのテスト |
 
-評価ハーネス（世代間 Elo、較正）と計測ハーネス（外部エンジンとの USI 対局）はこれから足す。
+| `libra_league/evaluate.py` | `libra eval`: 世代間 Elo と較正 |
+| `libra_league/usi_engine.py` | `bin/libra-usi`: USI 拡張エンジン（Python 版、暫定） |
+| `libra_league/usi_client.py`, `harness.py` | `libra match`: 外部エンジンとの無人対局、libra-sim による裁定、JSONL 棋譜 |
