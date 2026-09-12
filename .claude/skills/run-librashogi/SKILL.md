@@ -74,6 +74,8 @@ tmux send-keys -t libra 'quit' Enter; tmux kill-session -t libra
 
 ## Run (human path) — 本番のラン
 
+**本番のラン（ls・lx）の操作はユーザーが管理コンソールで行う。Claude は stop / run / pause / resume / throttle / eval-now / match-now を実行せず、終了待ちの監視もしない**（CLAUDE.md 「稼働中のランの扱い」）。以下は手順の記録と、driver が使う一時的な run（`driver.py runner`）向け。
+
 本番の状態は `~/libra-run/ls`（本体 L-S）と `~/libra-run/lx`（搾取者）。冪等で、前回の状態から再開する。詳細は `docs/runbook.md`。
 
 ```bash

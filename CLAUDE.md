@@ -27,10 +27,12 @@ libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX �
 7. 秘密情報・外部コードの混入を疑う操作（clone、コピー）をする前に CONTRIBUTING.md のクリーンルーム方針を確認する。相手 AI（~/fuseki-shogi-ai）の内部は読まない（起動方法とオプションだけ）。
 
 ## 稼働中のランの扱い
-- 本体 L-S は `~/libra-run/ls`、搾取者 lx は `~/libra-run/lx` で常時稼働（2026-09-11 開始）。**勝手に止めない**。状態は `bin/libra status` / `bin/libra --run lx status`。
-- 設定変更は `config.toml` を編集して `bin/libra [--run lx] stop` → 終了確認 → `nohup setsid bin/libra [--run lx] run >> <state dir>/stdout.log 2>&1 &`。ネットの形（[net]）は変えない（変えるなら新しい run-id）。
-- ls は `[auto]` で 24 時間ごとに archive → 自己評価 100 局 → 外部計測 10 局を別プロセスで回す（docs/runbook.md §6）。結果は管理コンソールの Elo / 対外対局タブと `~/libra-run/ls/eval`・`matches`。
-- GPU を使う計測（速度比較など）は `bin/libra pause` してから行い、終わったら `resume`。長い GPU 作業（検証対局・評価）は共有のまま回してよいが、局/日が落ちる旨を measurements.md に書く。
+**ランの操作と監視はユーザーが管理コンソール（`libra-console.bat`）で行う。Claude は行わない（2026-09-12 のユーザーの決定。Claude の停止待ちの誤りで搾取者が 11 分止まったため）。**
+- **ランを止めない・起動しない**。`bin/libra stop` / `run` / `pause` / `resume` / `throttle` / `eval-now` / `match-now` を実行しない。設定ファイルの編集や実装は行い、**反映に要る停止と起動はユーザーに依頼する**（「コンソールの停止を押して、止まったら起動を押してください」と伝える）。
+- **監視しない**。バックグラウンドタスク・待機ループ・ポーリングで稼働状態やジョブの終了を待たない。状態が要るときは `bin/libra [--run lx] status` を 1 回読むだけにして、待たずに作業を終える。結果は次にユーザーから聞かれたときに読む。
+- 本体 L-S は `~/libra-run/ls`、搾取者 lx は `~/libra-run/lx` で常時稼働（2026-09-11 開始）。ネットの形（[net]）は変えない（変えるなら新しい run-id）。
+- ls は `[auto]` で 24 時間ごとに archive → 基準比の自己評価 100 局 → 外部計測 10 局を別プロセスで回す（docs/runbook.md §6）。結果は管理コンソールの Elo / 対外対局タブと `~/libra-run/ls/eval`・`matches`。
+- GPU を使う計測（速度比較など）はユーザーにコンソールから一時停止してもらってから行う。長い GPU 作業を共有のまま回したときは局/日が落ちる旨を measurements.md に書く。
 - 1 週間の局/日（9/18 ごろ）、2 週間ごとの 20 局計測、10 月中旬の基準値マッチ 20 局、12 月の 100 局は docs/libra-local.md §5 の予定に従う。
 - Windows 側の操作（デスクトップの bat、タスク スケジューラ「LibraShogi run」「LibraShogi run lx」）は docs/runbook.md §3。自動ログオンと GPU 電力上限は設定しない（ユーザーの決定）。
 
