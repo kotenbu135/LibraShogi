@@ -68,7 +68,11 @@ DEFAULTS: dict[str, Any] = {
             "metrics_minutes": 5},  # metrics.jsonl（進捗の時系列）の追記間隔
     # 自動計測（docs/runbook.md §6）: every_hours ごとにチェックポイントを archive に残し、直前の archive と対局させて Elo を鎖にする。
     # match_games > 0 なら外部エンジン（fuseki_usi_server.py）とも少数局を指す。どちらも別プロセスで GPU を共有する。
+    # anchor_*: 固定の基準ネットとの対局。連続世代どうしの Elo は伸びが測定幅（100 局で ±70 Elo）に埋もれ、
+    # 鎖にすると誤差が回数の平方根で積み上がる。基準との差は大きいままなので信号が残り、誤差も積み上がらない。
+    # 基準に対する勝率が anchor_rebaseline を超えたら基準を新しい世代に置き換え、それまでの差を offset に足す。
     "auto": {"enabled": False, "every_hours": 24.0, "eval_games": 100, "eval_sims": 96, "eval_concurrent": 64, "eval_threads": 4,
+             "chain_eval": True, "anchor_games": 100, "anchor_rebaseline": 0.85,
              "match_games": 10, "match_go": "movetime 1000", "match_opponent_opt": "Threads=2"},
 }
 

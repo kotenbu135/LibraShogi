@@ -115,7 +115,7 @@ def collect_evals(sd: StateDir) -> list[dict]:
         out.append({
             "file": p.name, "time": p.stat().st_mtime, "step_a": sa, "step_b": sb, "n": r.get("n"),
             "elo": r.get("elo_a_minus_b"), "ci95": r.get("elo_ci95"), "score_a": r.get("score_a"),
-            "seconds": r.get("seconds"), "auto": p.name.startswith("auto-"),
+            "seconds": r.get("seconds"), "auto": p.name.startswith(("auto-", "anchor-")),
         })
     out.sort(key=lambda e: (e["step_b"] if e["step_b"] is not None else -1, e["time"]))
     # 鎖: a→b の Elo（b − a = −elo_a_minus_b）を、a が直前の鎖の末尾と一致する限り足す
@@ -132,6 +132,21 @@ def collect_evals(sd: StateDir) -> list[dict]:
         else:
             e["cumulative"] = None
     return out
+
+
+def collect_anchor(sd: StateDir) -> list[dict]:
+    """eval/anchor.jsonl（基準ネットとの差の推移）。"""
+    p = sd.root / "eval" / "anchor.jsonl"
+    if not p.exists():
+        return []
+    rows = []
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    rows.sort(key=lambda r: r.get("t", 0))
+    return rows
 
 
 def collect_matches(sd: StateDir) -> list[dict]:
@@ -174,7 +189,7 @@ class AutoJobs:
     def _st(self) -> dict:
         """state["auto"]（load() で state が置き換わっても欠けたキーを補う）。"""
         st = self.state.setdefault("auto", {})
-        for k, v in (("last_archive", None), ("last_match", None), ("queue", []), ("history", []), ("running", None)):
+        for k, v in (("last_archive", None), ("last_match", None), ("queue", []), ("history", []), ("running", None), ("anchor", None)):
             st.setdefault(k, v)
         return st
 
@@ -197,8 +212,11 @@ class AutoJobs:
             st["last_archive"] = now
             if new is not None:
                 self.log(f"auto: archived {new.name}")
-                if prev:
+                anc_file = str((st.get("anchor") or {}).get("file") or "")
+                # 基準が直前の世代と同じなら比較が同一なので、基準の対局 1 回で鎖も兼ねる（collect_evals は anchor- も鎖に使う）
+                if prev and self.acfg.get("chain_eval", True) and str(prev[-1]) != anc_file:
                     self.enqueue_eval(prev[-1], new)
+                self.on_new_archive(new)
             if eval_now:
                 self.sd.clear_flag("EVAL_NOW")
         match_now = self.sd.flag("MATCH_NOW")
@@ -216,6 +234,60 @@ class AutoJobs:
                 "--threads", str(self.acfg.get("eval_threads", 4)), "--out", str(out)]
         self.state["auto"]["queue"].append({"kind": "eval", "args": args, "out": str(out)})
         self.log(f"auto: queued eval {a.name} vs {b.name}")
+
+    # -- 基準ネット（anchor） --
+    def on_new_archive(self, new: Path) -> None:
+        """基準が無ければこの世代を基準にし、あれば基準との対局を積む。"""
+        if int(self.acfg.get("anchor_games", 0)) <= 0:
+            return
+        st = self._st()
+        anc = st.get("anchor")
+        if not anc or not Path(anc.get("file", "")).exists():
+            st["anchor"] = {"file": str(new), "step": ckpt_step(new), "offset": 0.0, "since": time.time()}
+            self.log(f"auto: anchor = {new.name} (offset 0)")
+            return
+        if int(anc.get("step") or -1) == ckpt_step(new):
+            return
+        self.enqueue_anchor(Path(anc["file"]), new)
+
+    def enqueue_anchor(self, a: Path, b: Path) -> None:
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        out = self.sd.root / "eval" / f"anchor-{ts}-{ckpt_step(a)}-{ckpt_step(b)}.json"
+        args = ["eval", "--a", str(a), "--b", str(b), "--games", str(self.acfg.get("anchor_games", 100)),
+                "--sims", str(self.acfg.get("eval_sims", 96)), "--concurrent", str(self.acfg.get("eval_concurrent", 64)),
+                "--threads", str(self.acfg.get("eval_threads", 4)), "--out", str(out)]
+        self._st()["queue"].append({"kind": "anchor", "args": args, "out": str(out)})
+        self.log(f"auto: queued anchor {a.name} vs {b.name}")
+
+    def record_anchor(self, job: dict) -> None:
+        """基準との対局の結果を anchor.jsonl に 1 行足し、勝ちすぎていれば基準を置き換える。"""
+        st = self._st()
+        anc = st.get("anchor") or {}
+        try:
+            r = json.loads(Path(job["out"]).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            self.log(f"auto: anchor result unreadable: {e}")
+            return
+        if r.get("elo_a_minus_b") is None:
+            return
+        elo = -float(r["elo_a_minus_b"])  # 新しい世代が基準より何 Elo 上か
+        ci = r.get("elo_ci95") or [None, None]
+        lo = -float(ci[1]) if ci[1] is not None else None
+        hi = -float(ci[0]) if ci[0] is not None else None
+        offset = float(anc.get("offset", 0.0))
+        step_b = ckpt_step(r.get("b", "")) 
+        row = {"t": time.time(), "step": step_b, "n": r.get("n"), "score_new": round(1 - float(r.get("score_a", 0.5)), 4),
+               "anchor_step": anc.get("step"), "offset": round(offset, 1), "elo_vs_anchor": round(elo, 1),
+               "elo": round(offset + elo, 1),
+               "ci95": [round(offset + lo, 1) if lo is not None else None, round(offset + hi, 1) if hi is not None else None]}
+        with open(self.sd.root / "eval" / "anchor.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        self.log(f"auto: anchor step {anc.get('step')} vs {step_b}: {elo:+.1f} Elo (total {row['elo']:+.1f}, new wins {row['score_new']:.0%})")
+        if row["score_new"] >= float(self.acfg.get("anchor_rebaseline", 0.85)):
+            new_file = str(r.get("b", ""))
+            if Path(new_file).exists():
+                st["anchor"] = {"file": new_file, "step": step_b, "offset": round(offset + elo, 1), "since": time.time()}
+                self.log(f"auto: anchor -> step {step_b} (offset {st['anchor']['offset']:+.1f}; 基準に勝ちすぎたので置き換え)")
 
     def enqueue_match(self) -> None:
         ts = time.strftime("%Y%m%d-%H%M%S")
@@ -240,6 +312,8 @@ class AutoJobs:
             job = self.current or {}
             job["finished"] = time.time()
             job["rc"] = rc
+            if job.get("kind") == "anchor" and rc == 0:
+                self.record_anchor(job)
             st["history"] = (st["history"] + [job])[-20:]
             st["running"] = None
             self.log(f"auto: {job.get('kind')} finished rc={rc} ({job['finished'] - job.get('started', job['finished']):.0f}s)")

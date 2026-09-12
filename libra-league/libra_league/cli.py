@@ -200,17 +200,22 @@ def main(argv: list[str] | None = None) -> int:
             }
             if a.tail > 0 and sd.log.exists():
                 out["log_tail"] = sd.log.read_text(encoding="utf-8", errors="replace").splitlines()[-a.tail:]
+            from .config import load_config as _lc
+
+            _ac = _lc(sd.config_toml if sd.config_toml.exists() else None)["auto"]
+            out["auto_cfg"] = {"enabled": bool(_ac.get("enabled")), "every_hours": _ac.get("every_hours"),
+                               "eval_games": _ac.get("eval_games"), "anchor_games": _ac.get("anchor_games"),
+                               "match_games": _ac.get("match_games")}
             if a.history > 0:
-                from .auto import collect_evals, collect_matches, list_archives, load_metrics
+                from .auto import collect_anchor, collect_evals, collect_matches, list_archives, load_metrics
 
                 out["metrics"] = load_metrics(sd, a.history)
                 out["evals"] = collect_evals(sd)
+                out["anchor"] = collect_anchor(sd)
                 out["matches"] = collect_matches(sd)
                 out["archives"] = [{"step": s_, "file": p.name} for p in list_archives(sd) if (s_ := int(p.stem.split("_")[1])) is not None]
                 out["auto"] = state.get("auto") if state else None
-                from .config import load_config
-
-                out["auto_cfg"] = load_config(sd.config_toml if sd.config_toml.exists() else None)["auto"]
+                out["exploiter_state"] = state.get("exploiter") if state else None
             print(json.dumps(out, ensure_ascii=False))
             return 0
         if not st and not state:

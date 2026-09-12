@@ -48,6 +48,8 @@ $script:NextFetch = [datetime]::MinValue
 $script:NextHistory = [datetime]::MinValue
 $script:ShotDone = $false
 $script:Errors = @{}
+$script:Tip = New-Object System.Windows.Forms.ToolTip
+$script:Tip.AutoPopDelay = 12000
 
 function Format-Int($v) {
     if ($null -eq $v) { return "-" }
@@ -290,7 +292,7 @@ $script:Keys = @(
     @("gpd", "局/日（1 時間平均）"), @("measured", "局/日（実測）"), @("active", "同時局数"), @("elapsed", "稼働 / セッション局数"),
     @("results", "先手 / 引分 / 後手"), @("plies", "平均手数 / sims/手"), @("loss", "loss / policy / value"),
     @("lr", "lr / 学習 1 回"), @("gpu", "GPU メモリ"), @("ckpt", "最終チェックポイント"), @("exploiter", "対本体 勝率"), @("restarts", "再起動"),
-    @("elo", "自己評価 Elo（累積）"), @("match", "対外対局 勝率"), @("auto", "自動計測")
+    @("elo", "強さ（基準比 Elo）"), @("match", "対外対局 勝率"), @("auto", "自動計測")
 )
 function New-RunPanel([string]$run) {
     $g = New-Object System.Windows.Forms.GroupBox
@@ -355,7 +357,9 @@ function New-RunPanel([string]$run) {
     $log.BackColor = [System.Drawing.Color]::White
     $inner.Controls.Add($log, 0, 2)
 
-    $script:Ui[$run] = @{ vals = $vals; log = $log; buttons = ($bl + @($bt, $be, $bm)); throttle = $nt }
+    $script:Tip.SetToolTip($be, "次のチェックポイントで archive を作り、基準ネットと 100 局対局する")
+    $script:Tip.SetToolTip($bm, "次のチェックポイントで外部エンジンとの計測対局を積む")
+    $script:Ui[$run] = @{ vals = $vals; log = $log; buttons = ($bl + @($bt)); autoButtons = @($be, $bm); throttle = $nt }
     return $g
 }
 $col = 0
@@ -370,8 +374,8 @@ function Get-Range {
         default { return [datetime]::MinValue }
     }
 }
-function New-Series([string]$name, $color, [bool]$marker = $false) {
-    return @{ name = $name; color = $color; pts = (New-Object System.Collections.ArrayList); marker = $marker }
+function New-Series([string]$name, $color, [bool]$marker = $false, [bool]$dash = $false) {
+    return @{ name = $name; color = $color; pts = (New-Object System.Collections.ArrayList); marker = $marker; dash = $dash }
 }
 function Add-Pt($series, [datetime]$t, [double]$y, $lo = $null, $hi = $null, [string]$label = "") {
     [void]$series.pts.Add(@{ t = $t; y = $y; lo = $lo; hi = $hi; label = $label })
@@ -434,13 +438,14 @@ function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt
     $mid = $tmin.AddSeconds($span / 2)
     $g.DrawString($mid.ToString($fmt), $font, $gray, $left + $pw / 2 - 30, $h - $bottom + 4)
     $g.DrawString($tmax.ToString($fmt), $font, $gray, $w - $right - 70, $h - $bottom + 4)
-    $lx = $w - $right
+    $shown = @($series | Where-Object { @($_.pts | Where-Object { $_.t -ge $tmin }).Count -gt 0 })
     $legendW = 0
-    foreach ($s in $series) { $legendW += 22 + $g.MeasureString($s.name, $font).Width + 8 }
+    foreach ($s in $shown) { $legendW += 22 + $g.MeasureString($s.name, $font).Width + 8 }
     $lx = $w - $right - $legendW
-    foreach ($s in $series) {
+    foreach ($s in $shown) {
         $brush = New-Object System.Drawing.SolidBrush($s.color)
         $rp = New-Object System.Drawing.Pen($s.color, 2)
+        if ($s.dash) { $rp.DashStyle = [System.Drawing.Drawing2D.DashStyle]::Dash }
         $pts = New-Object System.Collections.ArrayList
         $last = $null
         foreach ($p in $s.pts) {
@@ -493,23 +498,29 @@ function Build-Series([string]$tab) {
             }
         }
         "Elo" {
-            $title = "自己評価 Elo の累積（archive 同士の対局を鎖でつなぐ。縦線は 1 回分の 95% 区間）"
-            $zero = $false
+            $title = "強さの推移（Elo。0 は乱数初期化のネット。実線は固定の基準との差、点線は前の世代との差を足した鎖）"
             $i = 0
             foreach ($r in $Runs) {
-                $s = New-Series $r (Run-Color $r $i) $true
+                $s = New-Series ($r + " 基準比") (Run-Color $r $i) $true
+                if ($script:Data.ContainsKey($r)) {
+                    foreach ($a in @($script:Data[$r].anchor)) {
+                        $lo = $null; $hi = $null
+                        if ($null -ne $a.ci95) { $lo = $a.ci95[0]; $hi = $a.ci95[1] }
+                        Add-Pt $s (From-Unix $a.t) ([double]$a.elo) $lo $hi ("step " + (Format-Int $a.step))
+                    }
+                }
+                $series += $s
+                $c = New-Series ($r + " 鎖") (Run-Color $r $i) $false $true
                 if ($script:Data.ContainsKey($r)) {
                     foreach ($e in @($script:Data[$r].evals)) {
                         if ($null -eq $e.cumulative) { continue }
-                        $lo = $null; $hi = $null
-                        # ci95 は a−b の区間。累積は b−a を足しているので、前回までの累積 + (−ci) が今回分の区間
-                        if ($null -ne $e.ci95) { $base = [double]$e.cumulative + [double]$e.elo; $lo = $base - [double]$e.ci95[1]; $hi = $base - [double]$e.ci95[0] }
-                        Add-Pt $s (From-Unix $e.time) ([double]$e.cumulative) $lo $hi ("step " + (Format-Int $e.step_b))
+                        Add-Pt $c (From-Unix $e.time) ([double]$e.cumulative)
                     }
                 }
-                $series += $s; $i++
+                $series += $c
+                $i++
             }
-            $note = "1 日 1 回 100 局（[auto]）。「今すぐ自己評価」で前倒し"
+            $note = "基準比は 1 日 1 回 100 局。基準に 85% 勝つと基準を置き換えて差を足す"
         }
         "対外対局" {
             $title = "外部エンジン（fuseki_usi_server.py = 方策ネット＋やねうら王/水匠5）との勝率"
@@ -625,6 +636,13 @@ function Update-Panel([string]$run, $obj) {
     $v.process.ForeColor = if (-not $running) { [System.Drawing.Color]::Firebrick } elseif ($flags -contains "PAUSE" -or $flags -contains "STOP") { [System.Drawing.Color]::DarkOrange } else { [System.Drawing.Color]::ForestGreen }
     $v.process.Font = New-Object System.Drawing.Font($form.Font, [System.Drawing.FontStyle]::Bold)
     foreach ($b in $u.buttons) { $b.Enabled = $true }
+    # 自動計測が無効な run では前倒しのボタンは効かない（フラグを消費するものが無い）ので押せなくする
+    $ac = $obj.auto_cfg
+    $autoOn = ($null -ne $ac -and $ac.enabled)
+    foreach ($b in $u.autoButtons) {
+        $b.Enabled = $autoOn
+        if (-not $autoOn) { $script:Tip.SetToolTip($b, "$run は自動計測が無効です（$($obj.root)/config.toml の [auto] enabled = true で使えます）") }
+    }
     $st = $obj.status
     if ($null -eq $st) {
         foreach ($k in $script:Keys) { if ($k[0] -ne "process") { $v[$k[0]].Text = "-" } }
@@ -657,7 +675,11 @@ function Update-Panel([string]$run, $obj) {
         $ck = From-Unix $obj.state.last_checkpoint
         $v.ckpt.Text = "{0}（{1}、step {2}）" -f $ck.ToString("MM/dd HH:mm:ss"), (Format-Ago $ck), (Format-Int $obj.state.step)
     }
-    $v.exploiter.Text = if ($null -ne $st.exploiter) { "{0:P1}（{1} 局）" -f [double]$st.exploiter.winrate, (Format-Int $st.exploiter.games) } else { "-" }
+    if ($null -ne $st.exploiter) {
+        $ex = $st.exploiter
+        $v.exploiter.Text = "{0:P1}（{1} 局、相手 step {2}{3}）" -f [double]$ex.winrate, (Format-Int $ex.games), (Format-Int $ex.main_step),
+            $(if ($null -ne $ex.refreshed_at) { "、作り直し " + (Format-Ago (From-Unix $ex.refreshed_at)) } else { "" })
+    } else { $v.exploiter.Text = "-" }
     $rs = @($st.restarts)
     $v.restarts.Text = if ($rs.Count -gt 0) { "{0} 回（最終 {1}）" -f $rs.Count, $rs[$rs.Count - 1] } else { "0 回" }
     if ($null -ne $obj.log_tail) {
@@ -667,10 +689,14 @@ function Update-Panel([string]$run, $obj) {
     }
     if ($script:Data.ContainsKey($run)) {
         $d = $script:Data[$run]
+        $anc = @($d.anchor)
         $chain = @(@($d.evals) | Where-Object { $null -ne $_.cumulative })
-        if ($chain.Count -gt 0) {
+        if ($anc.Count -gt 0) {
+            $la = $anc[$anc.Count - 1]
+            $v.elo.Text = "{0:+0.0;-0.0;0} [{1:+0;-0;0}, {2:+0;-0;0}]（基準 step {3} に {4:P0}、{5}）" -f [double]$la.elo, [double]$la.ci95[0], [double]$la.ci95[1], (Format-Int $la.anchor_step), [double]$la.score_new, (Format-Ago (From-Unix $la.t))
+        } elseif ($chain.Count -gt 0) {
             $le = $chain[$chain.Count - 1]
-            $v.elo.Text = "{0:+0.0;-0.0;0}（前回 {1:+0.0;-0.0;0} [{2:+0;-0;0}, {3:+0;-0;0}]、step {4}→{5}、{6}）" -f [double]$le.cumulative, (-[double]$le.elo), (-[double]$le.ci95[1]), (-[double]$le.ci95[0]), (Format-Int $le.step_a), (Format-Int $le.step_b), (Format-Ago (From-Unix $le.time))
+            $v.elo.Text = "鎖 {0:+0.0;-0.0;0}（前回 {1:+0.0;-0.0;0} [{2:+0;-0;0}, {3:+0;-0;0}]、step {4}→{5}、{6}）" -f [double]$le.cumulative, (-[double]$le.elo), (-[double]$le.ci95[1]), (-[double]$le.ci95[0]), (Format-Int $le.step_a), (Format-Int $le.step_b), (Format-Ago (From-Unix $le.time))
         } else { $v.elo.Text = "（まだ無い。archive {0} 個）" -f @($d.archives).Count }
         $ms = @($d.matches)
         if ($ms.Count -gt 0) {

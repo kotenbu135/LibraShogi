@@ -4,7 +4,7 @@ import json
 import sys
 import time
 
-from libra_league.auto import AutoJobs, append_metrics, archive_checkpoint, collect_evals, collect_matches, list_archives, load_metrics
+from libra_league.auto import AutoJobs, append_metrics, collect_anchor, archive_checkpoint, collect_evals, collect_matches, list_archives, load_metrics
 from libra_league.cli import main
 from libra_league.config import load_config
 from libra_league.state import StateDir
@@ -77,15 +77,17 @@ def test_autojobs_runs_subprocess(tmp_path):
     sd.set_flag("EVAL_NOW")
     jobs.on_checkpoint(c1, now=1000.0 + 1800)  # フラグで前倒し
     assert not sd.flag("EVAL_NOW") and len(list_archives(sd)) == 2
-    assert [j["kind"] for j in state["auto"]["queue"]] == ["match", "eval"]
+    # 最初の archive が基準になるので、2 個目は基準との対局 1 回だけ（鎖も兼ねる）
+    assert [j["kind"] for j in state["auto"]["queue"]] == ["match", "anchor"]
     for _ in range(200):
         jobs.poll()
         if not state["auto"]["queue"] and jobs.proc is None:
             break
         time.sleep(0.05)
     hist = state["auto"]["history"]
-    assert [h["kind"] for h in hist] == ["match", "eval"] and all(h["rc"] == 0 for h in hist)
+    assert [h["kind"] for h in hist] == ["match", "anchor"] and all(h["rc"] == 0 for h in hist)
     assert json.loads(open(hist[1]["out"]).read())["kind"] == "eval"
+    assert state["auto"]["anchor"]["step"] == 10  # 最初の archive が基準
     assert (sd.root / "auto.log").exists()
     jobs.stop()
 
@@ -101,3 +103,80 @@ def test_status_json_history(tmp_path, capsys):
     assert out["auto"]["last_archive"] == 1.0
     assert main(["--root", str(tmp_path), "--run", "x", "eval-now"]) == 0
     assert sd.flag("EVAL_NOW")
+
+
+def _anchor_jobs(tmp_path, **acfg):
+    """eval を「結果 JSON を書くだけ」の偽プロセスに差し替えた AutoJobs。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    fake = tmp_path / "fake_eval.py"
+    fake.write_text(
+        "import sys, json, pathlib\n"
+        "a = sys.argv[sys.argv.index('--a') + 1]; b = sys.argv[sys.argv.index('--b') + 1]\n"
+        "o = pathlib.Path(sys.argv[sys.argv.index('--out') + 1]); o.parent.mkdir(parents=True, exist_ok=True)\n"
+        "elo, score = float(pathlib.Path(b + '.elo').read_text()), float(pathlib.Path(b + '.score').read_text())\n"
+        "o.write_text(json.dumps({'a': a, 'b': b, 'n': 100, 'score_a': score, 'elo_a_minus_b': elo,\n"
+        "                         'elo_ci95': [elo - 70, elo + 70]}))\n")
+    cfg = load_config(None)
+    cfg["auto"].update({"enabled": True, "every_hours": 1.0, "match_games": 0, "chain_eval": False})
+    cfg["auto"].update(acfg)
+    state = {}
+    jobs = AutoJobs(sd, cfg, state, print, cmd_prefix=[sys.executable, str(fake)])
+    return sd, jobs, state
+
+
+def _archive(sd, jobs, step, now, elo=-100.0, score=0.3):
+    """step の世代を archive に足して on_checkpoint を呼ぶ。elo/score は「その世代を基準にしたときの結果」。"""
+    p = sd.checkpoints / f"ckpt_{step:09d}.pt"
+    p.write_bytes(b"x" * 8)
+    (sd.checkpoints / "archive").mkdir(parents=True, exist_ok=True)
+    (sd.checkpoints / "archive" / f"ckpt_{step:09d}.pt.elo").write_text(str(elo))
+    (sd.checkpoints / "archive" / f"ckpt_{step:09d}.pt.score").write_text(str(score))
+    jobs.on_checkpoint(p, now=now)
+    for _ in range(400):
+        jobs.poll()
+        if not jobs.state["auto"]["queue"] and jobs.proc is None:
+            return
+        time.sleep(0.05)
+    raise AssertionError("job did not finish")
+
+
+def test_anchor_chain_accumulates_offset_only_on_rebaseline(tmp_path):
+    sd, jobs, state = _anchor_jobs(tmp_path)
+    _archive(sd, jobs, 1000, 1000.0)  # 最初の世代が基準になる
+    assert state["auto"]["anchor"]["step"] == 1000 and state["auto"]["anchor"]["offset"] == 0.0
+    # 基準より 100 Elo 強く、勝率 70%: 基準は据え置き
+    _archive(sd, jobs, 2000, 1000.0 + 3600, elo=-100.0, score=0.3)
+    rows = collect_anchor(sd)
+    assert len(rows) == 1
+    assert rows[0]["step"] == 2000 and rows[0]["elo_vs_anchor"] == 100.0 and rows[0]["elo"] == 100.0
+    assert rows[0]["ci95"] == [30.0, 170.0] and rows[0]["anchor_step"] == 1000
+    assert state["auto"]["anchor"]["step"] == 1000
+    # 基準に 90% 勝つ世代: 基準を置き換えて差を offset に足す
+    _archive(sd, jobs, 3000, 1000.0 + 7200, elo=-380.0, score=0.1)
+    rows = collect_anchor(sd)
+    assert rows[-1]["elo"] == 380.0 and state["auto"]["anchor"] == {
+        "file": str(sd.checkpoints / "archive" / "ckpt_000003000.pt"), "step": 3000, "offset": 380.0,
+        "since": state["auto"]["anchor"]["since"]}
+    # 置き換え後は offset が足される
+    _archive(sd, jobs, 4000, 1000.0 + 10800, elo=-50.0, score=0.35)
+    rows = collect_anchor(sd)
+    assert rows[-1]["anchor_step"] == 3000 and rows[-1]["elo_vs_anchor"] == 50.0 and rows[-1]["elo"] == 430.0
+
+
+def test_anchor_doubles_as_chain_when_it_is_the_previous_generation(tmp_path):
+    sd, jobs, state = _anchor_jobs(tmp_path, chain_eval=True)
+    _archive(sd, jobs, 1000, 1000.0)                      # 基準になる
+    _archive(sd, jobs, 2000, 1000.0 + 3600, elo=-100.0)   # 基準 = 直前の世代 → 対局は 1 回だけ
+    assert [h["kind"] for h in state["auto"]["history"]] == ["anchor"]
+    ev = collect_evals(sd)
+    assert len(ev) == 1 and ev[0]["cumulative"] == 100.0  # 鎖にも使う
+    _archive(sd, jobs, 3000, 1000.0 + 7200, elo=-150.0)   # 基準は 1000 のまま → 鎖と基準で 2 回
+    assert [h["kind"] for h in state["auto"]["history"]][-2:] == ["eval", "anchor"]
+
+
+def test_anchor_disabled(tmp_path):
+    sd, jobs, state = _anchor_jobs(tmp_path, anchor_games=0)
+    _archive(sd, jobs, 1000, 1000.0)
+    _archive(sd, jobs, 2000, 1000.0 + 3600)
+    assert state["auto"]["anchor"] is None and collect_anchor(sd) == []

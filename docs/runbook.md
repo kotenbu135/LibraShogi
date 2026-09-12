@@ -69,7 +69,12 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 
 **進捗の時系列**: ランナーは `metrics.jsonl` に 5 分ごと（`run.metrics_minutes`）に 1 行追記する（step、局数、局/日、loss 系、終局内訳の累積カウンタ、搾取者成績、GPU）。管理コンソールの「学習」「終局内訳」「手数」タブはこれを差分で割合にして描く。
 
-**自動計測（`[auto]`、本体 ls のみ有効）**: `every_hours`（24）ごとにチェックポイントを `checkpoints/archive/` に残し、直前の archive と `libra eval`（`eval_games`=100 局、`eval_sims`=96）で対局させて Elo 差を出す。archive 同士の連続ペアの Elo を足したものが「自己評価 Elo（累積）」（起点は step 0 の乱数初期化ネット）。同じ周期で `libra match`（`match_games`=10 局、`match_go`="movetime 1000"、相手は fuseki_usi_server.py に `Threads=2`）も回す。どちらも別プロセス（`auto.log`）で GPU を共有し、結果は `eval/auto-*.json` と `matches/auto-*.summary.json`。前倒しは `libra eval-now` / `libra match-now`（フラグ EVAL_NOW / MATCH_NOW。次のチェックポイントで実行。コンソールの「今すぐ自己評価」「今すぐ対外対局」）。相手側は 41 手目以降を必ずやねうら王（水匠5 の評価関数）に中継するので「方策ネットだけの相手」は無い。ランナーを stop すると実行中のジョブは止め、再開後に積み直す。
+**自動計測（`[auto]`、本体 ls のみ有効）**: `every_hours`（24）ごとにチェックポイントを `checkpoints/archive/` に残し、`libra eval`（`eval_sims`=96）で 2 通りの対局をする。
+
+- **基準比（`anchor_games`=100、これが主）**: 固定の基準ネット（`state.json` の `auto.anchor`）と対局する。結果は `eval/anchor-*.json` と 1 行ずつの `eval/anchor.jsonl`（`elo` は基準の `offset` を足した値）。基準に `anchor_rebaseline`（0.85）以上勝ったら基準を新しい世代に置き換え、そこまでの差を `offset` に足す。連続世代どうしの差（1 日で +30 Elo 程度）は 100 局の測定幅 ±70 Elo に埋もれ、鎖にすると誤差が回数の平方根で積み上がるため、基準との大きな差で測る。
+- **鎖（`chain_eval`、補助）**: 直前の archive との差を足した累積。基準が直前の archive と同じときは同じ対局になるので 1 回で兼ねる。
+
+同じ周期で `libra match`（`match_games`=10 局、`match_go`="movetime 1000"、相手は fuseki_usi_server.py に `Threads=2`）も回す。どちらも別プロセス（`auto.log`）で GPU を共有し、結果は `eval/auto-*.json` と `matches/auto-*.summary.json`。前倒しは `libra eval-now` / `libra match-now`（フラグ EVAL_NOW / MATCH_NOW。次のチェックポイントで実行。コンソールの「今すぐ自己評価」「今すぐ対外対局」）。相手側は 41 手目以降を必ずやねうら王（水匠5 の評価関数）に中継するので「方策ネットだけの相手」は無い。ランナーを stop すると実行中のジョブは止め、再開後に積み直す。
 
 ## 7. 計測（外部エンジンとの対局）
 
