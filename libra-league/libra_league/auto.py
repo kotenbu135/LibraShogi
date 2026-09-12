@@ -184,6 +184,7 @@ class AutoJobs:
         self.cmd_prefix = cmd_prefix if cmd_prefix is not None else [sys.executable, "-m", "libra_league.cli", "--root", str(sd.root.parent), "--run", sd.root.name]
         self.proc: subprocess.Popen | None = None
         self.current: dict | None = None
+        self.suspended = False  # 停止・一時停止中は新しいジョブを起動しない（stop / resume）
         self._st()
 
     def _st(self) -> dict:
@@ -319,7 +320,7 @@ class AutoJobs:
             self.log(f"auto: {job.get('kind')} finished rc={rc} ({job['finished'] - job.get('started', job['finished']):.0f}s)")
             self.proc = None
             self.current = None
-        if not st["queue"]:
+        if not st["queue"] or self.suspended:
             return changed
         job = st["queue"].pop(0)
         job["started"] = time.time()
@@ -340,15 +341,25 @@ class AutoJobs:
         return True
 
     def stop(self) -> None:
+        """実行中のジョブを止めて積み直し、以後 poll では起動しない（ランナーの停止・一時停止）。
+
+        子は start_new_session=True なので、親の終了後に残ると GPU を使い続ける。積んだジョブは
+        state に残るので、resume か次の run で走る（docs/runbook.md §6）。
+        """
+        self.suspended = True
         if self.proc is not None and self.proc.poll() is None:
             self.proc.terminate()
             try:
                 self.proc.wait(10)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
-            self.log("auto: job terminated (runner stopping)")
+            self.log("auto: job terminated and requeued")
             if self.current:
                 self.state["auto"]["queue"].insert(0, {k: self.current[k] for k in ("kind", "args", "out")})
             self.state["auto"]["running"] = None
             self.proc = None
             self.current = None
+
+    def resume(self) -> None:
+        """一時停止から戻ったとき（積んであるジョブを再び起動できるようにする）。"""
+        self.suspended = False

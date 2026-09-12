@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """進捗の時系列・archive・自動ジョブ（libra_league.auto）。"""
 import json
+import os
 import sys
 import time
 
@@ -180,3 +181,44 @@ def test_anchor_disabled(tmp_path):
     _archive(sd, jobs, 1000, 1000.0)
     _archive(sd, jobs, 2000, 1000.0 + 3600)
     assert state["auto"]["anchor"] is None and collect_anchor(sd) == []
+
+
+def test_no_spawn_while_suspended(tmp_path):
+    """停止・一時停止中に新しいジョブを起動しない（積むのは良い。再開後に走る）。
+
+    ランナーは stop / pause でも checkpoint() を通り、その中で on_checkpoint → poll を呼ぶ。
+    ここで起動すると start_new_session=True の子が親の終了後も GPU を使い続ける。
+    """
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    fake = tmp_path / "fake.py"
+    fake.write_text("import sys, json, pathlib, time\ntime.sleep(30)\n")
+    cfg = load_config(None)
+    cfg["auto"].update({"enabled": True, "every_hours": 1.0, "match_games": 2})
+    state: dict = {}
+    jobs = AutoJobs(sd, cfg, state, lambda _m: None, cmd_prefix=[sys.executable, str(fake)])
+
+    # (1) 走っているジョブが無い状態で stop → checkpoint が積んだジョブを起動しない
+    jobs.stop()
+    c0 = sd.checkpoints / "ckpt_000000010.pt"
+    c0.write_bytes(b"a")
+    jobs.on_checkpoint(c0, now=1000.0)
+    assert [j["kind"] for j in state["auto"]["queue"]] == ["match"]
+    assert jobs.poll() is False and jobs.proc is None
+    assert [j["kind"] for j in state["auto"]["queue"]] == ["match"]  # 積んだまま残る
+
+    # (2) 再開すると走る
+    jobs.resume()
+    assert jobs.poll() is True and jobs.proc is not None
+    assert not state["auto"]["queue"] and state["auto"]["running"]["kind"] == "match"
+
+    # (3) 走っているジョブの途中で stop → 止めて積み直し、直後の poll でも再起動しない
+    pid = jobs.proc.pid
+    jobs.stop()
+    assert jobs.proc is None and [j["kind"] for j in state["auto"]["queue"]] == ["match"]
+    assert jobs.poll() is False and jobs.proc is None
+    try:
+        os.kill(pid, 0)
+        assert False, "子プロセスが残っている"
+    except (ProcessLookupError, PermissionError):
+        pass

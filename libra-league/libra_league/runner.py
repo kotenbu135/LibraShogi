@@ -311,6 +311,7 @@ class Runner:
             if self.sd.flag("PAUSE"):
                 if not self.paused:
                     self.paused = True
+                    self.auto.stop()  # 一時停止は GPU を空けるためのもの（実行中の計測も止めて積み直す）
                     self.checkpoint()
                     self.write_status()
                     torch.cuda.empty_cache() if self.device.type == "cuda" else None
@@ -322,6 +323,7 @@ class Runner:
                 continue
             if self.paused:
                 self.paused = False
+                self.auto.resume()
                 self.log("resume")
             # 自己対局
             finished = self.loop.round()
