@@ -1,19 +1,21 @@
 ﻿# SPDX-License-Identifier: Apache-2.0
 # Libra 管理コンソール（Windows 用 GUI）。
-# WSL 内の bin/libra を wsl.exe 経由で呼び、本体 ls と搾取者 lx の進捗・速度を表示し、
-# 一時停止 / 再開 / 停止 / 起動 / 同時局数の絞り込みを行う。デスクトップの bat と同じ操作を 1 画面にまとめたもの。
+# WSL 内の bin/libra を wsl.exe 経由で呼び、本体 ls と搾取者 lx の進捗・速度・強さの推移を表示し、
+# 一時停止 / 再開 / 停止 / 起動 / 同時局数の絞り込み / 自己評価・対外対局の前倒しを行う。
 # 起動: libra-console.bat（powershell -ExecutionPolicy Bypass -File libra-console.ps1）
 # 自動テスト: -Screenshot C:\path\shot.png で 1 回更新して画面を PNG に保存し終了する（要約を stdout に出す）。
+#             -Tab <タブ名> で保存時に表示するグラフを選ぶ。
 #             -Do "lx:pause" のようにボタンと同じ操作だけを GUI なしで実行して結果を出す。
 param(
     [string]$Distro = "Ubuntu-24.04",
     [string]$Libra = "/home/sakis/LibraShogi/bin/libra",
     [string[]]$Runs = @("ls", "lx"),
     [int]$IntervalSec = 15,
+    [int]$HistorySec = 300,
     [int]$LogLines = 8,
     [string]$Screenshot = "",
-    [string]$Do = "",
-    [int]$ChartHours = 24
+    [string]$Tab = "",
+    [string]$Do = ""
 )
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms
@@ -28,13 +30,16 @@ trap {
 $script:RunTitles = @{ ls = "ls  本体 L-S"; lx = "lx  搾取者" }
 $script:TaskNames = @{ ls = "LibraShogi run"; lx = "LibraShogi run lx" }
 $script:Colors = @{ ls = [System.Drawing.Color]::FromArgb(31, 119, 180); lx = [System.Drawing.Color]::FromArgb(255, 127, 14) }
+$script:Palette = @([System.Drawing.Color]::FromArgb(31, 119, 180), [System.Drawing.Color]::FromArgb(255, 127, 14), [System.Drawing.Color]::FromArgb(44, 160, 44), [System.Drawing.Color]::FromArgb(148, 103, 189), [System.Drawing.Color]::FromArgb(214, 39, 40))
 $script:HistDir = Join-Path $env:LOCALAPPDATA "LibraShogi"
 $script:HistFile = Join-Path $script:HistDir "console-history.csv"
-$script:Hist = @{}      # run -> ArrayList of [pscustomobject]@{t; games; step; gpd}
+$script:Hist = @{}      # run -> ArrayList（コンソール自身の観測: t, games, step, gpd。実測 局/日 に使う）
+$script:Data = @{}      # run -> status --history の結果（metrics, evals, matches, archives, auto, auto_cfg）
 $script:Pending = @{}   # run -> @{proc; out; err; started}
-$script:Last = @{}      # run -> parsed status object
-$script:Ui = @{}        # run -> @{vals=@{}; log=TextBox; buttons=@()}
+$script:Last = @{}      # run -> 直近の status オブジェクト
+$script:Ui = @{}        # run -> @{vals; log; buttons; throttle}
 $script:NextFetch = [datetime]::MinValue
+$script:NextHistory = [datetime]::MinValue
 $script:ShotDone = $false
 $script:Errors = @{}
 
@@ -46,15 +51,18 @@ function Format-Ago([datetime]$t) {
     $d = [datetime]::Now - $t
     if ($d.TotalMinutes -lt 1) { return ("{0:N0} 秒前" -f $d.TotalSeconds) }
     if ($d.TotalHours -lt 1) { return ("{0:N0} 分前" -f $d.TotalMinutes) }
-    return ("{0:N1} 時間前" -f $d.TotalHours)
+    if ($d.TotalDays -lt 2) { return ("{0:N1} 時間前" -f $d.TotalHours) }
+    return ("{0:N1} 日前" -f $d.TotalDays)
+}
+function From-Unix($sec) {
+    return [DateTimeOffset]::FromUnixTimeSeconds([long][double]$sec).LocalDateTime
 }
 
 # ---- WSL 呼び出し ----
 function Get-LibraArgs([string]$run, [string[]]$cmd) {
     return (@("-d", $Distro, "--", $Libra, "--run", $run) + $cmd) -join " "
 }
-function Invoke-Libra([string]$run, [string[]]$cmd) {
-    # 同期呼び出し（pause/resume/stop/throttle は 0.3 秒程度）。stdout+stderr を返す。
+function New-LibraProcess([string]$run, [string[]]$cmd) {
     $p = New-Object System.Diagnostics.Process
     $p.StartInfo.FileName = "wsl.exe"
     $p.StartInfo.Arguments = Get-LibraArgs $run $cmd
@@ -64,23 +72,22 @@ function Invoke-Libra([string]$run, [string[]]$cmd) {
     $p.StartInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
     $p.StartInfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
     $p.StartInfo.CreateNoWindow = $true
+    return $p
+}
+function Invoke-Libra([string]$run, [string[]]$cmd) {
+    # 同期呼び出し（pause/resume/stop/throttle/eval-now/match-now は 0.3 秒程度）。stdout+stderr を返す。
+    $p = New-LibraProcess $run $cmd
     [void]$p.Start()
     $out = $p.StandardOutput.ReadToEndAsync()
     $err = $p.StandardError.ReadToEndAsync()
     $p.WaitForExit()
     return (($out.Result + $err.Result).Trim())
 }
-function Start-Fetch([string]$run) {
+function Start-Fetch([string]$run, [bool]$withHistory) {
     if ($script:Pending.ContainsKey($run)) { return }
-    $p = New-Object System.Diagnostics.Process
-    $p.StartInfo.FileName = "wsl.exe"
-    $p.StartInfo.Arguments = Get-LibraArgs $run @("status", "--json", "--tail", "$LogLines")
-    $p.StartInfo.UseShellExecute = $false
-    $p.StartInfo.RedirectStandardOutput = $true
-    $p.StartInfo.RedirectStandardError = $true
-    $p.StartInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
-    $p.StartInfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
-    $p.StartInfo.CreateNoWindow = $true
+    $cmd = @("status", "--json", "--tail", "$LogLines")
+    if ($withHistory) { $cmd += @("--history", "600") }
+    $p = New-LibraProcess $run $cmd
     [void]$p.Start()
     $script:Pending[$run] = @{ proc = $p; out = $p.StandardOutput.ReadToEndAsync(); err = $p.StandardError.ReadToEndAsync(); started = [datetime]::Now }
 }
@@ -101,6 +108,7 @@ function Complete-Fetches {
             if (-not $text) { throw "出力なし: " + $f.err.Result.Trim() }
             $obj = $text | ConvertFrom-Json
             $script:Last[$run] = $obj
+            if ($null -ne $obj.PSObject.Properties["metrics"]) { $script:Data[$run] = $obj }
             $script:Errors.Remove($run)
             Add-Sample $run $obj
             Update-Panel $run $obj
@@ -111,7 +119,7 @@ function Complete-Fetches {
     }
 }
 
-# ---- 履歴（速度の折れ線用。%LOCALAPPDATA%\LibraShogi\console-history.csv に追記） ----
+# ---- コンソール自身の観測履歴（実測 局/日 用。%LOCALAPPDATA%\LibraShogi\console-history.csv） ----
 function Load-History {
     foreach ($r in $Runs) { $script:Hist[$r] = New-Object System.Collections.ArrayList }
     if (-not (Test-Path $script:HistFile)) { return }
@@ -136,7 +144,6 @@ function Add-Sample([string]$run, $obj) {
     Add-Content -Path $script:HistFile -Value ("{0},{1},{2},{3},{4}" -f $run, $now.ToString("yyyy-MM-dd HH:mm:ss"), $s.games, $s.step, $s.gpd)
 }
 function Get-MeasuredRate([string]$run) {
-    # 直近 10 分以上前のサンプルからの実測 局/日（プロセスの再起動で games_total は減らない）
     $h = $script:Hist[$run]
     if ($h.Count -lt 2) { return $null }
     $last = $h[$h.Count - 1]
@@ -155,8 +162,8 @@ $form = New-Object System.Windows.Forms.Form
 $form.Text = "Libra 管理コンソール"
 $form.Font = New-Object System.Drawing.Font("Yu Gothic UI", 9)
 $form.StartPosition = "CenterScreen"
-$form.Size = New-Object System.Drawing.Size(1000, 940)
-$form.MinimumSize = New-Object System.Drawing.Size(820, 760)
+$form.Size = New-Object System.Drawing.Size(1040, 1000)
+$form.MinimumSize = New-Object System.Drawing.Size(860, 800)
 
 $root = New-Object System.Windows.Forms.TableLayoutPanel
 $root.Dock = "Fill"
@@ -164,16 +171,10 @@ $root.ColumnCount = 1
 $root.RowCount = 4
 [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("AutoSize")))
 [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("Percent", 100)))
-[void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("Absolute", 170)))
+[void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("Absolute", 240)))
 [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("AutoSize")))
 $form.Controls.Add($root)
 
-# ツールバー
-$bar = New-Object System.Windows.Forms.FlowLayoutPanel
-$bar.Dock = "Fill"
-$bar.AutoSize = $true
-$bar.WrapContents = $false
-$bar.Padding = New-Object System.Windows.Forms.Padding(4)
 function New-Button([string]$text, [scriptblock]$onClick, [int]$w = 96) {
     $b = New-Object System.Windows.Forms.Button
     $b.Text = $text
@@ -182,12 +183,19 @@ function New-Button([string]$text, [scriptblock]$onClick, [int]$w = 96) {
     $b.Add_Click($onClick)
     return $b
 }
-$bar.Controls.Add((New-Button "今すぐ更新" { $script:NextFetch = [datetime]::MinValue }))
-$lblIv = New-Object System.Windows.Forms.Label
-$lblIv.Text = "更新間隔(秒)"
-$lblIv.AutoSize = $true
-$lblIv.Margin = New-Object System.Windows.Forms.Padding(12, 8, 2, 0)
-$bar.Controls.Add($lblIv)
+function New-Label([string]$text, [int]$left = 12) {
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $text; $l.AutoSize = $true
+    $l.Margin = New-Object System.Windows.Forms.Padding($left, 8, 2, 0)
+    return $l
+}
+
+# ツールバー
+$bar = New-Object System.Windows.Forms.FlowLayoutPanel
+$bar.Dock = "Fill"; $bar.AutoSize = $true; $bar.WrapContents = $true
+$bar.Padding = New-Object System.Windows.Forms.Padding(4)
+$bar.Controls.Add((New-Button "今すぐ更新" { $script:NextFetch = [datetime]::MinValue; $script:NextHistory = [datetime]::MinValue }))
+$bar.Controls.Add((New-Label "更新間隔(秒)"))
 $numIv = New-Object System.Windows.Forms.NumericUpDown
 $numIv.Minimum = 5; $numIv.Maximum = 600; $numIv.Value = [Math]::Max(5, $IntervalSec); $numIv.Width = 60
 $numIv.Margin = New-Object System.Windows.Forms.Padding(0, 4, 12, 0)
@@ -195,6 +203,22 @@ $bar.Controls.Add($numIv)
 $bar.Controls.Add((New-Button "全部 一時停止" { Invoke-All @("pause") } 110))
 $bar.Controls.Add((New-Button "全部 再開" { Invoke-All @("resume") }))
 $bar.Controls.Add((New-Button "全部 停止" { if (Confirm-Action "両方の run に STOP を送ります（チェックポイントを書いて終了。再起動前の手順）。よろしいですか？") { Invoke-All @("stop") } }))
+$bar.Controls.Add((New-Label "グラフの期間" 24))
+$cmbRange = New-Object System.Windows.Forms.ComboBox
+$cmbRange.DropDownStyle = "DropDownList"; $cmbRange.Width = 90
+[void]$cmbRange.Items.AddRange(@("6 時間", "24 時間", "7 日", "全部"))
+$cmbRange.SelectedIndex = 1
+$cmbRange.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
+$cmbRange.Add_SelectedIndexChanged({ $tabs.Invalidate($true) })
+$bar.Controls.Add($cmbRange)
+$bar.Controls.Add((New-Label "学習・統計の run" 8))
+$cmbRun = New-Object System.Windows.Forms.ComboBox
+$cmbRun.DropDownStyle = "DropDownList"; $cmbRun.Width = 60
+[void]$cmbRun.Items.AddRange($Runs)
+$cmbRun.SelectedIndex = 0
+$cmbRun.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
+$cmbRun.Add_SelectedIndexChanged({ $tabs.Invalidate($true) })
+$bar.Controls.Add($cmbRun)
 $root.Controls.Add($bar, 0, 0)
 
 # run ごとのパネル
@@ -210,7 +234,8 @@ $script:Keys = @(
     @("process", "状態"), @("updated", "status 更新"), @("step", "step / 世代"), @("games_total", "総局数"),
     @("gpd", "局/日（1 時間平均）"), @("measured", "局/日（実測）"), @("active", "同時局数"), @("elapsed", "稼働 / セッション局数"),
     @("results", "先手 / 引分 / 後手"), @("plies", "平均手数 / sims/手"), @("loss", "loss / policy / value"),
-    @("lr", "lr / 学習 1 回"), @("gpu", "GPU メモリ"), @("ckpt", "最終チェックポイント"), @("exploiter", "対本体 勝率"), @("restarts", "再起動")
+    @("lr", "lr / 学習 1 回"), @("gpu", "GPU メモリ"), @("ckpt", "最終チェックポイント"), @("exploiter", "対本体 勝率"), @("restarts", "再起動"),
+    @("elo", "自己評価 Elo（累積）"), @("match", "対外対局 勝率"), @("auto", "自動計測")
 )
 function New-RunPanel([string]$run) {
     $g = New-Object System.Windows.Forms.GroupBox
@@ -238,10 +263,10 @@ function New-RunPanel([string]$run) {
     foreach ($k in $script:Keys) {
         $lk = New-Object System.Windows.Forms.Label
         $lk.Text = $k[1]; $lk.AutoSize = $true; $lk.ForeColor = [System.Drawing.Color]::DimGray
-        $lk.Margin = New-Object System.Windows.Forms.Padding(2, 3, 2, 3)
+        $lk.Margin = New-Object System.Windows.Forms.Padding(2, 1, 2, 1)
         $lv = New-Object System.Windows.Forms.Label
         $lv.Text = "-"; $lv.AutoSize = $true
-        $lv.Margin = New-Object System.Windows.Forms.Padding(2, 3, 2, 3)
+        $lv.Margin = New-Object System.Windows.Forms.Padding(2, 1, 2, 1)
         $grid.Controls.Add($lk, 0, $row); $grid.Controls.Add($lv, 1, $row)
         $vals[$k[0]] = $lv
         $row++
@@ -250,20 +275,22 @@ function New-RunPanel([string]$run) {
 
     $btns = New-Object System.Windows.Forms.FlowLayoutPanel
     $btns.Dock = "Fill"; $btns.AutoSize = $true; $btns.WrapContents = $true
-    $btns.Margin = New-Object System.Windows.Forms.Padding(0, 6, 0, 6)
+    $btns.Margin = New-Object System.Windows.Forms.Padding(0, 4, 0, 4)
     $bl = @()
-    $bl += New-Button "一時停止" { Invoke-Run $run @("pause") }.GetNewClosure() 80
-    $bl += New-Button "再開" { Invoke-Run $run @("resume") }.GetNewClosure() 60
-    $bl += New-Button "停止" { if (Confirm-Action "$run に STOP を送ります（チェックポイントを書いて終了）。よろしいですか？") { Invoke-Run $run @("stop") } }.GetNewClosure() 60
-    $bl += New-Button "起動" { Start-Run $run }.GetNewClosure() 60
-    $lt = New-Object System.Windows.Forms.Label
-    $lt.Text = "絞る(局)"; $lt.AutoSize = $true; $lt.Margin = New-Object System.Windows.Forms.Padding(10, 8, 2, 0)
+    $bl += New-Button "一時停止" { Invoke-Run $run @("pause") }.GetNewClosure() 76
+    $bl += New-Button "再開" { Invoke-Run $run @("resume") }.GetNewClosure() 56
+    $bl += New-Button "停止" { if (Confirm-Action "$run に STOP を送ります（チェックポイントを書いて終了）。よろしいですか？") { Invoke-Run $run @("stop") } }.GetNewClosure() 56
+    $bl += New-Button "起動" { Start-Run $run }.GetNewClosure() 56
+    $lt = New-Label "絞る(局)" 8
     $nt = New-Object System.Windows.Forms.NumericUpDown
-    $nt.Minimum = 0; $nt.Maximum = 4096; $nt.Value = 0; $nt.Width = 64
+    $nt.Minimum = 0; $nt.Maximum = 4096; $nt.Value = 0; $nt.Width = 60
     $nt.Margin = New-Object System.Windows.Forms.Padding(0, 4, 2, 0)
-    $bt = New-Button "適用" { Invoke-Run $run @("throttle", "--games", [string][int]$nt.Value) }.GetNewClosure() 56
+    $bt = New-Button "適用" { Invoke-Run $run @("throttle", "--games", [string][int]$nt.Value) }.GetNewClosure() 52
+    $be = New-Button "今すぐ自己評価" { if (Confirm-Action "$run : 次のチェックポイント（10 分以内）で archive を作り、直前の archive と自己評価します（GPU を共有、約 10 分）。よろしいですか？") { Invoke-Run $run @("eval-now") } }.GetNewClosure() 110
+    $bm = New-Button "今すぐ対外対局" { if (Confirm-Action "$run : 次のチェックポイント（10 分以内）で外部エンジンとの計測対局を積みます（GPU と CPU を共有、10 局で 15 分程度）。よろしいですか？") { Invoke-Run $run @("match-now") } }.GetNewClosure() 110
     foreach ($b in $bl) { $btns.Controls.Add($b) }
     $btns.Controls.Add($lt); $btns.Controls.Add($nt); $btns.Controls.Add($bt)
+    $btns.Controls.Add($be); $btns.Controls.Add($bm)
     $inner.Controls.Add($btns, 0, 1)
 
     $log = New-Object System.Windows.Forms.TextBox
@@ -273,58 +300,246 @@ function New-RunPanel([string]$run) {
     $log.BackColor = [System.Drawing.Color]::White
     $inner.Controls.Add($log, 0, 2)
 
-    $script:Ui[$run] = @{ vals = $vals; log = $log; buttons = ($bl + @($bt)); throttle = $nt }
+    $script:Ui[$run] = @{ vals = $vals; log = $log; buttons = ($bl + @($bt, $be, $bm)); throttle = $nt }
     return $g
 }
 $col = 0
 foreach ($r in $Runs) { $runsPanel.Controls.Add((New-RunPanel $r), $col, 0); $col++ }
 
-# 速度の折れ線
-$chart = New-Object System.Windows.Forms.Panel
-$chart.Dock = "Fill"
-$chart.BackColor = [System.Drawing.Color]::White
-$chart.BorderStyle = "FixedSingle"
-$chart.Add_Paint({
-    param($s, $e)
-    $g = $e.Graphics
+# ---- グラフ ----
+function Get-Range {
+    switch ($cmbRange.SelectedIndex) {
+        0 { return [datetime]::Now.AddHours(-6) }
+        1 { return [datetime]::Now.AddHours(-24) }
+        2 { return [datetime]::Now.AddDays(-7) }
+        default { return [datetime]::MinValue }
+    }
+}
+function New-Series([string]$name, $color, [bool]$marker = $false) {
+    return @{ name = $name; color = $color; pts = (New-Object System.Collections.ArrayList); marker = $marker }
+}
+function Add-Pt($series, [datetime]$t, [double]$y, $lo = $null, $hi = $null, [string]$label = "") {
+    [void]$series.pts.Add(@{ t = $t; y = $y; lo = $lo; hi = $hi; label = $label })
+}
+function Run-Color([string]$run, [int]$i = 0) {
+    if ($script:Colors.ContainsKey($run)) { return $script:Colors[$run] }
+    return $script:Palette[$i % $script:Palette.Length]
+}
+function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt, [bool]$zeroBase, [string]$note) {
     $g.SmoothingMode = "AntiAlias"
-    $w = $s.ClientSize.Width; $h = $s.ClientSize.Height
-    $left = 70; $right = 10; $top = 30; $bottom = 22
+    $g.Clear([System.Drawing.Color]::White)
     $font = New-Object System.Drawing.Font("Yu Gothic UI", 8)
     $gray = [System.Drawing.Brushes]::Gray
-    $g.DrawString("局/日（1 時間平均）の推移  直近 $ChartHours 時間", $font, [System.Drawing.Brushes]::Black, 6, 3)
+    $black = [System.Drawing.Brushes]::Black
+    $left = 72; $right = 14; $top = 30; $bottom = 24
+    $g.DrawString($title, $font, $black, 6, 3)
+    $t0 = Get-Range
     $now = [datetime]::Now
-    $t0 = $now.AddHours(-$ChartHours)
-    $maxY = 1.0
-    foreach ($r in $Runs) { foreach ($p in $script:Hist[$r]) { if ($p.t -ge $t0 -and $p.gpd -gt $maxY) { $maxY = $p.gpd } } }
-    $maxY = $maxY * 1.1
-    $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::LightGray)
-    for ($i = 0; $i -le 4; $i++) {
-        $y = $top + ($h - $top - $bottom) * (1 - $i / 4)
-        $g.DrawLine($pen, $left, $y, $w - $right, $y)
-        $g.DrawString(("{0:N0}" -f ($maxY * $i / 4)), $font, $gray, 4, $y - 7)
-    }
-    $g.DrawString($t0.ToString("MM/dd HH:mm"), $font, $gray, $left, $h - $bottom + 4)
-    $g.DrawString($now.ToString("MM/dd HH:mm"), $font, $gray, $w - $right - 70, $h - $bottom + 4)
-    $lx = $left + 6
-    foreach ($r in $Runs) {
-        $color = if ($script:Colors.ContainsKey($r)) { $script:Colors[$r] } else { [System.Drawing.Color]::Green }
-        $rp = New-Object System.Drawing.Pen($color, 2)
-        $pts = New-Object System.Collections.ArrayList
-        foreach ($p in $script:Hist[$r]) {
+    $tmin = $null; $tmax = $now
+    $ymin = [double]::MaxValue; $ymax = [double]::MinValue
+    $n = 0
+    foreach ($s in $series) {
+        foreach ($p in $s.pts) {
             if ($p.t -lt $t0) { continue }
-            $x = $left + ($w - $left - $right) * (($p.t - $t0).TotalSeconds / ($now - $t0).TotalSeconds)
-            $y = $top + ($h - $top - $bottom) * (1 - $p.gpd / $maxY)
+            $n++
+            if ($null -eq $tmin -or $p.t -lt $tmin) { $tmin = $p.t }
+            $lo = if ($null -ne $p.lo) { [double]$p.lo } else { $p.y }
+            $hi = if ($null -ne $p.hi) { [double]$p.hi } else { $p.y }
+            if ($lo -lt $ymin) { $ymin = $lo }
+            if ($hi -gt $ymax) { $ymax = $hi }
+        }
+    }
+    if ($n -eq 0) {
+        $g.DrawString("（データなし）", $font, $gray, $left, $top + 10)
+        if ($note) { $g.DrawString($note, $font, $gray, $left, $top + 28) }
+        return
+    }
+    if ($t0 -gt [datetime]::MinValue) { $tmin = $t0 }
+    if (($tmax - $tmin).TotalSeconds -lt 600) { $tmin = $tmax.AddMinutes(-10) }
+    if ($zeroBase) { $ymin = [Math]::Min(0.0, $ymin); if ($ymax -le $ymin) { $ymax = $ymin + 1 } }
+    $pad = ($ymax - $ymin) * 0.1
+    if ($pad -le 0) { $pad = [Math]::Max(1.0, [Math]::Abs($ymax) * 0.1) }
+    $ymax += $pad
+    if (-not $zeroBase -or $ymin -lt 0) { $ymin -= $pad }
+    $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::LightGray)
+    $ph = $h - $top - $bottom; $pw = $w - $left - $right
+    for ($i = 0; $i -le 4; $i++) {
+        $y = $top + $ph * (1 - $i / 4.0)
+        $g.DrawLine($pen, $left, $y, $w - $right, $y)
+        $g.DrawString(($yfmt -f ($ymin + ($ymax - $ymin) * $i / 4.0)), $font, $gray, 4, $y - 7)
+    }
+    if ($ymin -lt 0 -and $ymax -gt 0) {
+        $y0 = $top + $ph * (1 - (0 - $ymin) / ($ymax - $ymin))
+        $g.DrawLine((New-Object System.Drawing.Pen([System.Drawing.Color]::DarkGray)), $left, $y0, $w - $right, $y0)
+    }
+    $span = ($tmax - $tmin).TotalSeconds
+    $fmt = if ($span -gt 3 * 86400) { "MM/dd" } else { "MM/dd HH:mm" }
+    $g.DrawString($tmin.ToString($fmt), $font, $gray, $left, $h - $bottom + 4)
+    $mid = $tmin.AddSeconds($span / 2)
+    $g.DrawString($mid.ToString($fmt), $font, $gray, $left + $pw / 2 - 30, $h - $bottom + 4)
+    $g.DrawString($tmax.ToString($fmt), $font, $gray, $w - $right - 70, $h - $bottom + 4)
+    $lx = $w - $right
+    $legendW = 0
+    foreach ($s in $series) { $legendW += 22 + $g.MeasureString($s.name, $font).Width + 8 }
+    $lx = $w - $right - $legendW
+    foreach ($s in $series) {
+        $brush = New-Object System.Drawing.SolidBrush($s.color)
+        $rp = New-Object System.Drawing.Pen($s.color, 2)
+        $pts = New-Object System.Collections.ArrayList
+        $last = $null
+        foreach ($p in $s.pts) {
+            if ($p.t -lt $tmin) { continue }
+            $x = $left + $pw * (($p.t - $tmin).TotalSeconds / $span)
+            $y = $top + $ph * (1 - ($p.y - $ymin) / ($ymax - $ymin))
             [void]$pts.Add((New-Object System.Drawing.PointF([single]$x, [single]$y)))
+            if ($null -ne $p.lo -and $null -ne $p.hi) {
+                $yl = $top + $ph * (1 - ([double]$p.lo - $ymin) / ($ymax - $ymin))
+                $yh = $top + $ph * (1 - ([double]$p.hi - $ymin) / ($ymax - $ymin))
+                $g.DrawLine((New-Object System.Drawing.Pen($s.color, 1)), [single]$x, [single]$yl, [single]$x, [single]$yh)
+            }
+            if ($s.marker) { $g.FillEllipse($brush, [single]($x - 3), [single]($y - 3), 6, 6) }
+            $last = @{ x = $x; y = $y; p = $p }
         }
         if ($pts.Count -ge 2) { $g.DrawLines($rp, [System.Drawing.PointF[]]$pts.ToArray()) }
-        elseif ($pts.Count -eq 1) { $g.FillEllipse((New-Object System.Drawing.SolidBrush($color)), $pts[0].X - 3, $pts[0].Y - 3, 6, 6) }
-        $g.FillRectangle((New-Object System.Drawing.SolidBrush($color)), $w - 160 + $lx - $left - 6, 6, 10, 10)
-        $g.DrawString($r, $font, [System.Drawing.Brushes]::Black, $w - 146 + $lx - $left - 6, 3)
-        $lx += 40
+        elseif ($pts.Count -eq 1) { $g.FillEllipse($brush, $pts[0].X - 3, $pts[0].Y - 3, 6, 6) }
+        if ($null -ne $last) {
+            $txt = $yfmt -f $last.p.y
+            if ($last.p.label) { $txt += " " + $last.p.label }
+            $sz = $g.MeasureString($txt, $font)
+            $tx = [Math]::Min($last.x + 4, $w - $right - $sz.Width)
+            $g.DrawString($txt, $font, $brush, [single]$tx, [single]($last.y - 16))
+        }
+        $g.FillRectangle($brush, [single]$lx, 6, 10, 10)
+        $g.DrawString($s.name, $font, $black, [single]($lx + 12), 3)
+        $lx += 22 + $g.MeasureString($s.name, $font).Width + 8
     }
-})
-$root.Controls.Add($chart, 0, 2)
+    if ($note) { $g.DrawString($note, $font, $gray, $left + 4, $top - 12) }
+}
+
+function Get-Metrics([string]$run) {
+    if ($script:Data.ContainsKey($run) -and $null -ne $script:Data[$run].metrics) { return @($script:Data[$run].metrics) }
+    return @()
+}
+function Build-Series([string]$tab) {
+    $series = @()
+    $note = ""
+    $yfmt = "{0:N0}"; $zero = $true; $title = $tab
+    $sel = [string]$cmbRun.SelectedItem
+    switch ($tab) {
+        "局/日" {
+            $title = "局/日（1 時間平均）の推移"
+            $i = 0
+            foreach ($r in $Runs) {
+                $s = New-Series $r (Run-Color $r $i)
+                foreach ($m in (Get-Metrics $r)) { if ($null -ne $m.gpd) { Add-Pt $s (From-Unix $m.t) ([double]$m.gpd) } }
+                if ($s.pts.Count -eq 0) { foreach ($p in $script:Hist[$r]) { Add-Pt $s $p.t $p.gpd } }
+                $series += $s; $i++
+            }
+        }
+        "Elo" {
+            $title = "自己評価 Elo の累積（archive 同士の対局を鎖でつなぐ。縦線は 1 回分の 95% 区間）"
+            $zero = $false
+            $i = 0
+            foreach ($r in $Runs) {
+                $s = New-Series $r (Run-Color $r $i) $true
+                if ($script:Data.ContainsKey($r)) {
+                    foreach ($e in @($script:Data[$r].evals)) {
+                        if ($null -eq $e.cumulative) { continue }
+                        $lo = $null; $hi = $null
+                        # ci95 は a−b の区間。累積は b−a を足しているので、前回までの累積 + (−ci) が今回分の区間
+                        if ($null -ne $e.ci95) { $base = [double]$e.cumulative + [double]$e.elo; $lo = $base - [double]$e.ci95[1]; $hi = $base - [double]$e.ci95[0] }
+                        Add-Pt $s (From-Unix $e.time) ([double]$e.cumulative) $lo $hi ("step " + (Format-Int $e.step_b))
+                    }
+                }
+                $series += $s; $i++
+            }
+            $note = "1 日 1 回 100 局（[auto]）。「今すぐ自己評価」で前倒し"
+        }
+        "対外対局" {
+            $title = "外部エンジン（fuseki_usi_server.py = 方策ネット＋やねうら王/水匠5）との勝率"
+            $yfmt = "{0:P0}"
+            $i = 0
+            foreach ($r in $Runs) {
+                $s = New-Series $r (Run-Color $r $i) $true
+                if ($script:Data.ContainsKey($r)) {
+                    foreach ($m in @($script:Data[$r].matches)) { if ($null -ne $m.winrate) { Add-Pt $s (From-Unix $m.time) ([double]$m.winrate) $null $null ("{0} 局 {1}" -f $m.n, $m.go) } }
+                }
+                $series += $s; $i++
+            }
+            $note = "計測のみ（相手専用の対策はしない）。1 日 10 局・movetime 1000"
+        }
+        "学習" {
+            $title = "学習の損失（$sel）"
+            $yfmt = "{0:N2}"; $zero = $false
+            $names = @("loss", "policy", "value", "v41"); $i = 0
+            foreach ($k in $names) {
+                $s = New-Series $k $script:Palette[$i]
+                foreach ($m in (Get-Metrics $sel)) { if ($null -ne $m.train -and $null -ne $m.train.$k) { Add-Pt $s (From-Unix $m.t) ([double]$m.train.$k) } }
+                $series += $s; $i++
+            }
+            $s = New-Series "policy_acc" $script:Palette[4]
+            foreach ($m in (Get-Metrics $sel)) { if ($null -ne $m.train -and $null -ne $m.train.policy_acc) { Add-Pt $s (From-Unix $m.t) ([double]$m.train.policy_acc) } }
+            $series += $s
+        }
+        "終局内訳" {
+            $title = "終局の内訳と先手勝率（$sel、5 分ごとの新規対局の割合）"
+            $yfmt = "{0:P0}"
+            $ru = New-Series "41 手目裁定" $script:Palette[0]; $ma = New-Series "詰み" $script:Palette[1]; $se = New-Series "先手勝ち" $script:Palette[2]; $dr = New-Series "引き分け" $script:Palette[3]
+            $prev = $null
+            foreach ($m in (Get-Metrics $sel)) {
+                if ($null -ne $prev -and $null -ne $m.engine -and $null -ne $prev.engine -and $m.engine.games -gt $prev.engine.games) {
+                    $dg = [double]($m.engine.games - $prev.engine.games)
+                    $t = From-Unix $m.t
+                    Add-Pt $ru $t (($m.engine.ruling41 - $prev.engine.ruling41) / $dg)
+                    Add-Pt $ma $t (($m.engine.no_legal_move - $prev.engine.no_legal_move) / $dg)
+                    Add-Pt $se $t (($m.engine.sente_wins - $prev.engine.sente_wins) / $dg)
+                    Add-Pt $dr $t (($m.engine.draws - $prev.engine.draws) / $dg)
+                }
+                $prev = $m
+            }
+            $series = @($ru, $ma, $se, $dr)
+        }
+        "手数" {
+            $title = "平均手数と sims/手（$sel、5 分ごと）"
+            $yfmt = "{0:N1}"
+            $pl = New-Series "平均手数" $script:Palette[0]; $sm = New-Series "sims/手" $script:Palette[1]
+            $prev = $null
+            foreach ($m in (Get-Metrics $sel)) {
+                if ($null -ne $prev -and $null -ne $m.engine -and $null -ne $prev.engine -and $m.engine.games -gt $prev.engine.games -and $m.engine.moves -gt $prev.engine.moves) {
+                    $t = From-Unix $m.t
+                    Add-Pt $pl $t (($m.engine.plies_sum - $prev.engine.plies_sum) / ($m.engine.games - $prev.engine.games))
+                    Add-Pt $sm $t (($m.engine.sims - $prev.engine.sims) / ($m.engine.moves - $prev.engine.moves))
+                }
+                $prev = $m
+            }
+            $series = @($pl, $sm)
+        }
+    }
+    return @{ title = $title; series = $series; yfmt = $yfmt; zero = $zero; note = $note }
+}
+
+$tabs = New-Object System.Windows.Forms.TabControl
+$tabs.Dock = "Fill"
+$script:TabNames = @("局/日", "Elo", "対外対局", "学習", "終局内訳", "手数")
+foreach ($name in $script:TabNames) {
+    $page = New-Object System.Windows.Forms.TabPage
+    $page.Text = $name
+    $panel = New-Object System.Windows.Forms.Panel
+    $panel.Dock = "Fill"
+    $panel.BackColor = [System.Drawing.Color]::White
+    $panel.Tag = $name
+    $panel.Add_Paint({
+        param($s, $e)
+        $b = Build-Series ([string]$s.Tag)
+        Draw-Chart $e.Graphics $s.ClientSize.Width $s.ClientSize.Height $b.title $b.series $b.yfmt $b.zero $b.note
+    })
+    $panel.Add_Resize({ param($s, $e) $s.Invalidate() })
+    $page.Controls.Add($panel)
+    [void]$tabs.TabPages.Add($page)
+}
+$tabs.Add_SelectedIndexChanged({ $tabs.SelectedTab.Controls[0].Invalidate() })
+if ($Tab) { $idx = [array]::IndexOf($script:TabNames, $Tab); if ($idx -ge 0) { $tabs.SelectedIndex = $idx } }
+$root.Controls.Add($tabs, 0, 2)
 
 # ステータス行
 $status = New-Object System.Windows.Forms.Label
@@ -346,10 +561,12 @@ function Update-Panel([string]$run, $obj) {
     $ptxt = if ($running) { "稼働中" } else { "停止" }
     if ($flags -contains "PAUSE") { $ptxt += "（一時停止中）" }
     if ($flags -contains "STOP") { $ptxt += "（停止処理中）" }
+    if ($flags -contains "EVAL_NOW") { $ptxt += "（自己評価 予約）" }
+    if ($flags -contains "MATCH_NOW") { $ptxt += "（対外対局 予約）" }
     if ($null -ne $obj.throttle) { $ptxt += "（絞り $($obj.throttle) 局）" }
     if (-not $obj.exists) { $ptxt = "run なし（$($obj.root)）" }
     $v.process.Text = $ptxt
-    $v.process.ForeColor = if (-not $running) { [System.Drawing.Color]::Firebrick } elseif ($flags.Count -gt 0) { [System.Drawing.Color]::DarkOrange } else { [System.Drawing.Color]::ForestGreen }
+    $v.process.ForeColor = if (-not $running) { [System.Drawing.Color]::Firebrick } elseif ($flags -contains "PAUSE" -or $flags -contains "STOP") { [System.Drawing.Color]::DarkOrange } else { [System.Drawing.Color]::ForestGreen }
     $v.process.Font = New-Object System.Drawing.Font($form.Font, [System.Drawing.FontStyle]::Bold)
     foreach ($b in $u.buttons) { $b.Enabled = $true }
     $st = $obj.status
@@ -381,7 +598,7 @@ function Update-Panel([string]$run, $obj) {
     }
     if ($null -ne $st.gpu) { $v.gpu.Text = "{0} MB 確保 / {1} MB 予約" -f $st.gpu.mem_alloc_mb, $st.gpu.mem_reserved_mb }
     if ($null -ne $obj.state -and $null -ne $obj.state.last_checkpoint) {
-        $ck = [DateTimeOffset]::FromUnixTimeSeconds([long][double]$obj.state.last_checkpoint).LocalDateTime
+        $ck = From-Unix $obj.state.last_checkpoint
         $v.ckpt.Text = "{0}（{1}、step {2}）" -f $ck.ToString("MM/dd HH:mm:ss"), (Format-Ago $ck), (Format-Int $obj.state.step)
     }
     $v.exploiter.Text = if ($null -ne $st.exploiter) { "{0:P1}（{1} 局）" -f [double]$st.exploiter.winrate, (Format-Int $st.exploiter.games) } else { "-" }
@@ -392,7 +609,28 @@ function Update-Panel([string]$run, $obj) {
         $u.log.SelectionStart = $u.log.Text.Length
         $u.log.ScrollToCaret()
     }
-    $chart.Invalidate()
+    if ($script:Data.ContainsKey($run)) {
+        $d = $script:Data[$run]
+        $chain = @(@($d.evals) | Where-Object { $null -ne $_.cumulative })
+        if ($chain.Count -gt 0) {
+            $le = $chain[$chain.Count - 1]
+            $v.elo.Text = "{0:+0.0;-0.0;0}（前回 {1:+0.0;-0.0;0} [{2:+0;-0;0}, {3:+0;-0;0}]、step {4}→{5}、{6}）" -f [double]$le.cumulative, (-[double]$le.elo), (-[double]$le.ci95[1]), (-[double]$le.ci95[0]), (Format-Int $le.step_a), (Format-Int $le.step_b), (Format-Ago (From-Unix $le.time))
+        } else { $v.elo.Text = "（まだ無い。archive {0} 個）" -f @($d.archives).Count }
+        $ms = @($d.matches)
+        if ($ms.Count -gt 0) {
+            $lm = $ms[$ms.Count - 1]
+            $v.match.Text = "{0} / {1} 局（{2:P0}、{3}、{4}）" -f $lm.a_points, $lm.n, [double]$lm.winrate, $lm.go, (Format-Ago (From-Unix $lm.time))
+        } else { $v.match.Text = "（まだ無い）" }
+        $au = $d.auto; $ac = $d.auto_cfg
+        if ($null -eq $ac -or -not $ac.enabled) { $v.auto.Text = "無効（config.toml の [auto]）" }
+        elseif ($null -ne $au -and $null -ne $au.running) { $v.auto.Text = "{0} 実行中（{1}）" -f $au.running.kind, (Format-Ago (From-Unix $au.running.started)) }
+        else {
+            $q = if ($null -ne $au) { @($au.queue).Count } else { 0 }
+            $next = if ($null -ne $au -and $null -ne $au.last_archive) { (From-Unix $au.last_archive).AddHours([double]$ac.every_hours).ToString("MM/dd HH:mm") } else { "次のチェックポイント" }
+            $v.auto.Text = "待機（次の自己評価 {0}、待ち {1} 件、{2} 時間ごと）" -f $next, $q, $ac.every_hours
+        }
+    }
+    $tabs.SelectedTab.Controls[0].Invalidate()
 }
 function Update-StatusBar {
     $parts = @()
@@ -452,29 +690,36 @@ $timer.Add_Tick({
         Complete-Fetches
         if ($script:Pending.Count -eq 0 -and [datetime]::Now -ge $script:NextFetch) {
             $script:NextFetch = [datetime]::Now.AddSeconds([int]$numIv.Value)
-            foreach ($r in $Runs) { Start-Fetch $r }
+            $withHistory = ([datetime]::Now -ge $script:NextHistory)
+            if ($withHistory) { $script:NextHistory = [datetime]::Now.AddSeconds($HistorySec) }
+            foreach ($r in $Runs) { Start-Fetch $r $withHistory }
         }
         Update-StatusBar
-        if ($Screenshot -and -not $script:ShotDone -and $script:Pending.Count -eq 0 -and $script:Last.Count -eq $Runs.Count) {
+        if ($Screenshot -and -not $script:ShotDone -and $script:Pending.Count -eq 0 -and $script:Data.Count -eq $Runs.Count) {
             $script:ShotDone = $true
+            $tabs.SelectedTab.Controls[0].Refresh()
             $bmp = New-Object System.Drawing.Bitmap($form.Width, $form.Height)
             $form.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle(0, 0, $form.Width, $form.Height)))
             $bmp.Save($Screenshot, [System.Drawing.Imaging.ImageFormat]::Png)
             $bmp.Dispose()
-            [Console]::WriteLine("screenshot: " + $Screenshot)
-            foreach ($r in $Runs) { [Console]::WriteLine(("{0}: {1} flags={2} step={3} games={4} gpd={5}" -f $r, $script:Last[$r].process, (@($script:Last[$r].flags) -join "+"), $script:Last[$r].status.step, $script:Last[$r].status.games_total, $script:Last[$r].status.games_per_day_1h)) }
+            [Console]::WriteLine("screenshot: " + $Screenshot + " tab=" + $tabs.SelectedTab.Text)
+            foreach ($r in $Runs) {
+                $d = $script:Data[$r]
+                [Console]::WriteLine(("{0}: {1} flags={2} step={3} games={4} gpd={5} metrics={6} evals={7} matches={8} archives={9}" -f $r, $d.process, (@($d.flags) -join "+"), $d.status.step, $d.status.games_total, $d.status.games_per_day_1h, @($d.metrics).Count, @($d.evals).Count, @($d.matches).Count, @($d.archives).Count))
+            }
             $form.Close()
         }
     } catch {
         $status.Text = "内部エラー: " + $_.Exception.Message
         $status.ForeColor = [System.Drawing.Color]::Firebrick
+        if ($Screenshot) { [Console]::WriteLine("error: " + $_.Exception.Message + " " + $_.ScriptStackTrace); $form.Close() }
     }
 })
 $form.Add_Shown({ $timer.Start() })
 $form.Add_FormClosing({ $timer.Stop(); foreach ($f in $script:Pending.Values) { try { $f.proc.Kill() } catch {} } })
 
 if ($Do) {
-    # GUI なしでボタンと同じ呼び出しを実行する（例: -Do "lx:pause"、-Do "ls:throttle --games 256"）
+    # GUI なしでボタンと同じ呼び出しを実行する（例: -Do "lx:pause"、-Do "ls:throttle --games 256"、-Do "ls:eval-now"）
     $run, $rest = $Do.Split(":", 2)
     [Console]::WriteLine((Invoke-Libra $run ($rest.Trim().Split(" "))))
     exit 0

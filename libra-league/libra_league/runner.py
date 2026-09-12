@@ -14,6 +14,7 @@ import torch
 
 from libra_net.model import LibraNet, NetConfig
 
+from .auto import AutoJobs, append_metrics
 from .config import dump_toml, load_config
 from .replay import ReplayBuffer
 from .selfplay import SelfPlayLoop
@@ -46,6 +47,8 @@ class Runner:
         self.exploiter_stats = {"games": 0, "wins": 0, "draws": 0, "losses": 0}
         self.openings_mtime: float | None = None
         self.openings_checked = 0.0
+        self.auto = AutoJobs(sd, cfg, self.state, self.log)
+        self.last_metrics = 0.0
 
     # ---- 永続化 ----
     def log(self, msg: str) -> None:
@@ -88,14 +91,11 @@ class Runner:
         tmp2 = latest.with_suffix(".tmp")
         shutil.copyfile(path, tmp2)
         os.replace(tmp2, latest)
-        # 古いものを消す（archive_every_steps の倍数は残す）
+        # 古いものを消す（長期保管は auto が checkpoints/archive/ に写す）
         keep = self.cfg["run"]["keep_checkpoints"]
-        every = self.cfg["run"]["archive_every_steps"]
         cks = sorted(self.sd.checkpoints.glob("ckpt_*.pt"))
         for p in cks[:-keep]:
-            s = int(p.stem.split("_")[1])
-            if every <= 0 or s % every != 0:
-                p.unlink()
+            p.unlink()
         self.state["step"] = step
         self.state["chunk_index"] = self.replay.chunk_index
         self.state["games_total"] = self.replay.total_games
@@ -108,6 +108,9 @@ class Runner:
         self.log(f"checkpoint step={step} games={self.state['games_total']} ({time.time() - t0:.1f}s)")
         if self.cfg["run"].get("export_onnx", False):
             self.export_onnx(latest)
+        self.auto.on_checkpoint(path)
+        self.auto.poll()
+        self.sd.write_state(self.state)
 
     def export_onnx(self, ckpt: Path) -> None:
         """latest.pt → latest.onnx（原子的に置き換え）。失敗してもランは止めない。"""
@@ -198,6 +201,9 @@ class Runner:
             es["winrate"] = round((es["wins"] + 0.5 * es["draws"]) / max(1, es["games"]), 4)
             status["exploiter"] = es
         write_json_atomic(self.sd.status_json, status)
+        if now - self.last_metrics >= float(self.cfg["run"].get("metrics_minutes", 5)) * 60 and self.loop is not None and not self.paused:
+            append_metrics(self.sd, status)
+            self.last_metrics = now
 
     # ---- メインループ ----
     def run(self) -> None:
@@ -220,6 +226,7 @@ class Runner:
             # フラグ
             if self.sd.flag("STOP"):
                 self.log("STOP flag: checkpoint and exit")
+                self.auto.stop()
                 self.checkpoint()
                 self.write_status()
                 self.sd.clear_flag("STOP")
@@ -280,6 +287,7 @@ class Runner:
             self.reload_openings()
             if now - last_status > rr["status_seconds"]:
                 self.write_status()
+                self.auto.poll()
                 last_status = now
             if now - last_ck > rr["checkpoint_minutes"] * 60:
                 self.checkpoint()

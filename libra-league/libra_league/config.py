@@ -55,8 +55,13 @@ DEFAULTS: dict[str, Any] = {
         "mirror_prob": 0.5,
         "grad_clip": 1.0,
     },
-    "run": {"checkpoint_minutes": 10, "status_seconds": 30, "chunk_games": 100, "keep_checkpoints": 3, "archive_every_steps": 50000,
-            "export_onnx": True},  # チェックポイントごとに latest.onnx も書く（libra / libra.exe 用）
+    "run": {"checkpoint_minutes": 10, "status_seconds": 30, "chunk_games": 100, "keep_checkpoints": 3,
+            "export_onnx": True,   # チェックポイントごとに latest.onnx も書く（libra / libra.exe 用）
+            "metrics_minutes": 5},  # metrics.jsonl（進捗の時系列）の追記間隔
+    # 自動計測（docs/runbook.md §6）: every_hours ごとにチェックポイントを archive に残し、直前の archive と対局させて Elo を鎖にする。
+    # match_games > 0 なら外部エンジン（fuseki_usi_server.py）とも少数局を指す。どちらも別プロセスで GPU を共有する。
+    "auto": {"enabled": False, "every_hours": 24.0, "eval_games": 100, "eval_sims": 96, "eval_concurrent": 64, "eval_threads": 4,
+             "match_games": 10, "match_go": "movetime 1000", "match_opponent_opt": "Threads=2"},
 }
 
 

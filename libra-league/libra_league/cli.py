@@ -26,6 +26,9 @@ def main(argv: list[str] | None = None) -> int:
     p_st = sub.add_parser("status", help="状態を表示")
     p_st.add_argument("--json", action="store_true", help="機械可読な JSON を 1 行で出す（Windows の管理コンソール用）")
     p_st.add_argument("--tail", type=int, default=0, help="--json のとき log.txt の末尾 N 行も含める")
+    p_st.add_argument("--history", type=int, default=0, help="--json のとき metrics.jsonl（最大 N 点）、eval と match の結果一覧も含める")
+    sub.add_parser("eval-now", help="EVAL_NOW フラグ: 次のチェックポイントで archive に残し、直前の archive と自己評価する（[auto] が有効な run）")
+    sub.add_parser("match-now", help="MATCH_NOW フラグ: 次のチェックポイントで外部エンジンとの計測対局を積む（[auto] が有効な run）")
     p_ev = sub.add_parser("eval", help="2 つのチェックポイントを対局させて Elo 差と較正を出す")
     p_ev.add_argument("--a", required=True, help="チェックポイント A（.pt）")
     p_ev.add_argument("--b", required=True, help="チェックポイント B（.pt）")
@@ -92,6 +95,11 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "stop":
         sd.set_flag("STOP")
         print("STOP set")
+        return 0
+    if a.cmd in ("eval-now", "match-now"):
+        name = "EVAL_NOW" if a.cmd == "eval-now" else "MATCH_NOW"
+        sd.set_flag(name)
+        print(f"{name} set")
         return 0
     if a.cmd == "throttle":
         if a.games <= 0:
@@ -190,6 +198,17 @@ def main(argv: list[str] | None = None) -> int:
             }
             if a.tail > 0 and sd.log.exists():
                 out["log_tail"] = sd.log.read_text(encoding="utf-8", errors="replace").splitlines()[-a.tail:]
+            if a.history > 0:
+                from .auto import collect_evals, collect_matches, list_archives, load_metrics
+
+                out["metrics"] = load_metrics(sd, a.history)
+                out["evals"] = collect_evals(sd)
+                out["matches"] = collect_matches(sd)
+                out["archives"] = [{"step": s_, "file": p.name} for p in list_archives(sd) if (s_ := int(p.stem.split("_")[1])) is not None]
+                out["auto"] = state.get("auto") if state else None
+                from .config import load_config
+
+                out["auto_cfg"] = load_config(sd.config_toml if sd.config_toml.exists() else None)["auto"]
             print(json.dumps(out, ensure_ascii=False))
             return 0
         if not st and not state:

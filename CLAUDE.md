@@ -29,6 +29,7 @@ libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX �
 ## 稼働中のランの扱い
 - 本体 L-S は `~/libra-run/ls`、搾取者 lx は `~/libra-run/lx` で常時稼働（2026-09-11 開始）。**勝手に止めない**。状態は `bin/libra status` / `bin/libra --run lx status`。
 - 設定変更は `config.toml` を編集して `bin/libra [--run lx] stop` → 終了確認 → `nohup setsid bin/libra [--run lx] run >> <state dir>/stdout.log 2>&1 &`。ネットの形（[net]）は変えない（変えるなら新しい run-id）。
+- ls は `[auto]` で 24 時間ごとに archive → 自己評価 100 局 → 外部計測 10 局を別プロセスで回す（docs/runbook.md §6）。結果は管理コンソールの Elo / 対外対局タブと `~/libra-run/ls/eval`・`matches`。
 - GPU を使う計測（速度比較など）は `bin/libra pause` してから行い、終わったら `resume`。長い GPU 作業（検証対局・評価）は共有のまま回してよいが、局/日が落ちる旨を measurements.md に書く。
 - 1 週間の局/日（9/18 ごろ）、2 週間ごとの 20 局計測、10 月中旬の基準値マッチ 20 局、12 月の 100 局は docs/libra-local.md §5 の予定に従う。
 - Windows 側の操作（デスクトップの bat、タスク スケジューラ「LibraShogi run」「LibraShogi run lx」）は docs/runbook.md §3。自動ログオンと GPU 電力上限は設定しない（ユーザーの決定）。

@@ -63,9 +63,13 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 
 `~/libra-run/ls/config.toml` を編集し、`libra stop` → `libra run`。ネットの形（`[net]`）はチェックポイントと合わなくなるので変えない（変えるなら新しい run-id）。
 
-## 6. 監視
+## 6. 監視と自動計測
 
-`libra status` の `games/day(1h)` を docs/measurements.md に週 1 回記録する（Windows では管理コンソール `libra-console.bat` で常時見える。§3）。`libra status --json [--tail N]` は機械可読（`process`、`flags`、`throttle`、`state`、`status`、`log_tail`）。`status.json` の `engine` に終局理由の内訳（ruling41、mate、sennichite、perpetual、max_ply）がある。
+`libra status` の `games/day(1h)` を docs/measurements.md に週 1 回記録する（Windows では管理コンソール `libra-console.bat` で常時見える。§3）。`libra status --json [--tail N] [--history N]` は機械可読（`process`、`flags`、`throttle`、`state`、`status`、`log_tail`、`--history` で `metrics`・`evals`・`matches`・`archives`・`auto`・`auto_cfg`）。`status.json` の `engine` に終局理由の内訳（ruling41、mate、sennichite、perpetual、max_ply）がある。
+
+**進捗の時系列**: ランナーは `metrics.jsonl` に 5 分ごと（`run.metrics_minutes`）に 1 行追記する（step、局数、局/日、loss 系、終局内訳の累積カウンタ、搾取者成績、GPU）。管理コンソールの「学習」「終局内訳」「手数」タブはこれを差分で割合にして描く。
+
+**自動計測（`[auto]`、本体 ls のみ有効）**: `every_hours`（24）ごとにチェックポイントを `checkpoints/archive/` に残し、直前の archive と `libra eval`（`eval_games`=100 局、`eval_sims`=96）で対局させて Elo 差を出す。archive 同士の連続ペアの Elo を足したものが「自己評価 Elo（累積）」（起点は step 0 の乱数初期化ネット）。同じ周期で `libra match`（`match_games`=10 局、`match_go`="movetime 1000"、相手は fuseki_usi_server.py に `Threads=2`）も回す。どちらも別プロセス（`auto.log`）で GPU を共有し、結果は `eval/auto-*.json` と `matches/auto-*.summary.json`。前倒しは `libra eval-now` / `libra match-now`（フラグ EVAL_NOW / MATCH_NOW。次のチェックポイントで実行。コンソールの「今すぐ自己評価」「今すぐ対外対局」）。相手側は 41 手目以降を必ずやねうら王（水匠5 の評価関数）に中継するので「方策ネットだけの相手」は無い。ランナーを stop すると実行中のジョブは止め、再開後に積み直す。
 
 ## 7. 計測（外部エンジンとの対局）
 

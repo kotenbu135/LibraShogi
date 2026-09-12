@@ -95,7 +95,10 @@ S='C:\Users\sakis\libra\libra-console.ps1'
 powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot 'C:\Users\sakis\libra\console-shot.png'   # 1 回更新して PNG 保存、要約を表示して終了（約 5 秒）
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -Do 'lx:pause'      # ボタンと同じ呼び出しだけ実行（pause/resume/stop/throttle --games N）
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -Do 'lx:resume'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot 'C:\Users\sakis\libra\console-shot.png' -Tab 'Elo'   # 下のグラフのタブを選ぶ（局/日, Elo, 対外対局, 学習, 終局内訳, 手数）
 ```
+
+要約行には `metrics=`（metrics.jsonl の点数）`evals=` `matches=` `archives=` も出る。自動計測は `bin/libra eval-now` / `match-now`（次のチェックポイントで実行、`~/libra-run/ls/auto.log`）。
 
 PNG は `/mnt/c/Users/sakis/libra/console-shot.png` を Read で見る。`-Do` の出力は `bin/libra` の出力そのもの（`PAUSE set` など）。
 
