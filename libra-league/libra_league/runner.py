@@ -45,6 +45,8 @@ class Runner:
         self.last_train: dict = {}
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.exploiter_stats = {"games": 0, "wins": 0, "draws": 0, "losses": 0}
+        self.opponent_step: int | None = None
+        self.last_openings_write = 0.0
         self.openings_mtime: float | None = None
         self.openings_checked = 0.0
         self.auto = AutoJobs(sd, cfg, self.state, self.log)
@@ -143,7 +145,78 @@ class Runner:
         m.load_state_dict(sd["model"])
         assert self.loop is not None
         self.loop.set_opponent(m)
+        self.opponent_step = sd.get("step")
+        self.exploiter_state()["main_step"] = self.opponent_step
         self.log(f"exploiter: opponent {path} step {sd.get('step', '?')} params {m.n_params()/1e6:.1f}M (even slots: exploiter sente)")
+
+    # ---- 凍結相手の作り直しと布石の書き出し（搾取者の run だけ） ----
+    def exploiter_state(self) -> dict:
+        es = self.state.setdefault("exploiter", {})
+        for k, v in (("main_step", None), ("refreshed_at", None), ("from_chunk", 0), ("history", [])):
+            es.setdefault(k, v)
+        return es
+
+    def refresh_main(self) -> None:
+        """凍結相手を本体ランの最新で作り直す。今までの成績は履歴に移し、布石は空にして区切る。"""
+        ex = self.cfg.get("exploiter", {})
+        src = Path(str(ex.get("main_source") or "")).expanduser()
+        dst = Path(str(ex.get("main_ckpt") or "")).expanduser()
+        if not src.exists() or not str(dst):
+            self.log(f"exploiter: main_source not found: {src}")
+            return
+        es = self.exploiter_state()
+        if self.exploiter_stats["games"]:
+            g = max(1, self.exploiter_stats["games"])
+            es["history"] = (es["history"] + [{
+                "t": time.time(), "main_step": es.get("main_step"), "games": self.exploiter_stats["games"],
+                "winrate": round((self.exploiter_stats["wins"] + 0.5 * self.exploiter_stats["draws"]) / g, 4),
+            }])[-40:]
+        tmp = dst.with_suffix(".pt.tmp")
+        shutil.copyfile(src, tmp)
+        os.replace(tmp, dst)
+        self.exploiter_stats = {"games": 0, "wins": 0, "draws": 0, "losses": 0}
+        self.state.pop("exploiter_stats", None)
+        self.load_opponent()
+        es["main_step"] = self.opponent_step
+        es["refreshed_at"] = time.time()
+        es["from_chunk"] = self.replay.chunk_index
+        out = str(ex.get("openings_out") or "")
+        if out:
+            from .openings import write_openings
+
+            write_openings(Path(out).expanduser(), [], str(self.sd.root))  # 古い相手の穴なので本体には渡さない
+        self.last_openings_write = time.time()
+        self.sd.write_state(self.state)
+        self.log(f"exploiter: main refreshed from {src} (step {self.opponent_step}); stats and openings reset at chunk {es['from_chunk']}")
+
+    def maybe_refresh_main(self) -> None:
+        ex = self.cfg.get("exploiter", {})
+        hours = float(ex.get("refresh_hours", 0.0) or 0.0)
+        if hours <= 0 or not ex.get("main_source") or self.loop is None or self.loop.opponent is None:
+            return
+        last = self.exploiter_state().get("refreshed_at")
+        if last is not None and time.time() - float(last) < hours * 3600:
+            return
+        self.refresh_main()
+
+    def maybe_write_openings(self) -> None:
+        """搾取者が勝った布石を openings_out に書く（凍結相手を作り直してからの対局だけ）。"""
+        ex = self.cfg.get("exploiter", {})
+        out = str(ex.get("openings_out") or "")
+        mins = float(ex.get("openings_minutes", 0.0) or 0.0)
+        if not out or mins <= 0 or self.loop is None or self.loop.opponent is None:
+            return
+        now = time.time()
+        if now - self.last_openings_write < mins * 60:
+            return
+        self.last_openings_write = now
+        from .openings import openings_from_replay, write_openings
+
+        es = self.exploiter_state()
+        lines = openings_from_replay(self.sd.replay, int(ex.get("openings_chunks", 50)), int(ex.get("openings_moves", 12)),
+                                     min_chunk=int(es.get("from_chunk", 0)))
+        write_openings(Path(out).expanduser(), lines, str(self.sd.root))
+        self.log(f"exploiter: wrote {len(lines)} openings to {out} (chunks >= {es.get('from_chunk', 0)})")
 
     def reload_openings(self, force: bool = False) -> None:
         """cfg.selfplay.openings（openings.json）が更新されていればエンジンに渡す。"""
@@ -199,6 +272,10 @@ class Runner:
         if self.loop and self.loop.opponent is not None:
             es = dict(self.exploiter_stats)
             es["winrate"] = round((es["wins"] + 0.5 * es["draws"]) / max(1, es["games"]), 4)
+            xs = self.state.get("exploiter", {})
+            es["main_step"] = xs.get("main_step")
+            es["refreshed_at"] = xs.get("refreshed_at")
+            es["history"] = xs.get("history", [])[-10:]
             status["exploiter"] = es
         write_json_atomic(self.sd.status_json, status)
         if now - self.last_metrics >= float(self.cfg["run"].get("metrics_minutes", 5)) * 60 and self.loop is not None and not self.paused:
@@ -284,6 +361,8 @@ class Runner:
                 self.state["step"] = self.trainer.step_count
                 new_games = 0
             now = time.time()
+            self.maybe_refresh_main()
+            self.maybe_write_openings()
             self.reload_openings()
             if now - last_status > rr["status_seconds"]:
                 self.write_status()

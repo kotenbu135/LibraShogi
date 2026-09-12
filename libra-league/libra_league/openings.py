@@ -57,10 +57,17 @@ def load_openings(path: Path) -> list[list[int]]:
     return out
 
 
-def openings_from_replay(replay_dir: Path, last_chunks: int, k_moves: int) -> list[list[str]]:
+def openings_from_replay(replay_dir: Path, last_chunks: int, k_moves: int, min_chunk: int = 0) -> list[list[str]]:
+    """新しい側から last_chunks 個のチャンクを見る。min_chunk 未満のチャンク（凍結相手を作り直す前の対局）は使わない。"""
     import pickle
 
-    chunks = sorted(replay_dir.glob("chunk_*.pkl"))[-last_chunks:]
+    def idx(p: Path) -> int:
+        try:
+            return int(p.stem.split("_")[1])
+        except (IndexError, ValueError):
+            return -1
+
+    chunks = [p for p in sorted(replay_dir.glob("chunk_*.pkl")) if idx(p) >= min_chunk][-last_chunks:]
     games: deque = deque()
     for c in chunks:
         with open(c, "rb") as f:

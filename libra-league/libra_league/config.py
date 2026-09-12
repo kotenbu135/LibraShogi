@@ -37,8 +37,16 @@ DEFAULTS: dict[str, Any] = {
         "openings_prob": 0.1,      # 新規対局が openings から始まる確率
         "openings_reload_seconds": 600,
     },
-    # 搾取者（docs/libra-design.md §4.2）: main_ckpt を凍結した相手にして、自分の手だけを学習する
-    "exploiter": {"main_ckpt": "", "main_dtype": "float16"},
+    # 搾取者（docs/libra-design.md §4.2）: main_ckpt を凍結した相手にして、自分の手だけを学習する。
+    # 本体が強くなると凍結相手が古すぎて勝率が飽和するので、refresh_hours ごとに main_source で作り直し、
+    # 成績と布石をそこで区切る（収束判定「対本体勝率が頭打ち」は現行の本体に対してでないと意味がないため）。
+    "exploiter": {"main_ckpt": "", "main_dtype": "float16",
+                  "main_source": "",         # 作り直しの元（本体ランの checkpoints/latest.pt）。空なら作り直さない
+                  "refresh_hours": 0.0,      # 作り直しの間隔（0 で無効。初回は起動直後に行う）
+                  "openings_out": "",        # 見つけた布石の書き出し先（空なら書かない）。本体はこれを読む
+                  "openings_minutes": 60.0,
+                  "openings_chunks": 50,
+                  "openings_moves": 12},
     "train": {
         "batch_size": 1024,
         "lr": 2e-4,

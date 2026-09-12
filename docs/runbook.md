@@ -97,15 +97,10 @@ GPU（CUDA）で読ませたいときは「エンジン」→「実行ファイ�
 
 ## 搾取者リーグ（Main exploiter）
 
-`~/libra-run/lx/` に別 run を置く。`config.toml` の `[exploiter] main_ckpt` に凍結した本体（`main.pt`、L-S の latest.pt の写し）を指定すると、
-偶数枠は搾取者が先手・奇数枠は後手で本体と対局し、搾取者は自分の手だけを学習する（相手の手は方策ターゲットにしない）。
-`status` に搾取者の対本体勝率が出る（設計書 §4.2 の収束指標）。計算は本体の約 1/10（同時 64 局）。
+搾取者 lx（`~/libra-run/lx`、1.9M、64 局同時）は凍結した本体（`lx/main.pt`）と対局し、自分の手だけを学習する。偶数枠で搾取者が先手。
 
-```bash
-bin/libra --run lx run --config ~/libra-run/lx/lx.toml   # 初回。以後は bin/libra --run lx run
-bin/libra --run lx status
-bin/libra --run lx openings --chunks 50 --moves 12       # 搾取者が勝った布石 → ~/libra-run/lx/openings.json
-```
+**凍結相手の作り直し**: `[exploiter]` の `refresh_hours`（24）ごとに `main_source`（本体の `checkpoints/latest.pt`）を `main_ckpt` に写し、対本体成績を履歴（`state.json` の `exploiter.history`）へ移して 0 から数え直す。本体が強くなると古い相手への勝率が飽和し（2026-09-12 に 98.3%）、収束判定「対本体勝率が頭打ち」が意味を失うため。初回は起動直後に行う。
 
-本体（L-S）の `config.toml` の `[selfplay] openings = "~/libra-run/lx/openings.json"`, `openings_prob = 0.1` で、新規対局の 10% を
-その布石から始める（ファイルは 10 分ごとに読み直す。無ければ何もしない）。本体が強くなったら `main.pt` を差し替えて搾取者を回し直す。
+**布石**: `openings_minutes`（60）ごとに、作り直してからのチャンクだけから搾取者が勝った布石を `openings_out` に書く。本体 ls は `[selfplay] openings` でこれを読み、新規対局の 10% をそこから始める。相手を作り直した時点で布石は空にする（古い相手の穴なので本体に渡さない）。手動で書き出すときは `bin/libra --run lx openings`。
+
+状態は `bin/libra --run lx status`（`exploiter` に勝率、`main_step`、`refreshed_at`）。管理コンソールの「対本体 勝率」行にも出る。
