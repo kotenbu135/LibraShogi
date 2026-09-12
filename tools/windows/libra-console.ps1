@@ -416,6 +416,7 @@ function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt
     if ($pad -le 0) { $pad = [Math]::Max(1.0, [Math]::Abs($ymax) * 0.1) }
     $ymax += $pad
     if (-not $zeroBase -or $ymin -lt 0) { $ymin -= $pad }
+    if ($yfmt -eq "{0:P0}") { $ymax = [Math]::Min(1.0, $ymax); $ymin = [Math]::Max(0.0, $ymin) }
     $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::LightGray)
     $ph = $h - $top - $bottom; $pw = $w - $left - $right
     for ($i = 0; $i -le 4; $i++) {
