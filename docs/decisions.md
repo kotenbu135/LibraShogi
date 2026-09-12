@@ -39,3 +39,4 @@
 - 2026-09-12 進捗を 1 週間待たずに見る（ユーザーの希望: 過去の自分との Elo、外部エンジンとの勝率、学習指標の推移を管理コンソールで。GPU はほぼ使わない）: ランナーが 24 時間ごとに archive を残し直前の archive と 100 局（96 sims）で自己評価して Elo を鎖にする。外部計測は同じ周期で 10 局・movetime 1000・相手 Threads=2（計測のみ）。metrics.jsonl を 5 分ごとに追記。step の倍数で残す archive_every_steps は checkpoint が倍数に当たらず機能していなかったので時間基準に置き換えた。起点の archive は step 0（乱数初期化）。lx は無効。
 - 2026-09-12 外部計測の相手は fuseki_usi_server.py 一式（方策ネット＋やねうら王/水匠5 中継）。中継を外す設定は無く「方策ネットのみ」は選べないので、Threads=2 で軽くして毎日回す（ユーザーの選択「方策ネットのみ・1 手 1 秒」に最も近い形）。
 - 2026-09-12 `libra match` の既定モデルは latest.onnx（bin/libra-usi が C++ 版になったため。.pt を渡すとモデル読み込みに失敗して全局 resign になる。自動計測の初回 10 局はこれで 0 勝だったので計測として無効）。
+- 2026-09-12 「自分で指して体感」は desktop（天秤将棋GUI、`%LOCALAPPDATA%\天秤将棋GUI\tenbin-shogi-gui.exe`）に登録済みの Windows 版 libra.exe（CPU）で行う。管理コンソールの「desktop で対局」が latest.onnx を写してから起動する（desktop 側の改修不要。GPU で読む wsl.exe 経由は任意）。

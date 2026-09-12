@@ -98,6 +98,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -Do 'lx:resume'
 powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot 'C:\Users\sakis\libra\console-shot.png' -Tab 'Elo'   # 下のグラフのタブを選ぶ（局/日, Elo, 対外対局, 学習, 終局内訳, 手数）
 ```
 
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -UpdateDesktopModel   # desktop に登録した libra.exe の libra.onnx を latest.onnx に置き換える（desktop は起動しない）
+
 要約行には `metrics=`（metrics.jsonl の点数）`evals=` `matches=` `archives=` も出る。自動計測は `bin/libra eval-now` / `match-now`（次のチェックポイントで実行、`~/libra-run/ls/auto.log`）。
 
 PNG は `/mnt/c/Users/sakis/libra/console-shot.png` を Read で見る。`-Do` の出力は `bin/libra` の出力そのもの（`PAUSE set` など）。

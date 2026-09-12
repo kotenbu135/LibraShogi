@@ -81,11 +81,13 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 `match` は `~/libra-run/ls/matches/<時刻>.jsonl`（1 局 1 行）と `.summary.json`、USI ログ `.log` を書く。裁定は libra-sim（docs/rules.md）。相手のバージョンとハッシュは docs/protocol.md §5。
 GPU を L-S と共有するので、計測中は `libra pause` するか、局/日が落ちることを承知で回す。
 
-## 8. desktop で Libra を動かす（暫定・Python 版）
+## 8. desktop で Libra と指す（自分で体感する）
 
-「エンジン」→「実行ファイルを選んで追加」で `C:\Windows\System32\wsl.exe` を選び、引数に `-d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra-usi` を入れる。`usi` の申告から「布石にも対応」「GPU で読む」が自動で付く。`bin/libra-usi` は C++ 版 `build/libra-engine/libra`（ONNX Runtime、CUDA EP）を起動し、モデルは `~/libra-run/ls/checkpoints/latest.onnx`。学習中の最新にするには `bin/libra export`（latest.pt → latest.onnx）を実行する。
+desktop（天秤将棋GUI 0.5.0、`C:\Users\sakis\AppData\Local\天秤将棋GUI\tenbin-shogi-gui.exe`）には Windows 版 `libra.exe` を「LibraShogi 0.0.2」として登録済み（`%APPDATA%\com.fusekishogi.tenbin\engines\libra\engine\`。モデルは同じフォルダの `libra.onnx`、CPU 実行）。
 
-Windows 単体版: `C:\Users\sakis\libra\engine\libra.exe`（`onnxruntime.dll` と `libra.onnx` を同じ場所に置く。CPU 実行）。`libra-engine/README.md` のクロスビルド手順で作る。desktop にはこの exe を直接登録できる。
+最新のネットで指すには管理コンソールの「desktop で対局」を押す。WSL の `~/libra-run/ls/checkpoints/latest.onnx` をそのフォルダの `libra.onnx` に写し（`libra.onnx.json` に step と時刻を残す）、desktop を起動する。desktop が既に起動しているときはモデルだけ更新するので、エンジンを立て直す（desktop を開き直す）と新しいネットになる。対局画面でエンジンに「LibraShogi」を選ぶ。無人で行うには `powershell -File libra-console.ps1 -UpdateDesktopModel`。
+
+GPU（CUDA）で読ませたいときは「エンジン」→「実行ファイルを選んで追加」で `C:\Windows\System32\wsl.exe` を選び、引数に `-d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra-usi` を入れる（モデルは常に latest.onnx、学習中の GPU と共有）。
 
 ## 玉配置表（libra-scale）
 

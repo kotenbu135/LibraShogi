@@ -6,6 +6,7 @@
 # 自動テスト: -Screenshot C:\path\shot.png で 1 回更新して画面を PNG に保存し終了する（要約を stdout に出す）。
 #             -Tab <タブ名> で保存時に表示するグラフを選ぶ。
 #             -Do "lx:pause" のようにボタンと同じ操作だけを GUI なしで実行して結果を出す。
+#             -UpdateDesktopModel で desktop（天秤将棋GUI）に登録した libra.exe のモデルを最新の latest.onnx に置き換えて終了する。
 param(
     [string]$Distro = "Ubuntu-24.04",
     [string]$Libra = "/home/sakis/LibraShogi/bin/libra",
@@ -15,7 +16,12 @@ param(
     [int]$LogLines = 8,
     [string]$Screenshot = "",
     [string]$Tab = "",
-    [string]$Do = ""
+    [string]$Do = "",
+    [string]$RunRoot = "/home/sakis/libra-run",
+    [string]$ModelRun = "ls",
+    [string]$DesktopExe = "C:\Users\sakis\AppData\Local\天秤将棋GUI\tenbin-shogi-gui.exe",
+    [string]$DesktopEngineDir = (Join-Path $env:APPDATA "com.fusekishogi.tenbin\engines\libra\engine"),
+    [switch]$UpdateDesktopModel
 )
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms
@@ -219,7 +225,56 @@ $cmbRun.SelectedIndex = 0
 $cmbRun.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
 $cmbRun.Add_SelectedIndexChanged({ $tabs.Invalidate($true) })
 $bar.Controls.Add($cmbRun)
+$bar.Controls.Add((New-Button "desktop で対局" { Play-Desktop } 110))
+$lblModel = New-Label "" 4
+$lblModel.ForeColor = [System.Drawing.Color]::DimGray
+$bar.Controls.Add($lblModel)
 $root.Controls.Add($bar, 0, 0)
+
+# ---- desktop（天秤将棋GUI）で最新ネットと対局する ----
+function Get-DesktopModelInfo {
+    $j = Join-Path $DesktopEngineDir "libra.onnx.json"
+    if (Test-Path $j) { try { return (Get-Content $j -Raw -Encoding UTF8 | ConvertFrom-Json) } catch {} }
+    return $null
+}
+function Update-DesktopModelLabel {
+    $i = Get-DesktopModelInfo
+    $lblModel.Text = if ($null -ne $i) { "desktop のモデル: step {0}（{1}）" -f (Format-Int $i.step), $i.time } else { "desktop のモデル: 未更新（登録時のまま）" }
+}
+function Update-DesktopModel {
+    # WSL 側の latest.onnx を desktop に登録した libra.exe の横（libra.onnx）へ写す。手順は一時名 → 置き換え。
+    if (-not (Test-Path $DesktopEngineDir)) { throw "desktop のエンジン フォルダがありません: $DesktopEngineDir（desktop で libra.exe を登録してください。runbook §8）" }
+    $src = "\\wsl.localhost\$Distro\" + ($RunRoot.TrimStart("/") -replace "/", "\") + "\$ModelRun\checkpoints\latest.onnx"
+    if (-not (Test-Path $src)) { throw "latest.onnx が見つかりません: $src（WSL が起動していて run が動いているか確認）" }
+    $dst = Join-Path $DesktopEngineDir "libra.onnx"
+    $tmp = $dst + ".tmp"
+    Copy-Item -Path $src -Destination $tmp -Force
+    Move-Item -Path $tmp -Destination $dst -Force
+    $step = $null
+    $obj = Invoke-Libra $ModelRun @("status", "--json") | ConvertFrom-Json
+    if ($null -ne $obj.state) { $step = $obj.state.step }
+    $info = @{ step = $step; time = [datetime]::Now.ToString("yyyy-MM-dd HH:mm"); source = $src; size = (Get-Item $dst).Length }
+    ($info | ConvertTo-Json -Compress) | Set-Content -Path (Join-Path $DesktopEngineDir "libra.onnx.json") -Encoding UTF8
+    return $info
+}
+function Play-Desktop {
+    try {
+        $info = Update-DesktopModel
+        Update-DesktopModelLabel
+        $running = Get-Process -Name "tenbin-shogi-gui" -ErrorAction SilentlyContinue
+        if ($running) {
+            $status.Text = "desktop のモデルを step {0} に更新しました。desktop は起動中です。エンジンを立て直す（desktop を開き直すか、対局設定でエンジンを選び直す）と新しいネットで指します。" -f (Format-Int $info.step)
+        } else {
+            if (-not (Test-Path $DesktopExe)) { throw "desktop が見つかりません: $DesktopExe" }
+            Start-Process -FilePath $DesktopExe -WorkingDirectory (Split-Path $DesktopExe)
+            $status.Text = "desktop のモデルを step {0} に更新して起動しました。「対局」でエンジンに「LibraShogi」を選んでください。" -f (Format-Int $info.step)
+        }
+        $status.ForeColor = [System.Drawing.Color]::DimGray
+    } catch {
+        $status.Text = "desktop: " + $_.Exception.Message
+        $status.ForeColor = [System.Drawing.Color]::Firebrick
+    }
+}
 
 # run ごとのパネル
 $runsPanel = New-Object System.Windows.Forms.TableLayoutPanel
@@ -718,6 +773,11 @@ $timer.Add_Tick({
 $form.Add_Shown({ $timer.Start() })
 $form.Add_FormClosing({ $timer.Stop(); foreach ($f in $script:Pending.Values) { try { $f.proc.Kill() } catch {} } })
 
+if ($UpdateDesktopModel) {
+    $info = Update-DesktopModel
+    [Console]::WriteLine(("desktop model updated: step={0} size={1} dir={2}" -f $info.step, $info.size, $DesktopEngineDir))
+    exit 0
+}
 if ($Do) {
     # GUI なしでボタンと同じ呼び出しを実行する（例: -Do "lx:pause"、-Do "ls:throttle --games 256"、-Do "ls:eval-now"）
     $run, $rest = $Do.Split(":", 2)
@@ -725,4 +785,5 @@ if ($Do) {
     exit 0
 }
 Load-History
+Update-DesktopModelLabel
 [void]$form.ShowDialog()
