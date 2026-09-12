@@ -413,7 +413,7 @@ function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt
         $g.DrawString($s.name, $font, $black, [single]($lx + 12), 3)
         $lx += 22 + $g.MeasureString($s.name, $font).Width + 8
     }
-    if ($note) { $g.DrawString($note, $font, $gray, $left + 4, $top - 12) }
+    if ($note) { $g.DrawString($note, $font, $gray, [single](6 + $g.MeasureString($title, $font).Width + 12), 3) }
 }
 
 function Get-Metrics([string]$run) {

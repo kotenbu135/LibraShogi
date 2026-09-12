@@ -30,3 +30,13 @@ def test_status_json_with_run(tmp_path, capsys):
     # 従来の表示も壊れていない
     assert main(["--root", str(tmp_path), "--run", "x", "status"]) == 0
     assert "not running" in capsys.readouterr().out
+
+
+def test_default_match_model_prefers_onnx(tmp_path):
+    from libra_league.cli import default_match_model
+
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    assert default_match_model(sd).name == "latest.pt"
+    (sd.checkpoints / "latest.onnx").write_bytes(b"x")
+    assert default_match_model(sd).name == "latest.onnx"

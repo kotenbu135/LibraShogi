@@ -287,7 +287,8 @@ class Runner:
             self.reload_openings()
             if now - last_status > rr["status_seconds"]:
                 self.write_status()
-                self.auto.poll()
+                if self.auto.poll():
+                    self.sd.write_state(self.state)  # コンソールの「自動計測」欄が実行中/待機を追えるように
                 last_status = now
             if now - last_ck > rr["checkpoint_minutes"] * 60:
                 self.checkpoint()

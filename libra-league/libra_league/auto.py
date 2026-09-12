@@ -228,13 +228,15 @@ class AutoJobs:
         self.log("auto: queued match")
 
     # -- 実行 --
-    def poll(self) -> None:
-        """定期的に呼ぶ。走っているジョブの終了を回収し、待ちがあれば次を起動する。"""
+    def poll(self) -> bool:
+        """定期的に呼ぶ。走っているジョブの終了を回収し、待ちがあれば次を起動する。state を変えたら True。"""
         st = self._st()
+        changed = False
         if self.proc is not None:
             rc = self.proc.poll()
             if rc is None:
-                return
+                return False
+            changed = True
             job = self.current or {}
             job["finished"] = time.time()
             job["rc"] = rc
@@ -244,7 +246,7 @@ class AutoJobs:
             self.proc = None
             self.current = None
         if not st["queue"]:
-            return
+            return changed
         job = st["queue"].pop(0)
         job["started"] = time.time()
         logf = open(self.sd.root / "auto.log", "a", encoding="utf-8")
@@ -256,11 +258,12 @@ class AutoJobs:
         except OSError as e:
             self.log(f"auto: failed to start {job['kind']}: {e}")
             logf.close()
-            return
+            return True
         logf.close()
         self.current = job
         st["running"] = {"kind": job["kind"], "started": job["started"], "out": job["out"]}
         self.log(f"auto: started {job['kind']} (pid {self.proc.pid})")
+        return True
 
     def stop(self) -> None:
         if self.proc is not None and self.proc.poll() is None:
