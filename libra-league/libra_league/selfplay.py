@@ -86,9 +86,6 @@ class SelfPlayLoop:
     def stats(self) -> dict:
         return self.engine.stats()
 
-    def set_active(self, n: int) -> None:
-        self.engine.set_active(n)
-
 
 def mask_opponent_moves(g: dict, exploiter_is_sente: bool) -> dict:
     """搾取者の記録: 相手（本体）の手は方策ターゲットにしない（full=0）。3 手目（添字 0）は先手の手。"""

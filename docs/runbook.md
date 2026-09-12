@@ -12,7 +12,7 @@ docs/libra-local.md §7〜8 の実装。状態はすべて `~/libra-run/<run-id>
 | `checkpoints/ckpt_<step>.pt`, `latest.pt` | 10 分ごと。モデル・オプティマイザ・乱数状態・設定。直近 3 つと 50,000 ステップごとを残す |
 | `replay/chunk_<n>.pkl` | 100 局ごとの対局記録（学習用）。書き終えてから名前を確定する（書きかけは `.tmp`） |
 | `games/games_<n>.jsonl` | 同じ 100 局の棋譜（公開用、CC0）。1 局 1 行: `tokens`, `result`, `reason`, `plies`, `sfen41`, `v41` |
-| `PAUSE` / `STOP` / `THROTTLE` | フラグファイル。`libra pause/stop/throttle` が置き、ランナーが読む |
+| `PAUSE` / `STOP` / `EVAL_NOW` / `MATCH_NOW` | フラグファイル。`libra pause/stop/eval-now/match-now` が置き、ランナーが読む |
 | `run.lock` | 実行中の PID。二重起動を防ぐ |
 | `log.txt` | ランナーのログ |
 
@@ -23,14 +23,13 @@ docs/libra-local.md §7〜8 の実装。状態はすべて `~/libra-run/<run-id>
 ~/LibraShogi/bin/libra pause               # 現在のバッチを終えて待機（GPU メモリを解放）
 ~/LibraShogi/bin/libra resume
 ~/LibraShogi/bin/libra stop                # チェックポイントを書いて終了
-~/LibraShogi/bin/libra throttle --games 64 # 同時進行局数を絞る（0 で解除）
 ~/LibraShogi/bin/libra status
 ```
 
 `--run <id>` で run-id、`--root <dir>` で親ディレクトリを変えられる（既定 `~/libra-run/ls`）。
 `run --config path.toml` は初回だけ有効。
 
-Windows 側: `C:\Users\sakis\libra\` に `libra-run.bat`（本体 ls）/ `libra-run-lx.bat`（搾取者 lx）と、**ls と lx の両方に効く** `libra-pause.bat` / `libra-resume.bat` / `libra-stop.bat` / `libra-status.bat` / `libra-throttle.bat`。デスクトップに pause / resume / status / stop の写し。
+Windows 側: `C:\Users\sakis\libra\` に `libra-run.bat`（本体 ls）/ `libra-run-lx.bat`（搾取者 lx）と、**ls と lx の両方に効く** `libra-pause.bat` / `libra-resume.bat` / `libra-stop.bat` / `libra-status.bat`。デスクトップに pause / resume / status / stop の写し。
 
 ## 3. Windows Update で再起動しても続くようにする
 
@@ -56,7 +55,7 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 ## 4. 別作業でリソースを空けるとき
 
 - GPU を使う作業: デスクトップの `libra-pause.bat` → 終わったら `libra-resume.bat`
-- CPU だけ使う作業: `libra throttle --games 64`（ワーカーは `nice 10`）
+- CPU だけ使う作業: そのままで良い（ワーカーは `nice 10`）。GPU が要る作業は管理コンソールの「一時停止」
 - 数日止めても再開時のコストはゼロ
 
 ## 5. 設定を変えるとき
@@ -65,7 +64,7 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 
 ## 6. 監視と自動計測
 
-`libra status` の `games/day(1h)` を docs/measurements.md に週 1 回記録する（Windows では管理コンソール `libra-console.bat` で常時見える。§3）。`libra status --json [--tail N] [--history N]` は機械可読（`process`、`flags`、`throttle`、`state`、`status`、`log_tail`、`--history` で `metrics`・`evals`・`matches`・`archives`・`auto`・`auto_cfg`）。`status.json` の `engine` に終局理由の内訳（ruling41、mate、sennichite、perpetual、max_ply）がある。
+`libra status` の `games/day(1h)` を docs/measurements.md に週 1 回記録する（Windows では管理コンソール `libra-console.bat` で常時見える。§3）。`libra status --json [--tail N] [--history N]` は機械可読（`process`、`flags`、`state`、`status`、`log_tail`、`--history` で `metrics`・`evals`・`matches`・`archives`・`auto`・`auto_cfg`）。`status.json` の `engine` に終局理由の内訳（ruling41、mate、sennichite、perpetual、max_ply）がある。
 
 **進捗の時系列**: ランナーは `metrics.jsonl` に 5 分ごと（`run.metrics_minutes`）に 1 行追記する（step、局数、局/日、loss 系、終局内訳の累積カウンタ、搾取者成績、GPU）。管理コンソールの「学習」「終局内訳」「手数」タブはこれを差分で割合にして描く。
 

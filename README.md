@@ -31,7 +31,7 @@ python3 -m venv .venv && .venv/bin/pip install cmake ninja pybind11 pytest numpy
 export PATH=$PWD/.venv/bin:$PATH
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -Dpybind11_DIR=$(python -c "import pybind11;print(pybind11.get_cmake_dir())")
 cmake --build build && ctest --test-dir build/libra-sim --output-on-failure
-bin/libra run        # 自己対局と学習（~/libra-run/ls）。pause / resume / stop / throttle / status
+bin/libra run        # 自己対局と学習（~/libra-run/ls）。pause / resume / stop / status
 ```
 
 ## ライセンス

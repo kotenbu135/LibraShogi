@@ -32,7 +32,7 @@ def read_json(path: Path, default: Any = None) -> Any:
 
 
 class StateDir:
-    FLAGS = ("PAUSE", "STOP", "THROTTLE", "EVAL_NOW", "MATCH_NOW")
+    FLAGS = ("PAUSE", "STOP", "EVAL_NOW", "MATCH_NOW")
 
     def __init__(self, root: Path):
         self.root = root
@@ -62,15 +62,6 @@ class StateDir:
             (self.root / name).unlink()
         except FileNotFoundError:
             pass
-
-    def throttle_value(self) -> int | None:
-        p = self.root / "THROTTLE"
-        if not p.exists():
-            return None
-        try:
-            return int(p.read_text().strip())
-        except ValueError:
-            return None
 
     def read_state(self) -> dict:
         return read_json(self.state_json, {})

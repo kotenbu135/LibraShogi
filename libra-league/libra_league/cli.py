@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""`libra` コマンド: run / pause / resume / stop / throttle / status（docs/libra-local.md §7.2）。"""
+"""`libra` コマンド: run / pause / resume / stop / status（docs/libra-local.md §7.2）。
+
+同時進行局数を絞る `throttle` は廃止した（docs/decisions.md 2026-09-12）。負荷を落とすときは pause を使う。
+"""
 from __future__ import annotations
 
 import argparse
@@ -27,8 +30,6 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("pause", help="PAUSE フラグを置く。ワーカーは現在のバッチを終えて待機")
     sub.add_parser("resume", help="PAUSE フラグを消す")
     sub.add_parser("stop", help="STOP フラグを置く。チェックポイントを書いて終了")
-    p_th = sub.add_parser("throttle", help="同時進行局数を絞る")
-    p_th.add_argument("--games", type=int, required=True, help="同時進行局数（0 で解除）")
     p_st = sub.add_parser("status", help="状態を表示")
     p_st.add_argument("--json", action="store_true", help="機械可読な JSON を 1 行で出す（Windows の管理コンソール用）")
     p_st.add_argument("--tail", type=int, default=0, help="--json のとき log.txt の末尾 N 行も含める")
@@ -106,14 +107,6 @@ def main(argv: list[str] | None = None) -> int:
         name = "EVAL_NOW" if a.cmd == "eval-now" else "MATCH_NOW"
         sd.set_flag(name)
         print(f"{name} set")
-        return 0
-    if a.cmd == "throttle":
-        if a.games <= 0:
-            sd.clear_flag("THROTTLE")
-            print("THROTTLE cleared")
-        else:
-            sd.set_flag("THROTTLE", str(a.games))
-            print(f"THROTTLE {a.games}")
         return 0
     if a.cmd == "eval":
         import time
@@ -194,7 +187,6 @@ def main(argv: list[str] | None = None) -> int:
                 "exists": bool(st or state),
                 "process": "running" if running else "not running",
                 "flags": flags,
-                "throttle": sd.throttle_value(),
                 "state": {k: state.get(k) for k in ("step", "generation", "games_total", "last_checkpoint", "elapsed")} if state else None,
                 "status": st or None,
             }

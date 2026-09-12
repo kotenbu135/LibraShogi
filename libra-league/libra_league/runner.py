@@ -323,11 +323,6 @@ class Runner:
             if self.paused:
                 self.paused = False
                 self.log("resume")
-            th = self.sd.throttle_value()
-            want = min(sp["n_games"], max(1, th)) if th else sp["n_games"]
-            if self.loop.engine.active != want:
-                self.loop.set_active(want)
-                self.log(f"active games -> {want}")
             # 自己対局
             finished = self.loop.round()
             if finished:

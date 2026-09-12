@@ -32,8 +32,7 @@ def test_state_flags(tmp_path: Path):
     assert sd.flag("PAUSE")
     sd.clear_flag("PAUSE")
     assert not sd.flag("PAUSE")
-    sd.set_flag("THROTTLE", "64")
-    assert sd.throttle_value() == 64
+    assert not hasattr(sd, "throttle_value")  # 絞る機能は廃止（decisions.md 2026-09-12）
     sd.write_state({"a": 1})
     assert sd.read_state() == {"a": 1}
 

@@ -1,7 +1,7 @@
 ﻿# SPDX-License-Identifier: Apache-2.0
 # Libra 管理コンソール（Windows 用 GUI）。
 # WSL 内の bin/libra を wsl.exe 経由で呼び、本体 ls と搾取者 lx の進捗・速度・強さの推移を表示し、
-# 一時停止 / 再開 / 停止 / 起動 / 同時局数の絞り込み / 自己評価・対外対局の前倒しを行う。
+# 一時停止 / 再開 / 停止 / 起動 / 自己評価・対外対局の前倒しを行う。
 # 起動: libra-console.bat（powershell -ExecutionPolicy Bypass -File libra-console.ps1）
 # 自動テスト: -Screenshot C:\path\shot.png で 1 回更新して画面を PNG に保存し終了する（要約を stdout に出す）。
 #             -Tab <タブ名> で保存時に表示するグラフを選ぶ。
@@ -43,11 +43,12 @@ $script:Hist = @{}      # run -> ArrayList（コンソール自身の観測: t, 
 $script:Data = @{}      # run -> status --history の結果（metrics, evals, matches, archives, auto, auto_cfg）
 $script:Pending = @{}   # run -> @{proc; out; err; started}
 $script:Last = @{}      # run -> 直近の status オブジェクト
-$script:Ui = @{}        # run -> @{vals; log; buttons; throttle}
+$script:Ui = @{}        # run -> @{vals; log; buttons; autoButtons; autoTips}
 $script:NextFetch = [datetime]::MinValue
 $script:NextHistory = [datetime]::MinValue
 $script:ShotDone = $false
 $script:Errors = @{}
+$script:HistNote = ""
 $script:Tip = New-Object System.Windows.Forms.ToolTip
 $script:Tip.AutoPopDelay = 12000
 
@@ -57,6 +58,7 @@ function Format-Int($v) {
 }
 function Format-Ago([datetime]$t) {
     $d = [datetime]::Now - $t
+    if ($d.Ticks -lt 0) { $d = [timespan]::Zero }
     if ($d.TotalMinutes -lt 1) { return ("{0:N0} 秒前" -f $d.TotalSeconds) }
     if ($d.TotalHours -lt 1) { return ("{0:N0} 分前" -f $d.TotalMinutes) }
     if ($d.TotalDays -lt 2) { return ("{0:N1} 時間前" -f $d.TotalHours) }
@@ -64,6 +66,13 @@ function Format-Ago([datetime]$t) {
 }
 function From-Unix($sec) {
     return [DateTimeOffset]::FromUnixTimeSeconds([long][double]$sec).LocalDateTime
+}
+function Ci-Val($ci, [int]$i) {
+    # ci95 は [下限, 上限]。行が古い / 要素が null のことがあるので、取れないときは $null を返す
+    if ($null -eq $ci) { return $null }
+    $a = @($ci)
+    if ($a.Count -le $i -or $null -eq $a[$i]) { return $null }
+    return [double]$a[$i]
 }
 
 # ---- WSL 呼び出し ----
@@ -82,13 +91,22 @@ function New-LibraProcess([string]$run, [string[]]$cmd) {
     $p.StartInfo.CreateNoWindow = $true
     return $p
 }
-function Invoke-Libra([string]$run, [string[]]$cmd) {
-    # 同期呼び出し（pause/resume/stop/throttle/eval-now/match-now は 0.3 秒程度）。stdout+stderr を返す。
+function Invoke-Libra([string]$run, [string[]]$cmd, [int]$TimeoutMs = 20000) {
+    # 同期呼び出し（pause/resume/stop/eval-now/match-now は 0.3 秒程度）。stdout+stderr を返す。
+    # UI スレッドから呼ぶので必ず上限を付ける。WSL が起動していないと wsl.exe は長時間返らない。
     $p = New-LibraProcess $run $cmd
     [void]$p.Start()
     $out = $p.StandardOutput.ReadToEndAsync()
     $err = $p.StandardError.ReadToEndAsync()
-    $p.WaitForExit()
+    $sec = [int]($TimeoutMs / 1000)
+    if (-not $p.WaitForExit($TimeoutMs)) {
+        try { $p.Kill() } catch {}
+        throw "wsl.exe が $sec 秒で返りません（WSL が動いているか確認してください）: libra --run $run $($cmd -join ' ')"
+    }
+    if (-not [System.Threading.Tasks.Task]::WaitAll(@($out, $err), 5000)) {
+        try { $p.Kill() } catch {}
+        throw "wsl.exe の出力を読み終えられません: libra --run $run $($cmd -join ' ')"
+    }
     return (($out.Result + $err.Result).Trim())
 }
 function Start-Fetch([string]$run, [bool]$withHistory) {
@@ -129,15 +147,42 @@ function Complete-Fetches {
 
 # ---- コンソール自身の観測履歴（実測 局/日 用。%LOCALAPPDATA%\LibraShogi\console-history.csv） ----
 function Load-History {
+    # 壊れた 1 行でコンソールが起動しなくなるのを避けるため、行ごとに握りつぶす。
+    # （追記が改行なしで途切れると次の追記と連結し、5 列あるのに数値が壊れた行ができる）
     foreach ($r in $Runs) { $script:Hist[$r] = New-Object System.Collections.ArrayList }
     if (-not (Test-Path $script:HistFile)) { return }
     $cut = [datetime]::Now.AddDays(-7)
+    $total = 0; $bad = 0
     foreach ($line in Get-Content $script:HistFile) {
-        $c = $line.Split(",")
-        if ($c.Length -lt 5 -or -not $script:Hist.ContainsKey($c[0])) { continue }
-        $t = [datetime]::ParseExact($c[1], "yyyy-MM-dd HH:mm:ss", $null)
-        if ($t -lt $cut) { continue }
-        [void]$script:Hist[$c[0]].Add([pscustomobject]@{ t = $t; games = [double]$c[2]; step = [double]$c[3]; gpd = [double]$c[4] })
+        $total++
+        try {
+            $c = $line.Split(",")
+            if ($c.Length -lt 5 -or -not $script:Hist.ContainsKey($c[0])) { continue }
+            $t = [datetime]::ParseExact($c[1], "yyyy-MM-dd HH:mm:ss", $null)
+            if ($t -lt $cut) { continue }
+            [void]$script:Hist[$c[0]].Add([pscustomobject]@{ t = $t; games = [double]$c[2]; step = [double]$c[3]; gpd = [double]$c[4] })
+        } catch { $bad++ }
+    }
+    $kept = 0
+    foreach ($r in $Runs) { $kept += $script:Hist[$r].Count }
+    # 放っておくと 30 秒ごとに増え続ける（2 run で約 5,760 行/日）。壊れた行があるか大きくなったら書き戻す
+    if ($bad -gt 0 -or $total -gt $kept + 20000) { Save-History $bad $total }
+}
+function Save-History([int]$bad, [int]$total) {
+    # 読み込めた 7 日ぶんだけを書き戻す（run ごとにまとまるが、読み直しで run ごとに分けるので問題ない）
+    try {
+        $lines = New-Object System.Collections.ArrayList
+        foreach ($r in $Runs) {
+            foreach ($p in $script:Hist[$r]) {
+                [void]$lines.Add(("{0},{1},{2},{3},{4}" -f $r, $p.t.ToString("yyyy-MM-dd HH:mm:ss"), $p.games, $p.step, $p.gpd))
+            }
+        }
+        $tmp = $script:HistFile + ".tmp"
+        Set-Content -Path $tmp -Value $lines -Encoding ASCII   # Add-Sample の Add-Content と同じ符号化
+        Move-Item -Path $tmp -Destination $script:HistFile -Force
+        $script:HistNote = "履歴 CSV を整理しました（{0} 行 → {1} 行{2}）" -f $total, $lines.Count, $(if ($bad -gt 0) { "、壊れた $bad 行を除去" } else { "" })
+    } catch {
+        $script:HistNote = "履歴 CSV の書き戻しに失敗: " + $_.Exception.Message
     }
 }
 function Add-Sample([string]$run, $obj) {
@@ -157,9 +202,10 @@ function Get-MeasuredRate([string]$run) {
     $last = $h[$h.Count - 1]
     $base = $null
     for ($i = $h.Count - 2; $i -ge 0; $i--) {
-        $base = $h[$i]
-        if (($last.t - $base.t).TotalMinutes -ge 10) { break }
+        if (($last.t - $h[$i].t).TotalMinutes -ge 10) { $base = $h[$i]; break }
     }
+    # 10 分に満たない窓で割ると桁違いの値が出る（measurements.md に転記する数字なので出さない）
+    if ($null -eq $base) { return $null }
     $dt = ($last.t - $base.t).TotalDays
     if ($dt -le 0 -or $last.games -lt $base.games) { return $null }
     return [pscustomobject]@{ rate = ($last.games - $base.games) / $dt; minutes = ($last.t - $base.t).TotalMinutes }
@@ -239,23 +285,43 @@ function Get-DesktopModelInfo {
     if (Test-Path $j) { try { return (Get-Content $j -Raw -Encoding UTF8 | ConvertFrom-Json) } catch {} }
     return $null
 }
+function Model-StepText($info) {
+    if ($null -ne $info.step) { return "step " + (Format-Int $info.step) }
+    if ($info.stale) { return "step 不明（latest.onnx がチェックポイントより古い＝書き出しに失敗している）" }
+    return "step 不明"
+}
 function Update-DesktopModelLabel {
     $i = Get-DesktopModelInfo
-    $lblModel.Text = if ($null -ne $i) { "desktop のモデル: step {0}（{1}）" -f (Format-Int $i.step), $i.time } else { "desktop のモデル: 未更新（登録時のまま）" }
+    if ($null -eq $i) { $lblModel.Text = "desktop のモデル: 未更新（登録時のまま）"; return }
+    $ot = if ($i.PSObject.Properties["onnx_time"] -and $i.onnx_time) { "、onnx " + $i.onnx_time } else { "" }
+    $lblModel.Text = "desktop のモデル: {0}（更新 {1}{2}）" -f (Model-StepText $i), $i.time, $ot
 }
 function Update-DesktopModel {
     # WSL 側の latest.onnx を desktop に登録した libra.exe の横（libra.onnx）へ写す。手順は一時名 → 置き換え。
     if (-not (Test-Path $DesktopEngineDir)) { throw "desktop のエンジン フォルダがありません: $DesktopEngineDir（desktop で libra.exe を登録してください。runbook §8）" }
     $src = "\\wsl.localhost\$Distro\" + ($RunRoot.TrimStart("/") -replace "/", "\") + "\$ModelRun\checkpoints\latest.onnx"
     if (-not (Test-Path $src)) { throw "latest.onnx が見つかりません: $src（WSL が起動していて run が動いているか確認）" }
+    $srcItem = Get-Item $src
     $dst = Join-Path $DesktopEngineDir "libra.onnx"
     $tmp = $dst + ".tmp"
     Copy-Item -Path $src -Destination $tmp -Force
     Move-Item -Path $tmp -Destination $dst -Force
-    $step = $null
-    $obj = Invoke-Libra $ModelRun @("status", "--json") | ConvertFrom-Json
-    if ($null -ne $obj.state) { $step = $obj.state.step }
-    $info = @{ step = $step; time = [datetime]::Now.ToString("yyyy-MM-dd HH:mm"); source = $src; size = (Get-Item $dst).Length }
+    # state.step はチェックポイント時に書かれるので latest.onnx の step と一致する。
+    # ただし export は失敗してもランを止めない設計（runner.export_onnx）なので、
+    # onnx がチェックポイントより古ければ書き出しに失敗していて step は当てにならない。
+    $step = $null; $stale = $false
+    try {
+        $obj = Invoke-Libra $ModelRun @("status", "--json") | ConvertFrom-Json
+        if ($null -ne $obj.state) {
+            $step = $obj.state.step
+            if ($null -ne $obj.state.last_checkpoint -and $srcItem.LastWriteTime -lt (From-Unix $obj.state.last_checkpoint).AddMinutes(-1)) {
+                $stale = $true
+                $step = $null
+            }
+        }
+    } catch {}
+    $info = @{ step = $step; stale = $stale; onnx_time = $srcItem.LastWriteTime.ToString("yyyy-MM-dd HH:mm");
+               time = [datetime]::Now.ToString("yyyy-MM-dd HH:mm"); source = $src; size = (Get-Item $dst).Length }
     ($info | ConvertTo-Json -Compress) | Set-Content -Path (Join-Path $DesktopEngineDir "libra.onnx.json") -Encoding UTF8
     return $info
 }
@@ -265,11 +331,11 @@ function Play-Desktop {
         Update-DesktopModelLabel
         $running = Get-Process -Name "tenbin-shogi-gui" -ErrorAction SilentlyContinue
         if ($running) {
-            $status.Text = "desktop のモデルを step {0} に更新しました。desktop は起動中です。エンジンを立て直す（desktop を開き直すか、対局設定でエンジンを選び直す）と新しいネットで指します。" -f (Format-Int $info.step)
+            $status.Text = "desktop のモデルを {0} に更新しました。desktop は起動中です。エンジンを立て直す（desktop を開き直すか、対局設定でエンジンを選び直す）と新しいネットで指します。" -f (Model-StepText $info)
         } else {
             if (-not (Test-Path $DesktopExe)) { throw "desktop が見つかりません: $DesktopExe" }
             Start-Process -FilePath $DesktopExe -WorkingDirectory (Split-Path $DesktopExe)
-            $status.Text = "desktop のモデルを step {0} に更新して起動しました。「対局」でエンジンに「LibraShogi」を選んでください。" -f (Format-Int $info.step)
+            $status.Text = "desktop のモデルを {0} に更新して起動しました。「対局」でエンジンに「LibraShogi」を選んでください。" -f (Model-StepText $info)
         }
         $status.ForeColor = [System.Drawing.Color]::DimGray
     } catch {
@@ -338,15 +404,9 @@ function New-RunPanel([string]$run) {
     $bl += New-Button "再開" { Invoke-Run $run @("resume") }.GetNewClosure() 56
     $bl += New-Button "停止" { if (Confirm-Action "$run に STOP を送ります（チェックポイントを書いて終了）。よろしいですか？") { Invoke-Run $run @("stop") } }.GetNewClosure() 56
     $bl += New-Button "起動" { Start-Run $run }.GetNewClosure() 56
-    $lt = New-Label "絞る(局)" 8
-    $nt = New-Object System.Windows.Forms.NumericUpDown
-    $nt.Minimum = 0; $nt.Maximum = 4096; $nt.Value = 0; $nt.Width = 60
-    $nt.Margin = New-Object System.Windows.Forms.Padding(0, 4, 2, 0)
-    $bt = New-Button "適用" { Invoke-Run $run @("throttle", "--games", [string][int]$nt.Value) }.GetNewClosure() 52
     $be = New-Button "今すぐ自己評価" { if (Confirm-Action "$run : 次のチェックポイント（10 分以内）で archive を作り、直前の archive と自己評価します（GPU を共有、約 10 分）。よろしいですか？") { Invoke-Run $run @("eval-now") } }.GetNewClosure() 110
     $bm = New-Button "今すぐ対外対局" { if (Confirm-Action "$run : 次のチェックポイント（10 分以内）で外部エンジンとの計測対局を積みます（GPU と CPU を共有、10 局で 15 分程度）。よろしいですか？") { Invoke-Run $run @("match-now") } }.GetNewClosure() 110
     foreach ($b in $bl) { $btns.Controls.Add($b) }
-    $btns.Controls.Add($lt); $btns.Controls.Add($nt); $btns.Controls.Add($bt)
     $btns.Controls.Add($be); $btns.Controls.Add($bm)
     $inner.Controls.Add($btns, 0, 1)
 
@@ -357,9 +417,11 @@ function New-RunPanel([string]$run) {
     $log.BackColor = [System.Drawing.Color]::White
     $inner.Controls.Add($log, 0, 2)
 
-    $script:Tip.SetToolTip($be, "次のチェックポイントで archive を作り、基準ネットと 100 局対局する")
-    $script:Tip.SetToolTip($bm, "次のチェックポイントで外部エンジンとの計測対局を積む")
-    $script:Ui[$run] = @{ vals = $vals; log = $log; buttons = ($bl + @($bt)); autoButtons = @($be, $bm); throttle = $nt }
+    $tipEval = "次のチェックポイントで archive を作り、基準ネットと 100 局対局する"
+    $tipMatch = "次のチェックポイントで外部エンジンとの計測対局を積む"
+    $script:Tip.SetToolTip($be, $tipEval)
+    $script:Tip.SetToolTip($bm, $tipMatch)
+    $script:Ui[$run] = @{ vals = $vals; log = $log; buttons = $bl; autoButtons = @($be, $bm); autoTips = @($tipEval, $tipMatch) }
     return $g
 }
 $col = 0
@@ -504,8 +566,8 @@ function Build-Series([string]$tab) {
                 $s = New-Series ($r + " 基準比") (Run-Color $r $i) $true
                 if ($script:Data.ContainsKey($r)) {
                     foreach ($a in @($script:Data[$r].anchor)) {
-                        $lo = $null; $hi = $null
-                        if ($null -ne $a.ci95) { $lo = $a.ci95[0]; $hi = $a.ci95[1] }
+                        $lo = Ci-Val $a.ci95 0
+                        $hi = Ci-Val $a.ci95 1
                         Add-Pt $s (From-Unix $a.t) ([double]$a.elo) $lo $hi ("step " + (Format-Int $a.step))
                     }
                 }
@@ -630,7 +692,6 @@ function Update-Panel([string]$run, $obj) {
     if ($flags -contains "STOP") { $ptxt += "（停止処理中）" }
     if ($flags -contains "EVAL_NOW") { $ptxt += "（自己評価 予約）" }
     if ($flags -contains "MATCH_NOW") { $ptxt += "（対外対局 予約）" }
-    if ($null -ne $obj.throttle) { $ptxt += "（絞り $($obj.throttle) 局）" }
     if (-not $obj.exists) { $ptxt = "run なし（$($obj.root)）" }
     $v.process.Text = $ptxt
     $v.process.ForeColor = if (-not $running) { [System.Drawing.Color]::Firebrick } elseif ($flags -contains "PAUSE" -or $flags -contains "STOP") { [System.Drawing.Color]::DarkOrange } else { [System.Drawing.Color]::ForestGreen }
@@ -639,9 +700,9 @@ function Update-Panel([string]$run, $obj) {
     # 自動計測が無効な run では前倒しのボタンは効かない（フラグを消費するものが無い）ので押せなくする
     $ac = $obj.auto_cfg
     $autoOn = ($null -ne $ac -and $ac.enabled)
-    foreach ($b in $u.autoButtons) {
-        $b.Enabled = $autoOn
-        if (-not $autoOn) { $script:Tip.SetToolTip($b, "$run は自動計測が無効です（$($obj.root)/config.toml の [auto] enabled = true で使えます）") }
+    for ($i = 0; $i -lt $u.autoButtons.Count; $i++) {
+        $u.autoButtons[$i].Enabled = $autoOn
+        $script:Tip.SetToolTip($u.autoButtons[$i], $(if ($autoOn) { $u.autoTips[$i] } else { "$run は自動計測が無効です（$($obj.root)/config.toml の [auto] enabled = true で使えます）" }))
     }
     $st = $obj.status
     if ($null -eq $st) {
@@ -693,10 +754,15 @@ function Update-Panel([string]$run, $obj) {
         $chain = @(@($d.evals) | Where-Object { $null -ne $_.cumulative })
         if ($anc.Count -gt 0) {
             $la = $anc[$anc.Count - 1]
-            $v.elo.Text = "{0:+0.0;-0.0;0} [{1:+0;-0;0}, {2:+0;-0;0}]（基準 step {3} に {4:P0}、{5}）" -f [double]$la.elo, [double]$la.ci95[0], [double]$la.ci95[1], (Format-Int $la.anchor_step), [double]$la.score_new, (Format-Ago (From-Unix $la.t))
+            $lo = Ci-Val $la.ci95 0; $hi = Ci-Val $la.ci95 1
+            $ci = if ($null -ne $lo -and $null -ne $hi) { " [{0:+0;-0;0}, {1:+0;-0;0}]" -f $lo, $hi } else { "" }
+            $v.elo.Text = "{0:+0.0;-0.0;0}{1}（基準 step {2} に {3:P0}、{4}）" -f [double]$la.elo, $ci, (Format-Int $la.anchor_step), [double]$la.score_new, (Format-Ago (From-Unix $la.t))
         } elseif ($chain.Count -gt 0) {
             $le = $chain[$chain.Count - 1]
-            $v.elo.Text = "鎖 {0:+0.0;-0.0;0}（前回 {1:+0.0;-0.0;0} [{2:+0;-0;0}, {3:+0;-0;0}]、step {4}→{5}、{6}）" -f [double]$le.cumulative, (-[double]$le.elo), (-[double]$le.ci95[1]), (-[double]$le.ci95[0]), (Format-Int $le.step_a), (Format-Int $le.step_b), (Format-Ago (From-Unix $le.time))
+            # eval の ci95 は a−b の区間。鎖は b−a を足すので、符号を反転して上下を入れ替える
+            $aLo = Ci-Val $le.ci95 0; $aHi = Ci-Val $le.ci95 1
+            $ci = if ($null -ne $aLo -and $null -ne $aHi) { " [{0:+0;-0;0}, {1:+0;-0;0}]" -f (-$aHi), (-$aLo) } else { "" }
+            $v.elo.Text = "鎖 {0:+0.0;-0.0;0}（前回 {1:+0.0;-0.0;0}{2}、step {3}→{4}、{5}）" -f [double]$le.cumulative, (-[double]$le.elo), $ci, (Format-Int $le.step_a), (Format-Int $le.step_b), (Format-Ago (From-Unix $le.time))
         } else { $v.elo.Text = "（まだ無い。archive {0} 個）" -f @($d.archives).Count }
         $ms = @($d.matches)
         if ($ms.Count -gt 0) {
@@ -719,6 +785,7 @@ function Update-StatusBar {
     foreach ($r in $Runs) {
         if ($script:Errors.ContainsKey($r)) { $parts += "$r : " + $script:Errors[$r] }
     }
+    if ($script:HistNote) { $parts += $script:HistNote }
     $wait = [Math]::Max(0, ($script:NextFetch - [datetime]::Now).TotalSeconds)
     $pend = if ($script:Pending.Count -gt 0) { "  取得中…" } else { "" }
     $status.Text = ("次の更新まで {0:N0} 秒{1}   {2}" -f $wait, $pend, ($parts -join "   "))
@@ -753,14 +820,24 @@ function Start-Run([string]$run) {
         return
     }
     $task = if ($script:TaskNames.ContainsKey($run)) { $script:TaskNames[$run] } else { "LibraShogi run $run" }
-    $out = & schtasks.exe /Run /TN $task 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        $status.Text = "$run : タスク「$task」を起動しました"
-    } else {
-        Start-Process -FilePath "wsl.exe" -ArgumentList (Get-LibraArgs $run @("run")) -WindowStyle Hidden
-        $status.Text = "$run : タスク「$task」が無いので wsl.exe を直接起動しました（$out）"
+    try {
+        # $ErrorActionPreference は関数の中だけ Continue にする（外側の Stop はそのまま）。
+        # Stop のままだと schtasks が stderr に 1 行でも書いた時点で終端エラーになり、
+        # 下の $LASTEXITCODE の分岐にも wsl.exe のフォールバックにも到達しない。
+        # しかも WinForms のクリック ハンドラでは例外が黙って捨てられ、押しても無反応になる。
+        $ErrorActionPreference = "Continue"
+        $out = (& schtasks.exe /Run /TN $task 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -eq 0) {
+            $status.Text = "$run : タスク「$task」を起動しました"
+        } else {
+            Start-Process -FilePath "wsl.exe" -ArgumentList (Get-LibraArgs $run @("run")) -WindowStyle Hidden
+            $status.Text = "$run : タスク「$task」を起動できないので wsl.exe を直接起動しました（$out）"
+        }
+        $status.ForeColor = [System.Drawing.Color]::DimGray
+    } catch {
+        $status.Text = "$run : 起動に失敗: " + $_.Exception.Message
+        $status.ForeColor = [System.Drawing.Color]::Firebrick
     }
-    $status.ForeColor = [System.Drawing.Color]::DimGray
     $script:NextFetch = [datetime]::Now.AddSeconds(5)
 }
 
@@ -802,13 +879,17 @@ $form.Add_FormClosing({ $timer.Stop(); foreach ($f in $script:Pending.Values) { 
 
 if ($UpdateDesktopModel) {
     $info = Update-DesktopModel
-    [Console]::WriteLine(("desktop model updated: step={0} size={1} dir={2}" -f $info.step, $info.size, $DesktopEngineDir))
+    [Console]::WriteLine(("desktop model updated: step={0} stale={1} onnx={2} size={3} dir={4}" -f $info.step, $info.stale, $info.onnx_time, $info.size, $DesktopEngineDir))
     exit 0
 }
 if ($Do) {
-    # GUI なしでボタンと同じ呼び出しを実行する（例: -Do "lx:pause"、-Do "ls:throttle --games 256"、-Do "ls:eval-now"）
+    # GUI なしでボタンと同じ呼び出しを実行する（例: -Do "lx:pause"、-Do "ls:eval-now"）
     $run, $rest = $Do.Split(":", 2)
-    [Console]::WriteLine((Invoke-Libra $run ($rest.Trim().Split(" "))))
+    if ([string]::IsNullOrWhiteSpace($rest)) {
+        [Console]::WriteLine("-Do は <run>:<コマンド> の形で指定してください（例: ls:status、lx:pause）")
+        exit 1
+    }
+    [Console]::WriteLine((Invoke-Libra $run (@($rest.Trim().Split(" ")) | Where-Object { $_ })))
     exit 0
 }
 Load-History
