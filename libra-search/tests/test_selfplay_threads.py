@@ -101,4 +101,4 @@ def test_deferred_root_proof_keeps_records():
             assert g[:k] == r[:k], (threads, call_proof, slot)
             assert abs(len(g) - len(r)) <= 1, (threads, call_proof, slot)
         assert len(got_list) >= n_ref - len(ref)
-        assert st["mate_found"] + st["proof_found"] > 0
+        assert st["mate_found"] > 0 and st["proof_found"] > 0  # 本将棋の詰み探索と布石の証明探索の両方の経路を通る
