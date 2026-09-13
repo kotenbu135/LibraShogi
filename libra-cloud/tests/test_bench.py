@@ -176,6 +176,30 @@ def test_wait_ssh_gives_up_on_stalled_instance(monkeypatch):
     assert "authorized_keys" in vb.ONSTART and "chmod 600" in vb.ONSTART
 
 
+def test_ssh_prefers_direct_connection(monkeypatch):
+    """中継（sshN.vast.ai）への逆向きトンネルが張れないホストでも、公開 IP とポートへの直接接続で入る（9/14）。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("vast_bench", ROOT / "libra-cloud" / "vast_bench.py")
+    vb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vb)
+    inst = {"actual_status": "running", "status_msg": "success", "ssh_host": "ssh2.vast.ai", "ssh_port": 19638,
+            "public_ipaddr": "190.111.198.202 ", "ports": {"22/tcp": [{"HostIp": "0.0.0.0", "HostPort": "10299"}]}}
+    hs = vb.ssh_hosts(inst)
+    assert [(h.host, h.port) for h in hs] == [("190.111.198.202", 10299), ("ssh2.vast.ai", 19638)]
+    assert [(h.host, h.port) for h in vb.ssh_hosts({"ssh_host": "ssh2.vast.ai", "ssh_port": 1})] == [("ssh2.vast.ai", 1)]
+    monkeypatch.setattr(vb, "log", lambda m: None)
+    monkeypatch.setattr(vb.time, "sleep", lambda s: None)
+    monkeypatch.setattr(vb.Host, "ssh", lambda self, cmd, timeout, log_path=None, check=True: 0 if self.host != "ssh2.vast.ai" else 255)
+
+    class Api:
+        def show_instance(self, iid):
+            return inst
+
+    h = vb.wait_ssh(Api(), 1, timeout=60)
+    assert (h.host, h.port) == ("190.111.198.202", 10299)
+
+
 def test_try_create_reports_api_error_body():
     """作成の 400 で落ちず、API の本文を理由にして次のオファーへ移れる（9/14 に理由が見えないまま落ちた）。"""
     import importlib.util

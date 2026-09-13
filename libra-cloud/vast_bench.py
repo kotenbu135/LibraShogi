@@ -63,6 +63,18 @@ class Host:
                        stdout=subprocess.DEVNULL)
 
 
+def ssh_hosts(inst: dict) -> list[Host]:
+    """接続先の候補。ホストの公開 IP とポートへの直接接続を先に、vast.ai の中継（sshN.vast.ai）を後にする。
+    9/14 のホストでは中継への逆向きトンネルが張れず（remote port forwarding failed）、直接だけ入れた。"""
+    out = []
+    port = ((inst.get("ports") or {}).get("22/tcp") or [{}])[0].get("HostPort")
+    if inst.get("public_ipaddr") and port:
+        out.append(Host(str(inst["public_ipaddr"]).strip(), int(port)))
+    if inst.get("ssh_host") and inst.get("ssh_port"):
+        out.append(Host(inst["ssh_host"], int(inst["ssh_port"])))
+    return out
+
+
 def wait_ssh(v, iid: int, timeout: float, stall: float = 480.0, ssh_fail: float = 300.0) -> Host:
     """ssh で入れるまで待つ。状態（イメージ取得の進み具合など）が stall 秒変わらないか、running になってから
     ssh_fail 秒入れなければ（鍵が拒まれるなど）見切って TimeoutError。"""
@@ -79,14 +91,16 @@ def wait_ssh(v, iid: int, timeout: float, stall: float = 480.0, ssh_fail: float 
             changed = time.monotonic()
         elif inst.get("actual_status") != "running" and time.monotonic() - changed > stall:
             raise TimeoutError(f"instance {iid} stalled for {stall:.0f} s: {st[:120]}")
-        if inst.get("actual_status") == "running" and inst.get("ssh_host") and inst.get("ssh_port"):
+        hosts = ssh_hosts(inst)
+        if inst.get("actual_status") == "running" and hosts:
             running_since = running_since if running_since is not None else time.monotonic()
-            h = Host(inst["ssh_host"], int(inst["ssh_port"]))
-            try:
-                if h.ssh("true", timeout=40, check=False) == 0:
-                    return h
-            except subprocess.TimeoutExpired:
-                pass
+            for h in hosts:
+                try:
+                    if h.ssh("true", timeout=40, check=False) == 0:
+                        log(f"instance {iid}: ssh via {h.host}:{h.port}")
+                        return h
+                except subprocess.TimeoutExpired:
+                    pass
             if time.monotonic() - running_since > ssh_fail:
                 raise TimeoutError(f"instance {iid} running but ssh failed for {ssh_fail:.0f} s (see v.logs for sshd errors)")
         time.sleep(15)
@@ -119,6 +133,7 @@ def main() -> int:
     ap.add_argument("--image", default=IMAGE)
     ap.add_argument("--min-credit", type=float, default=2.0)
     ap.add_argument("--dry-run", action="store_true", help="オファーを選ぶだけで借りない")
+    ap.add_argument("--instance", type=int, default=0, help="借りてあるインスタンスを使う（新しく借りない。終わったら消す）")
     a = ap.parse_args()
     from vastai.sdk import VastAI
 
@@ -135,7 +150,7 @@ def main() -> int:
     cands = pick_offers(offers, max_dph=a.max_dph)
     log(f"{len(offers)} offers, {len(cands)} usable; cheapest: "
         + ", ".join(f"#{o['id']} ${o['dph_total']:.3f}/h cpu {o.get('cpu_cores_effective')} {o.get('geolocation', '')}" for o in cands[:3]))
-    if a.dry_run or not cands:
+    if a.dry_run or (not cands and not a.instance):
         return 0 if cands else 3
     pub = KEY.with_suffix(".pub").read_text().strip()
     try:
@@ -154,6 +169,14 @@ def main() -> int:
     t_rent = time.time()
     result: dict = {"gpu": a.gpu, "image": a.image, "minutes": a.minutes, "n_games": a.n_games}
     try:
+        if a.instance:
+            iid = a.instance
+            inst = v.show_instance(iid) or {}
+            result["offer"] = {"id": inst.get("machine_id"), "dph_total": inst.get("dph_total"), "gpu_name": inst.get("gpu_name"),
+                               "cpu_name": inst.get("cpu_name"), "cpu_cores_effective": inst.get("cpu_cores_effective"),
+                               "geolocation": inst.get("geolocation"), "instance": iid}
+            host = wait_ssh(v, iid, timeout=600)
+            cands = []
         for offer in cands[:3]:
             iid, why = try_create(v, offer["id"], image=a.image, disk=a.disk, label="libra-bench", ssh=True, direct=True,
                                   cancel_unavail=True, onstart_cmd=ONSTART)
