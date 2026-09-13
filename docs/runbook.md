@@ -2,6 +2,9 @@
 
 docs/libra-local.md §7〜8 の実装。状態はすべて `~/libra-run/<run-id>/` にある。ライセンス: CC BY 4.0。
 
+**系列**: 本体 `ls` と搾取者 `lx` は、二飛香（docs/rules.md §3.2、2026-09-13）を入れた系列。`ls` は旧ルールの ls の最終チェックポイント（step 229,590）の `latest.pt`（モデル・オプティマイザ・step）を `checkpoints/latest.pt` に置いて始め、`lx` はゼロから（凍結相手 `lx/main.pt` は同じ `latest.pt` を先に置き、起動直後に `main_source` から作り直す）。局数・チャンク・自動計測の基準（`auto.anchor`）・Elo の累積は 0 から数え直し、旧系列とはつながない。
+旧ルールの系列は `~/libra-run/ls-v0`（step 229,590、710,483 局）と `~/libra-run/lx-v0`（step 129,608）に残してあり、再開しない。`config.toml` の参照先はそれぞれ `ls-v0` / `lx-v0` の中で閉じるように付け替えた（`bin/libra --run ls-v0 status` で読める）。棋譜の陣の多くが二飛香に当たるので、新しい規定では再生できない。
+
 ## 1. 状態ディレクトリ
 
 | パス | 内容 |
