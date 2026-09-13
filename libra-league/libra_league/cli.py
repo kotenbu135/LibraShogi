@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""`libra` コマンド: run / stop / status（docs/libra-local.md §7.2）。
+"""`libra` コマンド: run / stop / status（docs/libra-local.md §7.2）、自己対局だけを回す worker（libra_league/workers.py）。
 
 同時進行局数を絞る `throttle`（decisions.md 2026-09-12）と一時停止の `pause` / `resume`（2026-09-14）は廃止した。
 GPU や CPU を空けるときは stop し、終わったら run する。
@@ -58,6 +58,14 @@ def main(argv: list[str] | None = None) -> int:
     p_ex = sub.add_parser("export", help="チェックポイント（.pt）を推論用 ONNX に書き出す（libra / libra.exe 用）")
     p_ex.add_argument("--ckpt", default=None, help="既定: <run>/checkpoints/latest.pt")
     p_ex.add_argument("--out", default=None, help="既定: <run>/checkpoints/latest.onnx（同じ場所に一時ファイルを書いてから置き換える）")
+    p_w = sub.add_parser("worker", help="自己対局だけを回し、終局した局を <run>/inbox に置く（学習は [workers] enabled の run 側）")
+    p_w.add_argument("--id", required=True, help="ワーカー名（英数字と _、32 文字まで。対局ファイル名と seed に使う）")
+    p_w.add_argument("--weights", default=None, help="重み（既定: <run>/weights/latest.pt）")
+    p_w.add_argument("--inbox", default=None, help="対局ファイルの置き場所（既定: <run>/inbox）")
+    p_w.add_argument("--n-games", type=int, default=None, help="同時進行局数（既定: [selfplay] n_games）")
+    p_w.add_argument("--threads", type=int, default=None, help="既定: [selfplay] threads")
+    p_w.add_argument("--device", default=None, help="既定: cuda があれば cuda")
+    p_w.add_argument("--detached", action="store_true", help="学習側の run.lock と STOP を見ない（別マシンで同期した run ディレクトリを使うとき）")
     p_op = sub.add_parser("openings", help="搾取者の run から、搾取者が勝った布石を openings.json に書き出す")
     p_op.add_argument("--chunks", type=int, default=50, help="新しい側から何チャンク（100 局単位）見るか")
     p_op.add_argument("--moves", type=int, default=12, help="玉 2 手のあとに残す布石の手数")
@@ -74,6 +82,31 @@ def main(argv: list[str] | None = None) -> int:
 
         main_run(sd.root, Path(a.config) if a.config else None)
         return 0
+    if a.cmd == "worker":
+        import signal
+
+        import torch
+
+        from .config import load_config
+        from .workers import Worker
+
+        if not sd.config_toml.exists():
+            print(f"no run at {sd.root} (config.toml not found)", file=sys.stderr)
+            return 1
+        cfg = load_config(sd.config_toml)
+        inbox = Path(a.inbox) if a.inbox else sd.inbox
+        inbox.mkdir(parents=True, exist_ok=True)
+        device = torch.device(a.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        w = Worker(cfg, a.id, Path(a.weights) if a.weights else sd.weights / "latest.pt", inbox, device, n_games=a.n_games, threads=a.threads,
+                   stop_root=None if a.detached else sd.root, lock=None if a.detached else sd.root / "run.lock",
+                   log=lambda s: print(s, flush=True))
+
+        def on_signal(signum, frame):
+            w.stopping = True
+
+        for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(s, on_signal)
+        return w.run()
     if a.cmd == "export":
         import os
 
@@ -221,6 +254,10 @@ def main(argv: list[str] | None = None) -> int:
                       f"perpetual {eng.get('perpetual_check')}  max_ply {eng.get('max_ply')}  sims/move {eng.get('sims', 0) / max(1, eng.get('moves', 1)):.1f}")
             if st.get("train"):
                 print("train:", json.dumps(st["train"]))
+            if st.get("workers"):
+                wk = st["workers"]
+                print(f"workers: games {wk.get('games')} files {wk.get('files')} stale {wk.get('stale_games')} rejected {wk.get('rejected_files')}  "
+                      + " ".join(f"{k}={v}" for k, v in (wk.get("by_worker") or {}).items()))
             if st.get("restarts"):
                 print("restarts:", ", ".join(st["restarts"]))
         return 0

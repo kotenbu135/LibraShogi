@@ -67,6 +67,10 @@ DEFAULTS: dict[str, Any] = {
         "mirror_prob": 0.5,
         "grad_clip": 1.0,
     },
+    # 自己対局ワーカー（libra worker、libra_league/workers.py）: 学習側は重みを <run>/weights/latest.pt に配り（学習のたび）、
+    # <run>/inbox/ に届いた局を ingest_seconds ごとに手元の自己対局と同じようにリプレイへ足す。既定は無効（今の 1 プロセスのまま）。
+    # max_lag_steps: 局を打った重みが学習側より何 step 遅れていたら捨てるか（0 で捨てない）。搾取者の run では無効。
+    "workers": {"enabled": False, "ingest_seconds": 10.0, "max_lag_steps": 2000},
     "run": {"checkpoint_minutes": 10, "status_seconds": 30, "chunk_games": 100, "keep_checkpoints": 3,
             "export_onnx": True,   # チェックポイントごとに latest.onnx も書く（libra / libra.exe 用）
             "metrics_minutes": 5},  # metrics.jsonl（進捗の時系列）の追記間隔

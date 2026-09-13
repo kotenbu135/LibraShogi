@@ -20,6 +20,8 @@ docs/libra-local.md §7〜8 の実装。状態はすべて `~/libra-run/<run-id>
 | `log.txt` | ランナーのログ（監視役の再起動の記録 `supervisor:` もここ） |
 | `stdout.log` | ランナー本体の標準出力・標準エラー（監視役が追記。異常終了したときの CUDA のエラー文などはここに残る） |
 | `auto_job.json` | 実行中の自動計測ジョブ（pid・引数）。ランナーが abort で落ちたとき、起動し直したランナーがこれを見て孤児のジョブを止めて積み直す |
+| `weights/latest.pt` | `[workers] enabled` の run だけ。ワーカーに配る重み（fp16 のモデル、step、ネットの形。約 20 MB）。学習のたびに原子的に書き換える |
+| `inbox/<worker>-<時刻>-<連番>.npz` | `[workers] enabled` の run だけ。ワーカーが置いた対局ファイル（pickle なし）。学習側が取り込んで消す。検査で弾いたものは `inbox/rejected/`（直近 20） |
 
 ## 2. コマンド
 
@@ -67,6 +69,14 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 - CPU だけ使う作業: そのままで良い（ワーカーは `nice 10`）
 - 数日止めても再開時のコストはゼロ（損失は最後のチェックポイント以降の進行中の対局だけ）
 - 推論は CUDA Graphs で捕獲している（`[selfplay] compile`、decisions.md 2026-09-14）。起動直後の最初のラウンドで捕獲するので、起動時は torch.compile の autotune に 5〜25 秒ほど掛かる（WSL の再起動で `/tmp` のキャッシュが消えた後は長め）。`log.txt` に `selfplay: inference model=compile(max-autotune)+cudagraph` が出れば有効、`eager` なら捕獲に失敗していて理由は `stdout.log`
+
+### 自己対局ワーカー（既定は無効。GPU を足すときの配管）
+
+学習側（`libra run`）と自己対局だけのプロセス（`libra worker`）を分けられる（decisions.md 2026-09-14）。**同じ GPU で分けても局/日は増えない**（推論だけで GPU が埋まっているため）。別の GPU（vast.ai など、利用開始はユーザーの判断）の計算を同じ run に足すためのもの。本番の ls・lx は使っていない。
+
+1. 学習側の `config.toml` に `[workers]` `enabled = true` を書き、停止 → 起動。学習側は今までどおり自分でも自己対局し、加えて `weights/latest.pt` を配り、`inbox/` の局を 10 秒ごとに取り込む（取り込んだ局も新規局数に数えるので、学習量の規則 `replay_ratio` は変わらない）。搾取者の run では無効。
+2. ワーカーを起動: `bin/libra --run ls worker --id w1 [--n-games 512] [--threads 12]`。重みを読み、`chunk_games`（100）局ごとに `inbox/` にファイルを置き、学習側が新しい重みを配ると 10 秒以内に読み直す。同じマシンでは学習側が動いている間だけ打ち、停止（STOP）か学習側の終了で残りを書いて抜ける（学習側が止まっている間は待つ）。別マシンで run ディレクトリの写し（`config.toml` と `weights/`）を使うときは `--detached`。
+3. 学習側は、局を打った重みが `max_lag_steps`（2000）より古いファイルを捨て、型・形・値域が合わないファイルを `inbox/rejected/` に移す（手の合法性や方策・価値の改ざんは確かめない）。件数は `status` の `workers:` 行と status.json の `workers`。
 
 ## 5. 設定を変えるとき
 

@@ -21,6 +21,12 @@ from .selfplay import SelfPlayLoop
 from .state import StateDir, write_json_atomic
 from .supervise import EXIT_ALREADY_RUNNING, acquire_lock
 from .trainer import Trainer
+from .workers import Inbox, publish_weights
+
+
+def train_steps(new_games: int, avg_len: float, tr: dict) -> int:
+    """新規 new_games 局ぶんの学習ステップ数（局面数 × replay_ratio / batch）。手元の自己対局かワーカーの局かは区別しない。"""
+    return max(1, int(round(new_games * avg_len * tr["replay_ratio"] / tr["batch_size"])))
 
 
 class Runner:
@@ -52,6 +58,11 @@ class Runner:
         self.openings_checked = 0.0
         self.auto = AutoJobs(sd, cfg, self.state, self.log)
         self.last_metrics = 0.0
+        # 自己対局ワーカー（[workers] enabled）: 重みを weights/ に配り、inbox/ に届いた局を取り込む。搾取者の run では使わない
+        self.inbox: Inbox | None = None
+        wk = cfg.get("workers", {})
+        if wk.get("enabled") and not cfg.get("exploiter", {}).get("main_ckpt"):
+            self.inbox = Inbox(sd.inbox, cfg["run_id"], int(wk.get("max_lag_steps", 0)), self.log)
 
     # ---- 永続化 ----
     def log(self, msg: str) -> None:
@@ -138,6 +149,27 @@ class Runner:
             self.log(f"export: {out.name} ({time.time() - t0:.1f}s)")
         except Exception as e:  # noqa: BLE001
             self.log(f"export failed: {e}")
+
+    def publish_weights(self) -> None:
+        """ワーカー用の重み（fp16 のモデルだけ）を配る。手元の推論用ネットを更新するのと同じ時点で書く。"""
+        if self.inbox is None:
+            return
+        try:
+            publish_weights(self.sd.weights / "latest.pt", self.model, self.trainer.step_count, self.cfg["net"], self.cfg["run_id"])
+        except OSError as e:
+            self.log(f"workers: publish failed: {e}")
+
+    def ingest_workers(self) -> int:
+        """inbox に届いた局をリプレイに足し、足した局数を返す。"""
+        if self.inbox is None:
+            return 0
+        games = self.inbox.poll(self.trainer.step_count)
+        if games:
+            self.replay.add_games(games)
+            self.state["games_total"] = self.replay.total_games
+            self.state["chunk_index"] = self.replay.chunk_index
+            self.log(f"workers: ingested {len(games)} games (total {self.inbox.stats['games']})")
+        return len(games)
 
     def elapsed(self) -> float:
         return self.session_elapsed_offset + (time.time() - self.started)
@@ -299,6 +331,8 @@ class Runner:
             "gpu": gpu,
             "restarts": self.state.get("restarts", [])[-5:],
         }
+        if self.inbox is not None:
+            status["workers"] = self.inbox.stats
         if self.loop and self.loop.opponent is not None:
             es = dict(self.exploiter_stats)
             es["winrate"] = round((es["wins"] + 0.5 * es["draws"]) / max(1, es["games"]), 4)
@@ -330,8 +364,16 @@ class Runner:
         tr, rr = self.cfg["train"], self.cfg["run"]
         last_ck = time.time()
         last_status = 0.0
+        last_ingest = 0.0
         new_games = 0
-        self.log(f"run: device={self.device} params={self.model.n_params()/1e6:.1f}M n_games={sp['n_games']} threads={sp['threads']}")
+        if self.inbox is not None:
+            self.sd.inbox.mkdir(exist_ok=True)
+            self.sd.weights.mkdir(exist_ok=True)
+            self.publish_weights()
+        elif self.cfg.get("workers", {}).get("enabled"):
+            self.log("workers: disabled (exploiter runs do not take worker games)")
+        self.log(f"run: device={self.device} params={self.model.n_params()/1e6:.1f}M n_games={sp['n_games']} threads={sp['threads']}"
+                 + (f" workers=inbox(max_lag_steps={self.inbox.max_lag_steps})" if self.inbox else ""))
         while True:
             # フラグ
             if self.sd.flag("STOP"):
@@ -358,11 +400,13 @@ class Runner:
                 self.session_games += len(finished)
                 self.state["games_total"] = self.replay.total_games
                 self.state["chunk_index"] = self.replay.chunk_index
+            if self.inbox is not None and time.time() - last_ingest >= float(self.cfg["workers"].get("ingest_seconds", 10)):
+                new_games += self.ingest_workers()
+                last_ingest = time.time()
             # 学習: 新規 N 局ごとに、局面数 × replay_ratio / batch ステップ
             if new_games >= tr["train_every_games"] and self.replay.n_games() >= tr["min_window_games"]:
-                positions = sum(len(g["moves"]) for g in finished) if finished else 0
                 avg_len = self.replay.n_positions() / max(1, self.replay.n_games())
-                steps = max(1, int(round(new_games * avg_len * tr["replay_ratio"] / tr["batch_size"])))
+                steps = train_steps(new_games, avg_len, tr)
                 t0 = time.time()
                 # バッチ作成（CPU、replay_features は GIL を離す）と学習ステップ（GPU）を重ねる
                 sample = lambda: self.replay.sample(tr["batch_size"], self.rng, tr["mirror_prob"], tr["lambda_z"], self.cfg["search"]["policy_topk"])  # noqa: E731
@@ -375,6 +419,7 @@ class Runner:
                 self.last_train["steps"] = steps
                 self.last_train["sec"] = round(time.time() - t0, 1)
                 self.loop.set_model(self.model)
+                self.publish_weights()
                 self.state["step"] = self.trainer.step_count
                 new_games = 0
             now = time.time()

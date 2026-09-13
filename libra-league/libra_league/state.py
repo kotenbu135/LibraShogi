@@ -43,6 +43,8 @@ class StateDir:
         self.status_json = root / "status.json"
         self.config_toml = root / "config.toml"
         self.log = root / "log.txt"
+        self.inbox = root / "inbox"      # 自己対局ワーカーが置く対局ファイル（[workers] enabled の run だけ作る）
+        self.weights = root / "weights"  # ワーカーに配る重み
 
     def create(self) -> None:
         for d in (self.root, self.checkpoints, self.replay, self.games):
