@@ -37,39 +37,15 @@ class Oracle:
         self.p.wait(timeout=5)
 
 
-def nihikyo_forbidden(sfen, move):
-    """二飛香に当たる飛・香打ちか（手番側の自分の飛・香が既にある筋へ打つ）。"""
-    if move[:2] not in ("R*", "L*"):
-        return False
-    board, turn = sfen.split()[:2]
-    col = 9 - int(move[2])  # SFEN の列（9 筋が 0）
-    for row in board.split("/"):
-        c = 0
-        for ch in row:
-            if ch.isdigit():
-                c += int(ch)
-                continue
-            if ch == "+":
-                continue
-            if c == col and ch in (("R", "L") if turn == "b" else ("r", "l")):
-                return True
-            c += 1
-    return False
-
-
 def play_game(oracle, rng, mode, aggressive, stats):
     """1 局の布石を進め、各手番で合法手集合を比較する。aggressive なら先手は後手玉に当てる手を優先する。"""
     pos = ls.Position(mode)
-    oracle.ask("reset")
+    oracle.ask("reset " + ("1" if mode == "tenbin" else "0"))  # 天秤将棋は二飛香の旗を立てる
     for ply in range(40):
         mine = set(pos.legal_moves())
         theirs = oracle.legal()
         if mode == "tenbin" and ply < 2:
             theirs = {m for m in theirs if m.startswith("K*")}  # GUI 側は kings フェーズで玉だけに絞る
-        if mode == "tenbin":
-            # 二飛香（2026-09-13 決定）は desktop の wasm にまだ無い。追いつくまで wasm 側から除いて比べる。
-            # 40 手目の制限と重なる局面（遮る手が二飛香だけ）は除いても一致しないので、その局は ruling41 の比較で落ちる。
-            theirs = {m for m in theirs if not nihikyo_forbidden(pos.sfen(), m)}
         if mine != theirs:
             raise AssertionError(
                 f"ply {ply} mismatch\n{pos.sfen()}\nonly libra: {sorted(mine - theirs)}\nonly wasm: {sorted(theirs - mine)}"

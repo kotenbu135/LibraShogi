@@ -127,7 +127,7 @@ libra-sim（`libra-sim/tests/perft.cpp`）で固定している perft 値。後�
 
 上の天秤将棋の値のうち二飛香（2026-09-13）より前からあるものは、自分の飛・香が盤上に 2 枚そろわない深さなので二飛香を入れても変わらない。
 
-合法手集合は desktop の wasm（dlshogi 由来、GPL。実行するだけ）とランダム局面で突き合わせて一致を確認する（`libra-sim/tests/blackbox_wasm.py`）。wasm が二飛香に追いつくまでは、天秤将棋の局で wasm 側の合法手から二飛香に当たる飛・香打ちを除いて比べる。
+合法手集合は desktop の wasm（dlshogi 由来、GPL。実行するだけ）とランダム局面で突き合わせて一致を確認する（`libra-sim/tests/blackbox_wasm.py`）。二飛香は desktop 0.8.0（`1b5b59c` の wasm）から wasm にも入っており、天秤将棋の局は `fw_reset(1)`（二飛香の旗）、布石将棋の局は `fw_reset(0)` で盤を作って、除外なしで比べる。旗の無い古い wasm ではオラクルが起動時に止まる。
 
 ## 7. 棋譜と結果の記録
 
@@ -143,5 +143,5 @@ libra-sim（`libra-sim/tests/perft.cpp`）で固定している perft 値。後�
 | desktop GUI `12c4a8d` | 無し | 無し | 無し（`win` は投了扱い） | 同じ（wasm の `verifyFinalSfen`） | 1 回聞き直し、2 回目で一時停止 |
 | 大会ルール（WCSC36） | 同じ | 320 手 | 同じ | — | 負け |
 
-- **二飛香（§3.2、2026-09-13 決定）**: Libra（libra-sim、tenbinshogi.com の WASM）は 2026-09-13 から適用する。公開版 fusekishogi.com・オンラインの判定役・desktop GUI（cppshogi）は、それぞれの Issue（kotenbu135/fuseki-shogi-web#1、kotenbu135/tenbin-shogi-desktop#1）が入るまで二飛香が無く、飛・香を同じ筋に重ねる手を合法として受け付ける。その間、desktop で Libra と人が指すと人の側だけ二飛香の手が通る。両方が入ったら tenbin-shogi-web の `scripts/oracle/fuseki_oracle.mjs` で合法手集合の一致を確かめる。
-- 二飛香より前（2026-09-13 まで）の天秤将棋の棋譜（L-S の `~/libra-run/ls`、搾取者 `~/libra-run/lx` の自己対局、計測対局）は、陣の多くが二飛香に当たるので新しい規定では再生できない。
+- **二飛香（§3.2、2026-09-13 決定）**: Libra（libra-sim、tenbinshogi.com の WASM）は 2026-09-13 から適用する。公開版 fusekishogi.com・オンラインの判定役（kotenbu135/fuseki-shogi-web#1）と desktop GUI（kotenbu135/tenbin-shogi-desktop#1、0.8.0 でリリース）も 2026-09-13 に入った。desktop 0.8.0 より前の GUI は二飛香が無く、人の側だけ二飛香の手が通る（Libra はその局面を非合法として `bad position` を出し投了する）。
+- 二飛香より前（2026-09-13 まで）の天秤将棋の棋譜（L-S の `~/libra-run/ls-v0`、搾取者 `~/libra-run/lx-v0` の自己対局、計測対局）は、陣の多くが二飛香に当たるので新しい規定では再生できない。
