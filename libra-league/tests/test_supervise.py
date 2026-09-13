@@ -88,9 +88,19 @@ def _holder(sd: StateDir, body: str) -> subprocess.Popen:
     """run.lock を持つ「稼働中のランナー」（cmdline に libra_league を含むプロセス）。"""
     sd.create()
     p = subprocess.Popen([sys.executable, "-c", textwrap.dedent(body), "libra_league"])
-    time.sleep(0.2)  # exec が済むまで（/proc/<pid>/cmdline が子のものになるまで）
     (sd.root / "run.lock").write_text(str(p.pid))
+    deadline = time.monotonic() + 20.0
+    while running_pid(sd.root / "run.lock") != p.pid:  # exec が済んで cmdline が子のものになるまで
+        assert time.monotonic() < deadline and p.poll() is None
+        time.sleep(0.02)
     return p
+
+
+def _wait_log(sd: StateDir, text: str, timeout: float = 20.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not (sd.log.exists() and text in sd.log.read_text(encoding="utf-8")):
+        assert time.monotonic() < deadline, text
+        time.sleep(0.02)
 
 
 def test_start_clears_leftover_flags(tmp_path):
@@ -114,17 +124,24 @@ def test_start_waits_for_stopping_run(tmp_path):
         import time
         from pathlib import Path
         root = Path({str(sd.root)!r})
-        time.sleep(1.5)  # チェックポイントを書いている
+        while not (root / "go").exists():  # チェックポイントを書いている（テストが合図するまで止まらない）
+            time.sleep(0.02)
         (root / "STOP").unlink()
         (root / "run.lock").unlink()
     """)
     try:
+        import threading
+
+        def finish_stop():
+            _wait_log(sd, "waiting for the running process to stop")
+            (sd.root / "go").write_text("1")
+
+        t = threading.Thread(target=finish_stop)
+        t.start()
         argv = _child(tmp_path, "sys.exit(0)\n")
-        t0 = time.monotonic()
-        assert supervise(sd, argv, delay=0.0, stop_wait=20.0) == 0
-        assert time.monotonic() - t0 >= 1.0
-        assert _count(sd) == 1
-        assert "waiting for the running process to stop" in sd.log.read_text(encoding="utf-8")
+        assert supervise(sd, argv, delay=0.0, stop_wait=60.0) == 0
+        t.join()
+        assert _count(sd) == 1  # 待ってから 1 回だけ起動した
     finally:
         holder.kill()
         holder.wait()
@@ -139,9 +156,8 @@ def test_start_refuses_running_run(tmp_path):
         assert not (sd.root / "count").exists()
         assert "already running" in sd.log.read_text(encoding="utf-8")
         sd.set_flag("STOP")  # 停止を送っても止まらない
-        t0 = time.monotonic()
-        assert supervise(sd, argv, delay=0.0, stop_wait=1.0) == EXIT_ALREADY_RUNNING
-        assert 1.0 <= time.monotonic() - t0 < 10.0
+        assert supervise(sd, argv, delay=0.0, stop_wait=0.5) == EXIT_ALREADY_RUNNING
+        assert "did not stop within" in sd.log.read_text(encoding="utf-8")
         assert not (sd.root / "count").exists() and sd.flag("STOP")  # 動いている run の STOP は消さない
     finally:
         holder.kill()
