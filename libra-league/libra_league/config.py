@@ -28,6 +28,7 @@ DEFAULTS: dict[str, Any] = {
         "mate_nodes_root": 200,
         "proof_nodes": 1000,
         "proof_min_ply": 36,
+        "defer_root_proof": True,  # 根の証明探索を GPU の評価中に解く（棋譜は変わらない。false で apply の中で解く）
     },
     "selfplay": {
         "n_games": 512,

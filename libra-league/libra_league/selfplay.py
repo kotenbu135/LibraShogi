@@ -127,8 +127,8 @@ def _quiet_inductor() -> None:
 class SelfPlayLoop:
     def __init__(self, search_cfg: dict, n_games: int, threads: int, seed: int, device: torch.device, infer_dtype: str = "float16",
                  compile: str = "none"):
-        # 根の証明探索は round() で GPU が評価している間に解く（CPU の apply から外す。棋譜は変わらない）
-        self.engine = librasearch.SelfPlay({**search_cfg, "defer_root_proof": True}, n_games, seed, threads)
+        # 根の証明探索は round() で GPU が評価している間に解く（CPU の apply から外す。棋譜は変わらない）。設定の false で切れる
+        self.engine = librasearch.SelfPlay({"defer_root_proof": True, **search_cfg}, n_games, seed, threads)
         self.n_games = n_games
         self.device = device
         self.dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[infer_dtype]

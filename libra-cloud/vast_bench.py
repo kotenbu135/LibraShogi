@@ -31,6 +31,14 @@ ONSTART = ("(for i in $(seq 60); do chown root:root /root /root/.ssh /root/.ssh/
            "sleep 2; done) &")
 
 
+def bench_command(minutes: int, threads: int, n_games: int, warmup: int, defers: list[str]) -> str:
+    """ホストで回すコマンド。defers が空なら設定のまま 1 回、["off", "on"] なら同じホストで根の証明探索の先送りを
+    切り替えて続けて回す（結果は /root/out-off、/root/out-on）。threads が 0 ならホストの CPU 数（12 まで）。"""
+    head = f"T={threads}; [ $T -gt 0 ] || T=$(( $(nproc) < 12 ? $(nproc) : 12 )); "
+    runs = [f"bash /root/libra/libra-cloud/bench/host_bench.sh {minutes} $T {n_games} {warmup} {d}".rstrip() for d in (defers or [""])]
+    return head + "; ".join(runs)
+
+
 def image_cuda(image: str, default: float = 12.8) -> float:
     """イメージのタグから CUDA の版（例: ...-cuda-12.9-... → 12.9、pytorch/pytorch:...-cuda12.8-... → 12.8）。
     ホストのドライバーがこれより古いと CUDA の前方互換ライブラリが使われ、GeForce では
@@ -145,6 +153,7 @@ def main() -> int:
     ap.add_argument("--min-cores", type=int, default=8, help="CPU コア数の下限（ワーカーは 12 スレッド。CPU 律速を避けて比べるときは 16 以上）")
     ap.add_argument("--min-cpu-ghz", type=float, default=0.0, help="CPU の最大周波数の下限（探索の反映は 1 スレッドの速さで決まる。例: 4.4）")
     ap.add_argument("--dry-run", action="store_true", help="オファーを選ぶだけで借りない")
+    ap.add_argument("--defer-ab", action="store_true", help="同じホストで search.defer_root_proof を off → on で続けて回す（各 --minutes 分）")
     ap.add_argument("--instance", type=int, default=0, help="借りてあるインスタンスを使う（新しく借りない。終わったら消す）")
     a = ap.parse_args()
     from vastai.sdk import VastAI
@@ -222,14 +231,18 @@ def main() -> int:
                  log_path=out / "setup.log")
         result["t_setup_s"] = round(time.time() - t0)
         log(f"setup done in {result['t_setup_s']} s; running worker {a.minutes} min")
-        threads = a.threads or 0
-        cmd = (f"T={threads}; [ $T -gt 0 ] || T=$(( $(nproc) < 12 ? $(nproc) : 12 )); "
-               f"bash /root/libra/libra-cloud/bench/host_bench.sh {a.minutes} $T {a.n_games} {a.warmup}")
-        host.ssh(cmd, timeout=a.minutes * 60 + 900, log_path=out / "bench.log")
-        host.get("/root/out", out)
-        rep = json.loads((out / "out" / "report.json").read_text())
-        result["report"] = rep
-        log(f"report: {json.dumps(rep)}")
+        defers = ["off", "on"] if a.defer_ab else []
+        cmd = bench_command(a.minutes, a.threads or 0, a.n_games, a.warmup, defers)
+        host.ssh(cmd, timeout=(a.minutes * 60 + 900) * max(1, len(defers)), log_path=out / "bench.log")
+        if defers:
+            result["report"] = {}
+            for d in defers:
+                host.get(f"/root/out-{d}", out)
+                result["report"][d] = json.loads((out / f"out-{d}" / "report.json").read_text())
+        else:
+            host.get("/root/out", out)
+            result["report"] = json.loads((out / "out" / "report.json").read_text())
+        log(f"report: {json.dumps(result['report'])}")
         return 0
     except KeyboardInterrupt:
         log("interrupted")

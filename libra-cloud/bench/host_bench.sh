@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # vast.ai のホストで libra worker（--detached）を MINUTES 分回し、inbox の対局ファイルから局/日を出す。
-# 使い方: host_bench.sh MINUTES THREADS N_GAMES WARMUP_S   結果は /root/out（report.json、worker.log、gpu.csv）
+# 使い方: host_bench.sh MINUTES THREADS N_GAMES WARMUP_S [DEFER]   結果は /root/out（report.json、worker.log、gpu.csv）
+# DEFER（on | off）を与えると search.defer_root_proof を切り替えて回し、結果を /root/out-on・/root/out-off に置く（同じホストでの比較用）
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 MINUTES=${1:-20}
 THREADS=${2:-12}
 N_GAMES=${3:-512}
 WARMUP=${4:-300}
-RUN=/root/libra/run
-OUT=/root/out
+DEFER=${5:-}
+RUN=$(pwd)/run
+OUT=/root/out${DEFER:+-$DEFER}
 PY=$(cat /root/python_path)  # host_setup.sh が選んだ Python
 export PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-cloud
 export OMP_NUM_THREADS=4
 mkdir -p "$OUT"
+if [ -n "$DEFER" ]; then
+  V=$([ "$DEFER" = on ] && echo true || echo false)
+  sed -i "s/^defer_root_proof = .*/defer_root_proof = $V/" "$RUN/ls/config.toml"
+  grep -q "^defer_root_proof = $V$" "$RUN/ls/config.toml"
+fi
 rm -rf "$RUN/ls/inbox"
 mkdir -p "$RUN/ls/inbox"
 (while true; do nvidia-smi --query-gpu=timestamp,utilization.gpu,power.draw,memory.used --format=csv,noheader >> "$OUT/gpu.csv"; sleep 30; done) &

@@ -94,6 +94,7 @@ def test_bench_config_is_standalone():
     assert b["selfplay"]["openings"] == "" and b["exploiter"]["main_ckpt"] == "" and not b["auto"]["enabled"] and not b["workers"]["enabled"]
     assert b["selfplay"]["n_games"] == 256 and b["selfplay"]["threads"] == 8
     assert b["search"] == cfg["search"] and b["net"] == cfg["net"] and b["run_id"] == cfg["run_id"]
+    assert b["search"]["defer_root_proof"] is True  # ホストで on / off を切り替えられるよう設定に出ている
     assert cfg["selfplay"]["openings"] != ""  # 元の設定は変えない
 
 
@@ -256,3 +257,18 @@ def test_host_scripts_parse():
     for s in sorted((ROOT / "libra-cloud" / "bench").glob("*.sh")):
         subprocess.run(["bash", "-n", str(s)], check=True)
     assert (ROOT / "libra-cloud" / "bench" / "host_setup.sh").exists() and (ROOT / "libra-cloud" / "bench" / "host_bench.sh").exists()
+
+
+def test_bench_command_defer_ab_on_same_host():
+    """--defer-ab では同じホストで根の証明探索の先送りを off → on の順に続けて回し、結果を別のディレクトリに置く。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("vast_bench", ROOT / "libra-cloud" / "vast_bench.py")
+    vb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vb)
+    one = vb.bench_command(20, 6, 512, 300, [])
+    assert one.count("host_bench.sh") == 1 and one.rstrip().endswith("host_bench.sh 20 $T 512 300")
+    ab = vb.bench_command(15, 6, 512, 300, ["off", "on"])
+    assert ab.count("host_bench.sh") == 2 and ab.index("300 off") < ab.index("300 on") and "T=6;" in ab
+    sh = (ROOT / "libra-cloud" / "bench" / "host_bench.sh").read_text()
+    assert "defer_root_proof" in sh and "/root/out${DEFER:+-$DEFER}" in sh
