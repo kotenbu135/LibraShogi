@@ -163,6 +163,18 @@ def test_wait_ssh_gives_up_on_stalled_instance(monkeypatch):
         vb.wait_ssh(Stuck(), 1, timeout=1200, stall=480)
     assert 480 < clock[0] < 600  # 20 分待たずに 8 分強で見切る
 
+    # running なのに鍵が拒まれ続ける（9/14、authorized_keys の権限）: 5 分で見切る。状態が変わらなくても stall では切らない
+    class Denied:
+        def show_instance(self, iid):
+            return {"actual_status": "running", "status_msg": "success", "ssh_host": "ssh7.example", "ssh_port": 1}
+
+    monkeypatch.setattr(vb.Host, "ssh", lambda self, cmd, timeout, log_path=None, check=True: 255)
+    clock[0] = 0.0
+    with pytest.raises(TimeoutError, match="ssh failed"):
+        vb.wait_ssh(Denied(), 1, timeout=1200, stall=100, ssh_fail=300)
+    assert 300 < clock[0] < 400
+    assert "authorized_keys" in vb.ONSTART and "chmod 600" in vb.ONSTART
+
 
 def test_host_scripts_parse():
     for s in sorted((ROOT / "libra-cloud" / "bench").glob("*.sh")):

@@ -24,6 +24,11 @@ from libra_cloud.bench import pick_offers  # noqa: E402
 # （pytorch/pytorch の 4.3 GB は 9/14 に 2 台で 15 分以上取得が終わらなかった）
 IMAGE = "vastai/pytorch:2.11.0-cu128-cuda-12.9-mini-py312-2026-09-08"
 KEY = Path.home() / ".ssh" / "id_ed25519_vast"
+# vastai/pytorch では sshd が "bad ownership or modes for file /root/.ssh/authorized_keys" で鍵を拒んだ（9/14）。
+# 起動時に /root と /root/.ssh の所有者と権限を正す（鍵が書かれるのが後になっても効くよう 2 分間繰り返す）
+ONSTART = ("(for i in $(seq 60); do chown root:root /root /root/.ssh /root/.ssh/authorized_keys 2>/dev/null; "
+           "chmod go-w /root 2>/dev/null; chmod 700 /root/.ssh 2>/dev/null; chmod 600 /root/.ssh/authorized_keys 2>/dev/null; "
+           "sleep 2; done) &")
 
 
 def log(msg: str) -> None:
@@ -58,11 +63,13 @@ class Host:
                        stdout=subprocess.DEVNULL)
 
 
-def wait_ssh(v, iid: int, timeout: float, stall: float = 480.0) -> Host:
-    """ssh で入れるまで待つ。状態（イメージ取得の進み具合など）が stall 秒変わらなければ見切って TimeoutError。"""
+def wait_ssh(v, iid: int, timeout: float, stall: float = 480.0, ssh_fail: float = 300.0) -> Host:
+    """ssh で入れるまで待つ。状態（イメージ取得の進み具合など）が stall 秒変わらないか、running になってから
+    ssh_fail 秒入れなければ（鍵が拒まれるなど）見切って TimeoutError。"""
     end = time.monotonic() + timeout
     last = ""
     changed = time.monotonic()
+    running_since: float | None = None
     while time.monotonic() < end:
         inst = v.show_instance(iid) or {}
         st = f"{inst.get('actual_status')} / {inst.get('status_msg') or ''}".strip()
@@ -70,15 +77,18 @@ def wait_ssh(v, iid: int, timeout: float, stall: float = 480.0) -> Host:
             log(f"instance {iid}: {st[:160]}")
             last = st
             changed = time.monotonic()
-        elif time.monotonic() - changed > stall:
+        elif inst.get("actual_status") != "running" and time.monotonic() - changed > stall:
             raise TimeoutError(f"instance {iid} stalled for {stall:.0f} s: {st[:120]}")
         if inst.get("actual_status") == "running" and inst.get("ssh_host") and inst.get("ssh_port"):
+            running_since = running_since if running_since is not None else time.monotonic()
             h = Host(inst["ssh_host"], int(inst["ssh_port"]))
             try:
                 if h.ssh("true", timeout=40, check=False) == 0:
                     return h
             except subprocess.TimeoutExpired:
                 pass
+            if time.monotonic() - running_since > ssh_fail:
+                raise TimeoutError(f"instance {iid} running but ssh failed for {ssh_fail:.0f} s (see v.logs for sshd errors)")
         time.sleep(15)
     raise TimeoutError(f"instance {iid} not reachable in {timeout:.0f} s")
 
@@ -133,7 +143,8 @@ def main() -> int:
     result: dict = {"gpu": a.gpu, "image": a.image, "minutes": a.minutes, "n_games": a.n_games}
     try:
         for offer in cands[:3]:
-            r = v.create_instance(offer["id"], image=a.image, disk=a.disk, label="libra-bench", ssh=True, direct=True, cancel_unavail=True)
+            r = v.create_instance(offer["id"], image=a.image, disk=a.disk, label="libra-bench", ssh=True, direct=True, cancel_unavail=True,
+                                  onstart_cmd=ONSTART)
             iid = (r or {}).get("new_contract")
             log(f"create #{offer['id']} ${offer['dph_total']:.3f}/h -> instance {iid} {'' if iid else str(r)[:200]}")
             if not iid:
