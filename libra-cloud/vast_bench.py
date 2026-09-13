@@ -31,6 +31,16 @@ ONSTART = ("(for i in $(seq 60); do chown root:root /root /root/.ssh /root/.ssh/
            "sleep 2; done) &")
 
 
+def image_cuda(image: str, default: float = 12.8) -> float:
+    """イメージのタグから CUDA の版（例: ...-cuda-12.9-... → 12.9、pytorch/pytorch:...-cuda12.8-... → 12.8）。
+    ホストのドライバーがこれより古いと CUDA の前方互換ライブラリが使われ、GeForce では
+    "Error 804: forward compatibility was attempted on non supported HW" で GPU を初期化できない（9/14、CUDA 12.8 のホスト）。"""
+    import re
+
+    m = re.search(r"cuda-?(\d+)\.(\d+)", image)
+    return float(f"{m.group(1)}.{m.group(2)}") if m else default
+
+
 def log(msg: str) -> None:
     print(time.strftime("%H:%M:%S ") + msg, flush=True)
 
@@ -147,9 +157,11 @@ def main() -> int:
     if credit < a.min_credit:
         log(f"credit below ${a.min_credit:.2f}; not renting")
         return 2
-    q = f"gpu_name={a.gpu.replace(' ', '_')} num_gpus=1 rentable=true verified=true reliability>0.98 inet_down>=200 cuda_max_good>=12.8 disk_space>={a.disk}"
+    min_cuda = image_cuda(a.image)
+    q = (f"gpu_name={a.gpu.replace(' ', '_')} num_gpus=1 rentable=true verified=true reliability>0.98 inet_down>=200 "
+         f"cuda_max_good>={min_cuda} disk_space>={a.disk}")
     offers = v.search_offers(query=q, type="on-demand", order="dph_total", limit=100, storage=a.disk) or []
-    cands = pick_offers(offers, max_dph=a.max_dph, min_cores=a.min_cores, min_cpu_ghz=a.min_cpu_ghz)
+    cands = pick_offers(offers, max_dph=a.max_dph, min_cores=a.min_cores, min_cpu_ghz=a.min_cpu_ghz, min_cuda=min_cuda)
     log(f"{len(offers)} offers, {len(cands)} usable; cheapest: "
         + ", ".join(f"#{o['id']} ${o['dph_total']:.3f}/h cpu {o.get('cpu_cores_effective')} {str(o.get('cpu_name'))[:28]} "
                     f"{o.get('cpu_ghz')} GHz {o.get('geolocation', '')}" for o in cands[:3]))

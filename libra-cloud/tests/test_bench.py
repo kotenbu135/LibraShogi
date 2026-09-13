@@ -205,6 +205,21 @@ def test_ssh_prefers_direct_connection(monkeypatch):
     assert (h.host, h.port) == ("190.111.198.202", 10299)
 
 
+def test_image_cuda_sets_min_driver():
+    """イメージの CUDA より古いドライバーのホストは選ばない（GeForce では前方互換が使えず Error 804、9/14）。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("vast_bench", ROOT / "libra-cloud" / "vast_bench.py")
+    vb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vb)
+    assert vb.image_cuda("vastai/pytorch:2.11.0-cu128-cuda-12.9-mini-py312-2026-09-08") == 12.9
+    assert vb.image_cuda("pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime") == 12.8
+    assert vb.image_cuda(vb.IMAGE) == 12.9
+    assert vb.image_cuda("ubuntu:24.04") == 12.8
+    offers = [_offer(1, 0.17, cuda_max_good=12.8), _offer(2, 0.19, cuda_max_good=13.2)]
+    assert [o["id"] for o in pick_offers(offers, max_dph=0.5, min_cuda=vb.image_cuda(vb.IMAGE))] == [2]
+
+
 def test_try_create_reports_api_error_body():
     """作成の 400 で落ちず、API の本文を理由にして次のオファーへ移れる（9/14 に理由が見えないまま落ちた）。"""
     import importlib.util
