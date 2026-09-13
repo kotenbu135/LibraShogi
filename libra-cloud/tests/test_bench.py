@@ -176,6 +176,38 @@ def test_wait_ssh_gives_up_on_stalled_instance(monkeypatch):
     assert "authorized_keys" in vb.ONSTART and "chmod 600" in vb.ONSTART
 
 
+def test_try_create_reports_api_error_body():
+    """作成の 400 で落ちず、API の本文を理由にして次のオファーへ移れる（9/14 に理由が見えないまま落ちた）。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("vast_bench", ROOT / "libra-cloud" / "vast_bench.py")
+    vb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vb)
+
+    class Resp:
+        text = '{"error": "invalid_args", "msg": "offer no longer available"}'
+
+    class HTTPError(Exception):
+        def __init__(self):
+            super().__init__("400 Client Error: Bad Request")
+            self.response = Resp()
+
+    class Api:
+        def __init__(self, result):
+            self.result = result
+
+        def create_instance(self, offer_id, **kw):
+            if isinstance(self.result, Exception):
+                raise self.result
+            return self.result
+
+    iid, why = vb.try_create(Api(HTTPError()), 1, image="x")
+    assert iid is None and "400" in why and "offer no longer available" in why
+    assert vb.try_create(Api({"success": True, "new_contract": 42}), 1) == (42, "")
+    iid, why = vb.try_create(Api({"success": False, "msg": "no"}), 1)
+    assert iid is None and "no" in why
+
+
 def test_host_scripts_parse():
     for s in sorted((ROOT / "libra-cloud" / "bench").glob("*.sh")):
         subprocess.run(["bash", "-n", str(s)], check=True)

@@ -93,6 +93,18 @@ def wait_ssh(v, iid: int, timeout: float, stall: float = 480.0, ssh_fail: float 
     raise TimeoutError(f"instance {iid} not reachable in {timeout:.0f} s")
 
 
+def try_create(v, offer_id: int, **kw) -> tuple[int | None, str]:
+    """インスタンスを作る。(インスタンス id, 失敗の理由)。API の 400 などは本文を理由に入れて None を返す（次のオファーへ移る）。"""
+    try:
+        r = v.create_instance(offer_id, **kw) or {}
+    except Exception as e:  # noqa: BLE001  requests.HTTPError など
+        resp = getattr(e, "response", None)
+        body = getattr(resp, "text", "") if resp is not None else ""
+        return None, f"{type(e).__name__}: {str(e)[:120]} {body[:300]}".strip()
+    iid = r.get("new_contract")
+    return (int(iid), "") if iid else (None, str(r)[:300])
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--gpu", required=True, help='例: "RTX 3090"')
@@ -143,10 +155,9 @@ def main() -> int:
     result: dict = {"gpu": a.gpu, "image": a.image, "minutes": a.minutes, "n_games": a.n_games}
     try:
         for offer in cands[:3]:
-            r = v.create_instance(offer["id"], image=a.image, disk=a.disk, label="libra-bench", ssh=True, direct=True, cancel_unavail=True,
-                                  onstart_cmd=ONSTART)
-            iid = (r or {}).get("new_contract")
-            log(f"create #{offer['id']} ${offer['dph_total']:.3f}/h -> instance {iid} {'' if iid else str(r)[:200]}")
+            iid, why = try_create(v, offer["id"], image=a.image, disk=a.disk, label="libra-bench", ssh=True, direct=True,
+                                  cancel_unavail=True, onstart_cmd=ONSTART)
+            log(f"create #{offer['id']} ${offer['dph_total']:.3f}/h -> instance {iid} {why}")
             if not iid:
                 continue
             result["offer"] = {k: offer.get(k) for k in ("id", "dph_total", "gpu_name", "cpu_name", "cpu_cores_effective", "cpu_ram",
