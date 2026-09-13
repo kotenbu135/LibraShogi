@@ -31,5 +31,7 @@ info = {"torch": torch.__version__, "cuda": torch.version.cuda, "gpu": torch.cud
 print(json.dumps(info))
 open("/root/host_info.json", "w").write(json.dumps(info))
 EOF
-nvidia-smi --query-gpu=name,driver_version,power.limit,memory.total --format=csv,noheader
+nvidia-smi --query-gpu=name,driver_version,power.limit,memory.total,pcie.link.gen.current,pcie.link.gen.max,pcie.link.width.current,pcie.link.width.max --format=csv,noheader
+lscpu | grep -E "^(Model name|CPU\(s\)|Thread|Core|Socket)" || true
+nproc
 echo "setup done in $(( $(date +%s) - t0 )) s"

@@ -236,7 +236,7 @@ def test_worker_waits_for_learner_and_exits_when_it_stops(tmp_path: Path):
     inbox.mkdir()
     logs: list[str] = []
     w = Worker(cfg, "a", weights, inbox, torch.device("cpu"), stop_root=root, lock=root / "run.lock", poll_seconds=0.1,
-               lock_seconds=0.1, log=logs.append)
+               lock_seconds=0.1, perf_seconds=0.2, log=logs.append)
     t = threading.Thread(target=w.run, daemon=True)
     t.start()
     _wait(lambda: any("waiting for the learner" in s for s in logs), 30, "waiting log")
@@ -251,6 +251,26 @@ def test_worker_waits_for_learner_and_exits_when_it_stops(tmp_path: Path):
         holder.wait()
     t.join(timeout=60)
     assert not t.is_alive() and any("learner not running" in s for s in logs)
+    # 段ごとの時間（クラウドのホストで CPU と GPU のどちらが遅いかを分ける）
+    perf = [s for s in logs if ": perf " in s]
+    assert perf and all(k in perf[0] for k in ("evals/s", "collect", "eval", "apply"))
+
+
+def test_selfplay_round_timing():
+    """timing に dict を入れたときだけ段ごとの時間を累計する（既定の None では測らない）。"""
+    from libra_league.selfplay import SelfPlayLoop
+
+    cfg = load_config(None)
+    cfg["search"].update({"full_sims": 4, "fast_sims": 4, "proof_nodes": 0, "mate_nodes_root": 0, "max_moves_per_game": 20})
+    loop = SelfPlayLoop(cfg["search"], 4, 1, 3, torch.device("cpu"), "float32")
+    loop.set_model(LibraNet(NetConfig.from_dict(NET)))
+    loop.round()
+    assert loop.timing is None
+    loop.timing = {}
+    for _ in range(5):
+        loop.round()
+    tm = loop.timing
+    assert tm["rounds"] == 5 and all(tm[k] > 0 for k in ("collect", "eval", "apply"))
 
 
 def test_runner_ingests_games_from_worker_process(tmp_path: Path):

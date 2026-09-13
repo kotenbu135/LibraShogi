@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import time
 
 import numpy as np
 import torch
@@ -142,6 +143,8 @@ class SelfPlayLoop:
         self.wdl = torch.empty((n_games, 3), dtype=torch.float32, pin_memory=pin)
         self.model: InferenceNet | None = None
         self.opponent: InferenceNet | None = None  # 搾取者モード: 凍結した本体。奇数枠では本体が先手
+        # 段ごとの時間（秒の累計）。dict を入れたときだけ測る: collect（CPU）、eval（H2D・forward・D2H、CUDA は同期まで）、apply（CPU）
+        self.timing: dict | None = None
 
     def _install(self, cur: InferenceNet | None, model: LibraNet) -> InferenceNet:
         if cur is not None and cur.load(model):
@@ -180,7 +183,10 @@ class SelfPlayLoop:
     @torch.no_grad()
     def round(self) -> list[dict]:
         assert self.model is not None
+        tm = self.timing
+        t0 = time.perf_counter() if tm is not None else 0.0
         self.engine.collect(self.sq_np, self.glob_np)
+        t1 = time.perf_counter() if tm is not None else 0.0
         who = None
         if self.opponent is not None:
             # 手番が搾取者側なら自分のネット、相手側なら凍結した本体（偶数枠は搾取者が先手）
@@ -192,8 +198,15 @@ class SelfPlayLoop:
         self.wdl.copy_(wdl, non_blocking=True)
         if self.device.type == "cuda":
             torch.cuda.current_stream(self.device).synchronize()
+        t2 = time.perf_counter() if tm is not None else 0.0
         self.engine.apply(self.logits.numpy(), self.wdl.numpy())
         games = self.engine.take_finished()
+        if tm is not None:
+            t3 = time.perf_counter()
+            tm["rounds"] = tm.get("rounds", 0) + 1
+            tm["collect"] = tm.get("collect", 0.0) + (t1 - t0)
+            tm["eval"] = tm.get("eval", 0.0) + (t2 - t1)
+            tm["apply"] = tm.get("apply", 0.0) + (t3 - t2)
         if self.opponent is not None:
             for g in games:
                 mask_opponent_moves(g, self.exploiter_is_sente(int(g["slot"])))

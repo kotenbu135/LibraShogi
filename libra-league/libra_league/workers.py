@@ -233,7 +233,8 @@ class Worker:
 
     def __init__(self, cfg: dict, worker_id: str, weights: Path, inbox: Path, device: torch.device, *, n_games: int | None = None,
                  threads: int | None = None, stop_root: Path | None = None, lock: Path | None = None, entropy: int | None = None,
-                 poll_seconds: float = 2.0, reload_seconds: float = 10.0, lock_seconds: float = 5.0, log: Callable[[str], None] = print):
+                 poll_seconds: float = 2.0, reload_seconds: float = 10.0, lock_seconds: float = 5.0, perf_seconds: float = 60.0,
+                 log: Callable[[str], None] = print):
         if not WORKER_ID.match(worker_id):
             raise ValueError(f"worker id must match {WORKER_ID.pattern}: {worker_id!r}")
         self.cfg = cfg
@@ -249,6 +250,7 @@ class Worker:
         self.poll_seconds = poll_seconds
         self.reload_seconds = reload_seconds
         self.lock_seconds = lock_seconds
+        self.perf_seconds = perf_seconds  # 段ごとの時間をログに出す間隔（0 で出さない）
         self.log = log
         self.stopping = False  # シグナルで立てる
         self.step: int | None = None
@@ -326,6 +328,9 @@ class Worker:
         pending: list[dict] = []
         file_step = self.step
         last_reload = time.monotonic()
+        last_perf = time.monotonic()
+        if self.perf_seconds > 0:
+            loop.timing = {}
         modes = ""
         reason = ""
         while True:
@@ -346,6 +351,14 @@ class Worker:
                 pending = pending[chunk:]
                 file_step = self.step
             now = time.monotonic()
+            if loop.timing is not None and now - last_perf >= self.perf_seconds and loop.timing.get("rounds"):
+                tm, dt = loop.timing, now - last_perf
+                r = tm["rounds"]
+                self.log(f"worker {self.id}: perf rounds/s {r / dt:.1f} evals/s {r * self.n_games / dt:.0f} per round: "
+                         f"collect {tm['collect'] / r * 1000:.1f} ms eval {tm['eval'] / r * 1000:.1f} ms apply {tm['apply'] / r * 1000:.1f} ms "
+                         f"other {max(0.0, dt / r - (tm['collect'] + tm['eval'] + tm['apply']) / r) * 1000:.1f} ms games {self.games + len(pending)}")
+                loop.timing = {}
+                last_perf = now
             if now - last_reload >= self.reload_seconds:
                 last_reload = now
                 m = self._load()
