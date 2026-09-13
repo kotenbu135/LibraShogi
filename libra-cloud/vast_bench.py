@@ -20,7 +20,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from libra_cloud.bench import pick_offers  # noqa: E402
 
-IMAGE = "pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime"  # 手元と同じ torch 2.11.0+cu128
+# 手元と同じ torch 2.11.0+cu128。vast.ai の公式イメージはホストに取得済みのことが多い
+# （pytorch/pytorch の 4.3 GB は 9/14 に 2 台で 15 分以上取得が終わらなかった）
+IMAGE = "vastai/pytorch:2.11.0-cu128-cuda-12.9-mini-py312-2026-09-08"
 KEY = Path.home() / ".ssh" / "id_ed25519_vast"
 
 

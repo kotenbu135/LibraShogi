@@ -5,16 +5,24 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 t0=$(date +%s)
+# torch を読める Python を探す（vastai/pytorch は /venv/main、pytorch/pytorch は /opt/conda で PATH 上）
+PY=""
+for c in /venv/main/bin/python /opt/conda/bin/python python3 python; do
+  if command -v "$c" >/dev/null 2>&1 && "$c" -c "import torch" 2>/dev/null; then PY=$(command -v "$c"); break; fi
+done
+[ -n "$PY" ] || { echo "no python with torch"; exit 1; }
+echo "$PY" > /root/python_path
+export PATH="$(dirname "$PY"):$PATH"
 if ! command -v g++ >/dev/null; then
   apt-get update -qq
   DEBIAN_FRONTEND=noninteractive apt-get install -y -qq g++ make >/dev/null
 fi
-python -m pip install -q cmake ninja pybind11 numpy
+"$PY" -m pip install -q cmake ninja pybind11 numpy
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLIBRA_BUILD_ENGINE=OFF -DLIBRA_BUILD_TESTS=OFF \
-  -Dpybind11_DIR="$(python -c 'import pybind11;print(pybind11.get_cmake_dir())')" > /root/cmake.log
+  -DPython_EXECUTABLE="$PY" -Dpybind11_DIR="$("$PY" -c 'import pybind11;print(pybind11.get_cmake_dir())')" > /root/cmake.log
 cmake --build build >> /root/cmake.log
 export PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-cloud
-python - <<'EOF'
+"$PY" - <<'EOF'
 import json, os, platform
 import torch, librashogi, librasearch
 info = {"torch": torch.__version__, "cuda": torch.version.cuda, "gpu": torch.cuda.get_device_name(0),

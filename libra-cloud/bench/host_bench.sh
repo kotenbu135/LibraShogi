@@ -10,6 +10,7 @@ N_GAMES=${3:-512}
 WARMUP=${4:-300}
 RUN=/root/libra/run
 OUT=/root/out
+PY=$(cat /root/python_path)  # host_setup.sh が選んだ Python
 export PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-cloud
 export OMP_NUM_THREADS=4
 mkdir -p "$OUT"
@@ -21,8 +22,8 @@ START=$(date +%s.%N)
 echo "$START" > "$OUT/start"
 # 終わりは SIGTERM（ワーカーは残りの局を書いてから抜ける）。抜けなければ 2 分後に KILL
 timeout -s TERM --kill-after=120 "${MINUTES}m" \
-  python -m libra_league.cli --root "$RUN" --run ls worker --id bench --detached --threads "$THREADS" --n-games "$N_GAMES" \
+  "$PY" -m libra_league.cli --root "$RUN" --run ls worker --id bench --detached --threads "$THREADS" --n-games "$N_GAMES" \
   > "$OUT/worker.log" 2>&1 || true
 kill "$SMI" 2>/dev/null || true
-python -m libra_cloud.bench report --inbox "$RUN/ls/inbox" --start "$START" --warmup "$WARMUP" --out "$OUT/report.json"
+"$PY" -m libra_cloud.bench report --inbox "$RUN/ls/inbox" --start "$START" --warmup "$WARMUP" --out "$OUT/report.json"
 cp /root/host_info.json "$OUT/" 2>/dev/null || true
