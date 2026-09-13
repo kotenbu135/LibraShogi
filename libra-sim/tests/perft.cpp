@@ -34,6 +34,10 @@ static const Case CASES[] = {
     // 二歩と筋埋め: 7筋に歩を置くと歩は 7 筋以外（8 筋 × 4 マス − ... は d2 で確かめる）
     {"tenbin P7g d1", "position fuseki moves K*5i K*5a P*7g", MODE_TENBIN, 1, 7 * 35},
     {"tenbin P7g P3c d1", "position fuseki moves K*5i K*5a P*7g P*3c", MODE_TENBIN, 1, 6 * 34 + (34 - 3)},
+    // 二飛香（天秤将棋のみ）: 5h に飛を置くと香は 5 筋の空き 2 マス（5f, 5g）に打てない。
+    // 上の値は自分の飛・香が盤上に 2 枚そろわない深さなので、二飛香を入れても変わらない。
+    {"tenbin R5h P1c d1", "position fuseki moves K*5i K*5a R*5h P*1c", MODE_TENBIN, 1, 5 * 34 + (34 - 2)},
+    {"fuseki R5h P1c d1", "position fuseki moves K*5i K*5a R*5h P*1c", MODE_FUSEKI, 1, 6 * 34},
 };
 
 int main(int argc, char** argv) {

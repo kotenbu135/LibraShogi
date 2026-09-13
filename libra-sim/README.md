@@ -28,7 +28,7 @@ TENBIN_DESKTOP_DIR=~/tenbin-shogi-desktop PYTHONPATH=libra-sim/python python lib
 |---|---|
 | `include/libra/types.h` | マス・駒・手の表現、USI 変換 |
 | `include/libra/bitboard.h` | 81 マスのビットボード、利きの表 |
-| `include/libra/position.h` | 局面。布石（玉打ち、二歩、筋埋め禁止、40 手目の制限、41 手目の裁定）と本将棋（打ち歩詰め、千日手、連続王手、宣言法、手数上限）。着手順に依存しない Zobrist と 1↔9 筋の鏡映キー |
+| `include/libra/position.h` | 局面。布石（玉打ち、二歩、筋埋め禁止、二飛香（天秤将棋のみ）、40 手目の制限、41 手目の裁定）と本将棋（打ち歩詰め、千日手、連続王手、宣言法、手数上限）。着手順に依存しない Zobrist と 1↔9 筋の鏡映キー |
 | `python/bindings.cpp` | pybind11（`librashogi.Position`） |
 | `python/librashogi/usi.py` | 勝率↔擬似 cp の換算（GUI と同じ式） |
 | `tests/` | `test_rules.cpp`、`perft.cpp`、`test_python.py`、`blackbox_wasm.py`＋`wasm_oracle.mjs` |

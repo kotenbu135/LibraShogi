@@ -143,6 +143,114 @@ static void test_fuseki_drops() {
   CHECK_EQ(legal_set(r).size(), 8u * 36u);
 }
 
+// 二飛香（天秤将棋のみ）: 自陣の同じ筋に自分の飛・香は合わせて 1 枚まで。手順は Issue #1 の確認用の手順。
+static const char* NIHIKYO_40 =
+    "K*8g K*6b choose:sente P*1g R*8a S*7g N*7c S*9g P*4d L*5g S*6c P*8f B*3b B*3f P*8d G*8h P*3d P*5i G*7b N*4f "
+    "P*7d P*9f P*9d G*6h P*1d P*2h G*5b P*4g S*4c P*7f P*6d N*6f P*2d P*3g N*5d R*2f P*5c P*6g L*2c L*7i L*5a";
+
+static std::vector<std::string> split_tokens(const std::string& s) {
+  std::vector<std::string> v;
+  size_t i = 0;
+  while (i < s.size()) {
+    size_t j = s.find(' ', i);
+    if (j == std::string::npos) j = s.size();
+    if (j > i) v.push_back(s.substr(i, j - i));
+    i = j + 1;
+  }
+  return v;
+}
+
+static void test_nihikyo() {
+  auto toks = split_tokens(NIHIKYO_40);
+  std::string pre23 = "position fuseki moves";
+  for (int i = 0; i < 24; ++i) pre23 += " " + toks[i];  // choose を含めて 23 手
+  // 後手の反則: 8 筋に後手の飛 8a がある
+  Position p;
+  CHECK(p.set_position(pre23));
+  CHECK_EQ(p.ply(), 23);
+  auto s = legal_set(p);
+  CHECK(!s.count("L*8c"));
+  CHECK(!s.count("L*8d"));
+  CHECK(s.count("P*1d"));
+  CHECK(s.count("G*8c"));  // 飛・香以外は同じ筋に打てる
+  CHECK(!p.set_position(pre23 + " L*8c"));
+  // 先手の反則: 5 筋に先手の飛 5h がある
+  Position q;
+  CHECK(q.set_position("position fuseki moves K*5i K*5a choose:sente R*5h P*1c"));
+  s = legal_set(q);
+  CHECK(!s.count("L*5g"));
+  CHECK(!s.count("L*5f"));
+  CHECK(s.count("L*4g"));
+  CHECK(s.count("P*5g"));
+  CHECK(s.count("G*5g"));
+  // 香が先でも同じ（香香・飛香）
+  Position l;
+  CHECK(l.set_position("position fuseki moves K*5i K*5a choose:sente L*3i P*1c"));
+  s = legal_set(l);
+  CHECK(!s.count("L*3h"));
+  CHECK(!s.count("R*3f"));
+  CHECK(s.count("R*4h"));
+  CHECK(s.count("L*4h"));
+  // 相手の飛・香は数えない
+  Position o;
+  CHECK(o.set_position("position fuseki moves K*5i K*5a choose:sente R*5h"));
+  s = legal_set(o);
+  CHECK(s.count("L*5c"));
+  CHECK(s.count("R*5c"));
+  // 布石将棋モードでは同じ手が合法のまま
+  Position f;
+  CHECK(f.set_position("position fuseki moves K*5i K*5a R*5h P*1c", MODE_FUSEKI));
+  CHECK(legal_set(f).count("L*5g"));
+  std::string pre23f = "position fuseki moves";
+  for (int i = 0; i < 24; ++i)
+    if (toks[i].rfind("choose:", 0) != 0) pre23f += " " + toks[i];
+  CHECK(f.set_position(pre23f + " L*8c", MODE_FUSEKI));
+  // 二飛香に合う 40 手はすべて合法で、41 手目の局面まで進む
+  Position g;
+  CHECK(g.set_position("position fuseki"));
+  for (const std::string& t : toks) {
+    if (t.rfind("choose:", 0) == 0) continue;
+    CHECK(legal_set(g).count(t));
+    g.do_move(move_from_usi(t));
+  }
+  CHECK_EQ(g.phase(), PHASE_NORMAL);
+  CHECK_EQ(g.ply(), 40);
+}
+
+// 40 手目の制限と二飛香: 飛 5f が後手玉 5c に当たり、遮るマスは 5d だけ。後手の最後の 1 枚は香で、
+// 5 筋には後手の香 5b があるので L*5d は二飛香で打てない → 遮る手が無く 41 手目の裁定（二飛香は外れない）。
+static void test_nihikyo_move40() {
+  std::vector<std::pair<std::string, std::string>> pcs = {{"K", "5i"}, {"R", "5f"}, {"B", "1h"}};
+  for (int f = 1; f <= 9; ++f) pcs.push_back({"P", std::to_string(f) + "g"});
+  pcs.insert(pcs.end(), {{"L", "1i"}, {"L", "9i"}, {"N", "2i"}, {"N", "8i"}, {"S", "3i"}, {"S", "7i"}, {"G", "4i"}, {"G", "6i"}});
+  pcs.insert(pcs.end(), {{"n", "2a"}, {"s", "3a"}, {"g", "4a"}, {"p", "5a"}, {"b", "6a"}, {"s", "7a"}, {"n", "8a"}, {"g", "9a"},
+                         {"p", "1b"}, {"p", "2b"}, {"p", "3b"}, {"p", "4b"}, {"l", "5b"}, {"p", "6b"}, {"p", "7b"}, {"p", "8b"}, {"p", "9b"},
+                         {"k", "5c"}, {"r", "9c"}});
+  const std::string sfen = build_sfen(pcs, "l", "w");
+  Position p;
+  CHECK(p.set_sfen(sfen, PHASE_FUSEKI));
+  CHECK_EQ(p.mode(), MODE_TENBIN);
+  CHECK_EQ(p.ply(), 39);
+  CHECK(p.king_attacked(WHITE));
+  CHECK(p.ruling41_pending());
+  auto s = legal_set(p);
+  CHECK(!s.count("L*5d"));
+  CHECK(!s.count("L*9d"));  // 9 筋には後手の飛 9c
+  CHECK_EQ(s.size(), 15u);  // 後手陣の空き 17 マスのうち 5d・9d を除く
+  p.do_move(move_from_usi("L*1a"));
+  CHECK_EQ(p.outcome().result, BLACK_WIN);
+  CHECK_EQ(p.outcome().reason, R_RULING41);
+  // 布石将棋モードでは L*5d で遮れる
+  Position q;
+  q.reset(MODE_FUSEKI);
+  CHECK(q.set_sfen(sfen, PHASE_FUSEKI));
+  CHECK_EQ(q.mode(), MODE_FUSEKI);
+  CHECK(!q.ruling41_pending());
+  s = legal_set(q);
+  CHECK_EQ(s.size(), 1u);
+  CHECK(s.count("L*5d"));
+}
+
 // 39 手目直後の局面を組む。先手は 20 枚すべて、後手は 19 枚を置き、最後の 1 枚（金）が持ち駒。
 // black_extra / white_layout で飛角の位置を変える。
 static std::vector<std::pair<std::string, std::string>> black_pieces(const std::string& bishop_sq) {
@@ -437,6 +545,8 @@ int main() {
   test_usi_sfen();
   test_zobrist();
   test_fuseki_drops();
+  test_nihikyo();
+  test_nihikyo_move40();
   test_move40_restriction();
   test_ruling41();
   test_mate_at_41();

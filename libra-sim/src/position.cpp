@@ -188,16 +188,22 @@ void Position::fuseki_moves(MoveList& out) {
   Bitboard own = pieces(us);
   Bitboard own_pawns = pieces(us, PAWN);
   Bitboard own_nonpawn = own & ~own_pawns;
-  // 二歩の筋と、筋埋め禁止（自陣 4 マスのうち 3 マスが歩以外の自駒）の筋
-  Bitboard pawn_files, fill_files;
+  // 二歩の筋と、筋埋め禁止（自陣 4 マスのうち 3 マスが歩以外の自駒）の筋、
+  // 二飛香（天秤将棋のみ。自分の飛か香がある筋に飛・香を打てない）の筋
+  bool nihikyo = mode_ == MODE_TENBIN;
+  Bitboard own_runners = pieces(us, ROOK) | pieces(us, LANCE);
+  Bitboard pawn_files, fill_files, runner_files;
   for (int f = 0; f < 9; ++f) {
     if ((own_pawns & bb::FileBB[f]).any()) pawn_files |= bb::FileBB[f];
     if ((own_nonpawn & bb::ZoneBB[us] & bb::FileBB[f]).count() == 3) fill_files |= bb::FileBB[f];
+    if (nihikyo && (own_runners & bb::FileBB[f]).any()) runner_files |= bb::FileBB[f];
   }
   for (int pt = PAWN; pt <= KING; ++pt) {
     if (hand_[us][pt] == 0) continue;
     if (kings_only && pt != KING) continue;
-    Bitboard targets = zone & ~(pt == PAWN ? pawn_files : fill_files);
+    Bitboard forbidden = pt == PAWN ? pawn_files : fill_files;
+    if (pt == LANCE || pt == ROOK) forbidden |= runner_files;
+    Bitboard targets = zone & ~forbidden;
     while (targets.any()) out.add(make_drop(PieceType(pt), targets.pop()));
   }
   // 40 手目の制限: 最後の 1 枚を打つ手番（自分の残り 1 枚、相手は 0 枚）で自玉が当たっているなら、
