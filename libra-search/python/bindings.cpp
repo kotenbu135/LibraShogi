@@ -46,6 +46,7 @@ SearchConfig config_from_dict(const py::dict& d) {
   geti("proof_nodes", c.proof_nodes);
   geti("proof_min_ply", c.proof_min_ply);
   getb("external", c.external);
+  getb("defer_root_proof", c.defer_root_proof);
   return c;
 }
 
@@ -157,6 +158,11 @@ PYBIND11_MODULE(_search, m) {
              s.apply(logits.data(), wdl.data());
            },
            py::arg("logits"), py::arg("wdl"))
+      .def("proof",
+           [](SelfPlay& s) {
+             py::gil_scoped_release nogil;
+             s.proof();
+           })
       .def("take_finished",
            [](SelfPlay& s) {
              py::list out;

@@ -33,6 +33,7 @@ struct SearchConfig {
   int proof_nodes = 1000;        // 布石終盤の証明探索（41 手目の裁定・先手詰み）の節点数（0 で無効）
   int proof_min_ply = 36;        // 証明探索を始める手数
   bool external = false;         // 外部駆動（USI エンジン用）: 局面は set_position で与え、手は指さず結果を返す
+  bool defer_root_proof = false; // 根の証明探索を proof() の段に回す（根の評価を先に出す。棋譜は変わらない。external では無視）
   std::vector<int> king_pairs;   // 自己対局の玉配置を限定する（kb0, kw0, kb1, kw1, ...）。空なら 36×36 から一様
   std::vector<std::vector<std::uint32_t>> openings;  // 開始局面の手順（玉 2 手を含む）。搾取者が見つけた布石を本体の分布に混ぜる
   float openings_prob = 0.0f;    // 新規対局が openings から始まる確率
@@ -91,6 +92,9 @@ class SelfPlay {
   int collect(float* sq, float* glob);
   // 葉の評価を受け取り、逆伝播して各対局を進める。logits: n_games×POLICY_SIZE、wdl: n_games×3（勝・分・負、手番側）
   void apply(const float* logits, const float* wdl);
+  // cfg.defer_root_proof のとき、collect で評価に出した根の証明探索を解く。collect の後・apply の前（GPU の評価中）に呼ぶ。
+  // 呼ばなければ apply がその場で解く
+  void proof();
   std::vector<GameRecord> take_finished();
   SelfPlayStats stats() const { return stats_; }
   void set_active(int n);  // 同時進行数を絞る（throttle）。n 以降の対局は止めたまま保持する
@@ -121,7 +125,9 @@ class SelfPlay {
   void play_forced(Game& g, Move m, float value);
   void start_game(Game& g);
   void end_game(Game& g);
-  void parallel_for(int n, const std::function<void(int)>& f);
+  Move root_proof(Game& g, float& value);  // 根の証明探索。手番側の勝ちが証明できればその手（無ければ MOVE_NONE）
+  // serial_below: n がこれ未満なら呼んだスレッドだけで回す（0 ならスレッド数の 2 倍）
+  void parallel_for(int n, const std::function<void(int)>& f, int serial_below = 0);
   void gather();
   struct Pool;                  // parallel_for の常駐スレッド（最初の並列呼び出しで作る）
   std::unique_ptr<Pool> pool_;  // games_ より後に宣言する（先に止めて join する）

@@ -63,3 +63,42 @@ def test_pool_survives_many_engines():
                 sp.collect(sq, glob)
                 sp.apply(*fake_net(sq, glob))
         del sp
+
+
+def play_deferred(threads, call_proof, n_games=40, rounds=2000):
+    sp = librasearch.SelfPlay({**CFG, "defer_root_proof": True}, n_games, seed=7, threads=threads)
+    sq = np.zeros((n_games, 81, ls.SQ_FEATS), np.float32)
+    glob = np.zeros((n_games, ls.GLOB_FEATS), np.float32)
+    done = []
+    for _ in range(rounds):
+        sp.collect(sq, glob)
+        logits, wdl = fake_net(sq, glob)
+        if call_proof:
+            sp.proof()  # 自己対局のループでは GPU が評価している間に呼ぶ
+        sp.apply(logits, wdl)
+        done += sp.take_finished()
+    return done, sp.stats()
+
+
+def by_slot(recs):
+    out = {}
+    for r in recs:
+        out.setdefault(r["slot"], []).append(canon(r))
+    return out
+
+
+def test_deferred_root_proof_keeps_records():
+    """根の証明探索を proof() の段に回しても各枠の棋譜は変わらない。証明できた手ではその根の評価を捨てるので 1 ラウンド遅れるだけ。
+    proof() を呼ばなかったときは apply がその場で解く（同じ棋譜）。"""
+    ref = by_slot(play(1)[0])
+    n_ref = sum(len(v) for v in ref.values())
+    for threads, call_proof in ((1, True), (8, True), (8, False)):
+        got_list, st = play_deferred(threads, call_proof)
+        got = by_slot(got_list)
+        for slot in set(ref) | set(got):
+            g, r = got.get(slot, []), ref.get(slot, [])
+            k = min(len(g), len(r))
+            assert g[:k] == r[:k], (threads, call_proof, slot)
+            assert abs(len(g) - len(r)) <= 1, (threads, call_proof, slot)
+        assert len(got_list) >= n_ref - len(ref)
+        assert st["mate_found"] + st["proof_found"] > 0

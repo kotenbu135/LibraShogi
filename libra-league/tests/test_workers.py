@@ -271,7 +271,7 @@ def test_selfplay_round_timing():
     for _ in range(5):
         loop.round()
     tm = loop.timing
-    assert tm["rounds"] == 5 and all(tm[k] > 0 for k in ("collect", "eval", "apply"))
+    assert tm["rounds"] == 5 and all(tm[k] > 0 for k in ("collect", "eval", "apply")) and tm["proof"] >= 0
 
 
 def test_runner_ingests_games_from_worker_process(tmp_path: Path):

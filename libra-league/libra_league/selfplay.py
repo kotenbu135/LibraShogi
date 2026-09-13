@@ -127,7 +127,8 @@ def _quiet_inductor() -> None:
 class SelfPlayLoop:
     def __init__(self, search_cfg: dict, n_games: int, threads: int, seed: int, device: torch.device, infer_dtype: str = "float16",
                  compile: str = "none"):
-        self.engine = librasearch.SelfPlay(search_cfg, n_games, seed, threads)
+        # 根の証明探索は round() で GPU が評価している間に解く（CPU の apply から外す。棋譜は変わらない）
+        self.engine = librasearch.SelfPlay({**search_cfg, "defer_root_proof": True}, n_games, seed, threads)
         self.n_games = n_games
         self.device = device
         self.dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[infer_dtype]
@@ -143,7 +144,8 @@ class SelfPlayLoop:
         self.wdl = torch.empty((n_games, 3), dtype=torch.float32, pin_memory=pin)
         self.model: InferenceNet | None = None
         self.opponent: InferenceNet | None = None  # 搾取者モード: 凍結した本体。奇数枠では本体が先手
-        # 段ごとの時間（秒の累計）。dict を入れたときだけ測る: collect（CPU）、eval（H2D・forward・D2H、CUDA は同期まで）、apply（CPU）
+        # 段ごとの時間（秒の累計）。dict を入れたときだけ測る: collect（CPU）、eval（H2D・forward・D2H、CUDA は同期まで。proof を除く）、
+        # proof（根の証明探索、CPU。GPU の評価と重なる）、apply（CPU）
         self.timing: dict | None = None
 
     def _install(self, cur: InferenceNet | None, model: LibraNet) -> InferenceNet:
@@ -196,6 +198,9 @@ class SelfPlayLoop:
         logits, wdl = self.evaluate(who)
         self.logits.copy_(logits, non_blocking=True)
         self.wdl.copy_(wdl, non_blocking=True)
+        tp = time.perf_counter() if tm is not None else 0.0
+        self.engine.proof()  # GPU の評価を待つ間に根の証明探索を解く
+        tq = time.perf_counter() if tm is not None else 0.0
         if self.device.type == "cuda":
             torch.cuda.current_stream(self.device).synchronize()
         t2 = time.perf_counter() if tm is not None else 0.0
@@ -205,7 +210,8 @@ class SelfPlayLoop:
             t3 = time.perf_counter()
             tm["rounds"] = tm.get("rounds", 0) + 1
             tm["collect"] = tm.get("collect", 0.0) + (t1 - t0)
-            tm["eval"] = tm.get("eval", 0.0) + (t2 - t1)
+            tm["proof"] = tm.get("proof", 0.0) + (tq - tp)
+            tm["eval"] = tm.get("eval", 0.0) + (t2 - t1) - (tq - tp)
             tm["apply"] = tm.get("apply", 0.0) + (t3 - t2)
         if self.opponent is not None:
             for g in games:

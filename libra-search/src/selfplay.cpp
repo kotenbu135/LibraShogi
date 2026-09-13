@@ -84,6 +84,10 @@ struct SelfPlay::Game {
   Ruling41Problem ruling_prob;
   Mate41Problem mate41_prob;
   std::unordered_map<std::uint64_t, float> proof_cache;  // 鍵 → 手番側の値（±1）。この手の探索内
+  // 根の証明探索の先送り（cfg.defer_root_proof）: 1 = 根を評価に出して proof() を待つ、2 = 解いた（proof_move は証明手か MOVE_NONE）
+  int proof_state = 0;
+  Move proof_move = MOVE_NONE;
+  float proof_value = 0.0f;
 
   float root_q() const {
     const Node& r = nodes[0];
@@ -469,6 +473,33 @@ void SelfPlay::play_forced(Game& g, Move m, float value) {
   }
 }
 
+// 根での証明探索: 本将棋の詰み、布石終盤の裁定・先手詰み。手番側の勝ちが証明できればその手を返す
+Move SelfPlay::root_proof(Game& g, float& value) {
+  value = 0.0f;
+  if (g.pos.phase() == PHASE_NORMAL && cfg_.mate_nodes_root > 0) {
+    Move m = MOVE_NONE;
+    if (g.dfpn.solve(g.pos, g.mate_prob, true, cfg_.mate_nodes_root, &m) == PROOF_PROVEN && m != MOVE_NONE) {
+      g.st.mate_found++;
+      value = 1.0f;
+      return m;
+    }
+  } else if (g.pos.phase() == PHASE_FUSEKI) {
+    Move m = MOVE_NONE;
+    float v;
+    if (fuseki_proof(g, g.pos, cfg_, v, &m) && v > 0 && m != MOVE_NONE) {
+      value = v;
+      return m;
+    }
+  }
+  return MOVE_NONE;
+}
+
+// 根の証明探索が実際に df-pn を回すか（回さない局面は先送りしない）
+static bool root_proof_runs(const Position& pos, const SearchConfig& cfg) {
+  if (pos.phase() == PHASE_NORMAL) return cfg.mate_nodes_root > 0;
+  return cfg.proof_nodes > 0 && pos.ply() >= cfg.proof_min_ply;
+}
+
 // 次の葉まで進める。終端は即座に逆伝播し、必要なら着手・終局・新規対局も行う
 void SelfPlay::step_game(Game& g) {
   if (g.idle) return;
@@ -489,27 +520,17 @@ void SelfPlay::step_game(Game& g) {
         end_game(g);
         continue;
       }
-      // 根での証明探索: 本将棋の詰み、布石終盤の裁定・先手詰み。手番側の勝ちが証明できればその手を指す
-      Move forced = MOVE_NONE;
-      float fv = 0.0f;
-      if (g.pos.phase() == PHASE_NORMAL && cfg_.mate_nodes_root > 0) {
-        Move m = MOVE_NONE;
-        if (g.dfpn.solve(g.pos, g.mate_prob, true, cfg_.mate_nodes_root, &m) == PROOF_PROVEN && m != MOVE_NONE) {
-          forced = m;
-          fv = 1.0f;
-          g.st.mate_found++;
+      // 根での証明探索。手番側の勝ちが証明できればその手を指す
+      if (cfg_.defer_root_proof && !cfg_.external && root_proof_runs(g.pos, cfg_)) {
+        // 根の評価を先に出し、証明探索は proof()（GPU の評価中）で解く。証明できたら apply でこの評価を捨てて証明手を指す
+        g.proof_state = 1;
+      } else {
+        float fv;
+        Move forced = root_proof(g, fv);
+        if (forced != MOVE_NONE) {
+          play_forced(g, forced, fv);
+          continue;
         }
-      } else if (g.pos.phase() == PHASE_FUSEKI) {
-        Move m = MOVE_NONE;
-        float v;
-        if (fuseki_proof(g, g.pos, cfg_, v, &m) && v > 0 && m != MOVE_NONE) {
-          forced = m;
-          fv = v;
-        }
-      }
-      if (forced != MOVE_NONE) {
-        play_forced(g, forced, fv);
-        continue;
       }
       g.nodes.push_back(make_node(g.pos.key()));
       g.sp = g.pos;
@@ -720,8 +741,8 @@ struct SelfPlay::Pool {
   }
 };
 
-void SelfPlay::parallel_for(int n, const std::function<void(int)>& f) {
-  if (threads_ <= 1 || n < 2 * threads_) {
+void SelfPlay::parallel_for(int n, const std::function<void(int)>& f, int serial_below) {
+  if (threads_ <= 1 || n < (serial_below > 0 ? serial_below : 2 * threads_)) {
     for (int i = 0; i < n; ++i) f(i);
     return;
   }
@@ -800,10 +821,37 @@ void SelfPlay::apply(const float* logits, const float* wdl) {
   parallel_for(n, [&](int i) {
     Game& g = *games_[i];
     if (g.idle || !g.pending) return;
+    if (g.proof_state == 1) {  // proof() が呼ばれなかった: ここで解く
+      g.proof_move = root_proof(g, g.proof_value);
+      g.proof_state = 2;
+    }
+    if (g.proof_state == 2) {
+      g.proof_state = 0;
+      if (g.proof_move != MOVE_NONE) {
+        // 証明できた: 根の評価は使わず（先送りしない場合は評価に出していない）証明手を指す
+        g.nodes.clear();
+        g.pending = false;
+        play_forced(g, g.proof_move, g.proof_value);
+        step_game(g);
+        return;
+      }
+    }
     apply_game(g, logits + size_t(i) * POLICY_SIZE, wdl + size_t(i) * 3);
     step_game(g);  // 次の葉まで進める（終局・着手を含む）
   });
   gather();
+}
+
+void SelfPlay::proof() {
+  std::vector<Game*> todo;
+  for (auto& gp : games_)
+    if (gp->proof_state == 1) todo.push_back(gp.get());
+  // 1 ラウンドに数局しかないので、2 局からスレッドに分ける
+  parallel_for(int(todo.size()), [&](int i) {
+    Game& g = *todo[i];
+    g.proof_move = root_proof(g, g.proof_value);
+    g.proof_state = 2;
+  }, 2);
 }
 
 bool SelfPlay::set_position(int slot, const std::string& usi_line, int sims, bool full, Mode mode) {

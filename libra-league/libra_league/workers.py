@@ -355,8 +355,10 @@ class Worker:
                 tm, dt = loop.timing, now - last_perf
                 r = tm["rounds"]
                 self.log(f"worker {self.id}: perf rounds/s {r / dt:.1f} evals/s {r * self.n_games / dt:.0f} per round: "
-                         f"collect {tm['collect'] / r * 1000:.1f} ms eval {tm['eval'] / r * 1000:.1f} ms apply {tm['apply'] / r * 1000:.1f} ms "
-                         f"other {max(0.0, dt / r - (tm['collect'] + tm['eval'] + tm['apply']) / r) * 1000:.1f} ms games {self.games + len(pending)}")
+                         f"collect {tm['collect'] / r * 1000:.1f} ms eval {tm['eval'] / r * 1000:.1f} ms "
+                         f"proof {tm.get('proof', 0.0) / r * 1000:.1f} ms apply {tm['apply'] / r * 1000:.1f} ms "
+                         f"other {max(0.0, dt / r - (tm['collect'] + tm['eval'] + tm.get('proof', 0.0) + tm['apply']) / r) * 1000:.1f} ms "
+                         f"games {self.games + len(pending)}")
                 loop.timing = {}
                 last_perf = now
             if now - last_reload >= self.reload_seconds:
