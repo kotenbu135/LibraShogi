@@ -194,17 +194,19 @@ def test_lock_ignores_dead_and_reused_pids(tmp_path):
     assert acquire_lock(lock) is None
     other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])  # libra ではないプロセス（pid の使い回し）
     libra = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "libra_league"])
+    worker = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "libra_league", "worker"])  # 自己対局ワーカーは lock の持ち主ではない
     try:
         time.sleep(0.2)
         lock.write_text(str(other.pid))
         assert running_pid(lock) is None and acquire_lock(lock) is None
+        lock.write_text(str(worker.pid))
+        assert running_pid(lock) is None and acquire_lock(lock) is None
         lock.write_text(str(libra.pid))
         assert running_pid(lock) == libra.pid and acquire_lock(lock) == libra.pid
     finally:
-        other.kill()
-        libra.kill()
-        other.wait()
-        libra.wait()
+        for p in (other, libra, worker):
+            p.kill()
+            p.wait()
 
 
 def test_child_argv():

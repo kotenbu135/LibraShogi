@@ -42,13 +42,15 @@ def should_restart(rc: int, uptime: float, quick_failures: int, healthy: float =
 
 
 def running_pid(lock: Path) -> int | None:
-    """run.lock の pid が生きている libra_league のプロセスならその pid。使い回された pid は別プロセスとみなす。"""
+    """run.lock の pid が生きている libra_league のプロセスならその pid。使い回された pid は別プロセスとみなす。
+
+    自己対局ワーカー（`libra worker`）は run.lock を取らないので、pid がワーカーに使い回されていても持ち主とみなさない。"""
     try:
         pid = int(lock.read_text().strip())
         cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
     except (OSError, ValueError):
         return None
-    return pid if b"libra_league" in cmdline else None
+    return pid if b"libra_league" in cmdline and b"worker" not in cmdline.split(b"\0") else None
 
 
 def acquire_lock(lock: Path) -> int | None:

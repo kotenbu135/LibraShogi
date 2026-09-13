@@ -401,7 +401,9 @@ class Runner:
                 self.state["games_total"] = self.replay.total_games
                 self.state["chunk_index"] = self.replay.chunk_index
             if self.inbox is not None and time.time() - last_ingest >= float(self.cfg["workers"].get("ingest_seconds", 10)):
-                new_games += self.ingest_workers()
+                n = self.ingest_workers()
+                new_games += n
+                self.session_games += n  # games_session と局/日（total_games から数える）を揃える
                 last_ingest = time.time()
             # 学習: 新規 N 局ごとに、局面数 × replay_ratio / batch ステップ
             if new_games >= tr["train_every_games"] and self.replay.n_games() >= tr["min_window_games"]:

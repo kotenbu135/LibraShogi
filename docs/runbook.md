@@ -70,14 +70,6 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 - 数日止めても再開時のコストはゼロ（損失は最後のチェックポイント以降の進行中の対局だけ）
 - 推論は CUDA Graphs で捕獲している（`[selfplay] compile`、decisions.md 2026-09-14）。起動直後の最初のラウンドで捕獲するので、起動時は torch.compile の autotune に 5〜25 秒ほど掛かる（WSL の再起動で `/tmp` のキャッシュが消えた後は長め）。`log.txt` に `selfplay: inference model=compile(max-autotune)+cudagraph` が出れば有効、`eager` なら捕獲に失敗していて理由は `stdout.log`
 
-### 自己対局ワーカー（既定は無効。GPU を足すときの配管）
-
-学習側（`libra run`）と自己対局だけのプロセス（`libra worker`）を分けられる（decisions.md 2026-09-14）。**同じ GPU で分けても局/日は増えない**（推論だけで GPU が埋まっているため）。別の GPU（vast.ai など、利用開始はユーザーの判断）の計算を同じ run に足すためのもの。本番の ls・lx は使っていない。
-
-1. 学習側の `config.toml` に `[workers]` `enabled = true` を書き、停止 → 起動。学習側は今までどおり自分でも自己対局し、加えて `weights/latest.pt` を配り、`inbox/` の局を 10 秒ごとに取り込む（取り込んだ局も新規局数に数えるので、学習量の規則 `replay_ratio` は変わらない）。搾取者の run では無効。
-2. ワーカーを起動: `bin/libra --run ls worker --id w1 [--n-games 512] [--threads 12]`。重みを読み、`chunk_games`（100）局ごとに `inbox/` にファイルを置き、学習側が新しい重みを配ると 10 秒以内に読み直す。同じマシンでは学習側が動いている間だけ打ち、停止（STOP）か学習側の終了で残りを書いて抜ける（学習側が止まっている間は待つ）。別マシンで run ディレクトリの写し（`config.toml` と `weights/`）を使うときは `--detached`。
-3. 学習側は、局を打った重みが `max_lag_steps`（2000）より古いファイルを捨て、型・形・値域が合わないファイルを `inbox/rejected/` に移す（手の合法性や方策・価値の改ざんは確かめない）。件数は `status` の `workers:` 行と status.json の `workers`。
-
 ## 5. 設定を変えるとき
 
 `~/libra-run/ls/config.toml` を編集し、`libra stop` → `libra run`。ネットの形（`[net]`）はチェックポイントと合わなくなるので変えない（変えるなら新しい run-id）。
@@ -128,3 +120,11 @@ GPU（CUDA）で読ませたいときは「エンジン」→「実行ファイ�
 **布石**: `openings_minutes`（60）ごとに、作り直してからのチャンクだけから搾取者が勝った布石を `openings_out` に書く。本体 ls は `[selfplay] openings` でこれを読み、新規対局の 10% をそこから始める。相手を作り直した時点で布石は空にする（古い相手の穴なので本体に渡さない）。手動で書き出すときは `bin/libra --run lx openings`。
 
 状態は `bin/libra --run lx status`（`exploiter` に勝率、`main_step`、`refreshed_at`）。管理コンソールの「対本体 勝率」行にも出る。
+
+## 自己対局ワーカー（既定は無効。GPU を足すときの配管）
+
+学習側（`libra run`）と自己対局だけのプロセス（`libra worker`）を分けられる（decisions.md 2026-09-14）。**同じ GPU で分けても局/日は増えない**（推論だけで GPU が埋まっているため）。別の GPU（vast.ai など、利用開始はユーザーの判断）の計算を同じ run に足すためのもの。本番の ls・lx は使っていない。
+
+1. 学習側の `config.toml` に `[workers]` `enabled = true` を書き、停止 → 起動。学習側は今までどおり自分でも自己対局し、加えて `weights/latest.pt` を配り、`inbox/` の局を 10 秒ごとに取り込む（取り込んだ局も新規局数に数えるので、学習量の規則 `replay_ratio` は変わらない）。搾取者の run では無効。
+2. ワーカーを起動: `bin/libra --run ls worker --id w1 [--n-games 512] [--threads 12]`。重みを読み、`chunk_games`（100）局ごとに `inbox/` にファイルを置き、学習側が新しい重みを配ると 10 秒以内に読み直す。同じマシンでは学習側が動いている間だけ打ち、停止（STOP）か学習側の終了で残りを書いて抜ける（学習側が止まっている間は待つ）。ワーカーは run.lock を取らないので、コンソールの状態と 起動 / 停止 は学習側だけを見る。別マシンで run ディレクトリの写し（`config.toml` と `weights/`）を使うときは `--detached`。
+3. 学習側は、局を打った重みが `max_lag_steps`（2000）より古いファイルを捨て、型・形・値域が合わないファイルを `inbox/rejected/` に移す（手の合法性や方策・価値の改ざんは確かめない）。件数は `status` の `workers:` 行と status.json の `workers`。
