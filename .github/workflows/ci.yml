@@ -33,4 +33,4 @@ jobs:
       - name: Python tests
         env:
           PYTHONPATH: libra-sim/python:libra-search/python:libra-net:libra-league:libra-scale:libra-cloud
-        run: python -m pytest -q libra-sim/tests/test_python.py libra-league/tests libra-net/tests libra-engine/tests libra-scale/tests libra-search/tests/test_external.py libra-cloud/tests
+        run: python -m pytest -q libra-sim/tests/test_python.py libra-league/tests libra-net/tests libra-engine/tests libra-scale/tests libra-search/tests/test_external.py libra-search/tests/test_selfplay_threads.py libra-cloud/tests

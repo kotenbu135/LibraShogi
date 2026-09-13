@@ -245,7 +245,8 @@ def test_worker_waits_for_learner_and_exits_when_it_stops(tmp_path: Path):
     holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", "libra_league"])
     try:
         (root / "run.lock").write_text(str(holder.pid))
-        _wait(lambda: list(inbox.glob("*.npz")), 120, "games after learner started")
+        # 段ごとの時間の行も待つ（速い CPU では perf_seconds より先に対局ファイルが出て、学習側を止めると 1 行も出ずに抜ける）
+        _wait(lambda: list(inbox.glob("*.npz")) and any(": perf " in s for s in logs), 120, "games and perf after learner started")
     finally:
         holder.kill()
         holder.wait()

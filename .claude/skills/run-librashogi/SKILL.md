@@ -111,7 +111,7 @@ PNG は `/mnt/c/Users/sakis/libra/console-shot.png` を Read で見る。`-Do` �
 export PATH=$PWD/.venv/bin:$PATH
 ctest --test-dir build/libra-sim --output-on-failure      # ルールテスト（test_rules）＋perft
 ctest --test-dir build/libra-search --output-on-failure   # df-pn
-PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-scale:libra-cloud python -m pytest -q libra-sim/tests/test_python.py libra-league/tests libra-net/tests libra-engine/tests libra-scale/tests libra-search/tests/test_external.py libra-cloud/tests -p no:warnings
+PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-scale:libra-cloud python -m pytest -q libra-sim/tests/test_python.py libra-league/tests libra-net/tests libra-engine/tests libra-scale/tests libra-search/tests/test_external.py libra-search/tests/test_selfplay_threads.py libra-cloud/tests -p no:warnings
 ```
 
 件数はテストの追加で変わるので、通ったかは各コマンドの結果行（`N passed, 0 failed`、ctest の `100% tests passed`、pytest の `N passed`）で確かめる。pytest は約 10 秒〜3 分（ランナーのスモークと df-pn の乱数検証が重い。L-S 稼働中は CPU を取り合って伸びる）。CI（`.github/workflows/ci.yml`）は同じ手順を ubuntu-latest の CPU で回す。

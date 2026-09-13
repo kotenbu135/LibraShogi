@@ -4,8 +4,11 @@
 #include "libra/dfpn.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <condition_variable>
 #include <functional>
+#include <mutex>
 #include <thread>
 
 namespace libra {
@@ -652,21 +655,78 @@ void SelfPlayStats::add(const SelfPlayStats& o) {
   plies_sum += o.plies_sum;
 }
 
+// 常駐スレッドの組。呼ぶたびにスレッドを作らず、対局は空いたスレッドが次の番号を取る。
+// 固定の等分だと重い対局（本将棋の根の詰み探索など）が 1 つの組に重なり、その組が 1 ラウンドの時間を決めていた
+struct SelfPlay::Pool {
+  std::vector<std::thread> workers;
+  std::mutex mu;
+  std::condition_variable wake, done;
+  const std::function<void(int)>* f = nullptr;
+  int n = 0;
+  std::atomic<int> next{0};
+  std::uint64_t epoch = 0;
+  std::size_t acked = 0;  // この回を終えた常駐スレッドの数
+  bool stop = false;
+
+  explicit Pool(int threads) {
+    for (int t = 0; t + 1 < threads; ++t) workers.emplace_back([this] { loop(); });
+  }
+  ~Pool() {
+    {
+      std::lock_guard<std::mutex> lk(mu);
+      stop = true;
+    }
+    wake.notify_all();
+    for (auto& w : workers) w.join();
+  }
+  void drain(const std::function<void(int)>* fn, int count) {
+    for (int i; (i = next.fetch_add(1, std::memory_order_relaxed)) < count;) (*fn)(i);
+  }
+  void loop() {
+    std::uint64_t seen = 0;
+    for (;;) {
+      const std::function<void(int)>* fn;
+      int count;
+      {
+        std::unique_lock<std::mutex> lk(mu);
+        wake.wait(lk, [&] { return stop || epoch != seen; });
+        if (stop) return;
+        seen = epoch;
+        fn = f;
+        count = n;
+      }
+      drain(fn, count);
+      {
+        std::lock_guard<std::mutex> lk(mu);
+        ++acked;
+      }
+      done.notify_one();
+    }
+  }
+  // 全スレッドがこの回を終えるまで待つので、次の回に前の回の f が残らない
+  void run(int count, const std::function<void(int)>& fn) {
+    {
+      std::lock_guard<std::mutex> lk(mu);
+      f = &fn;
+      n = count;
+      next.store(0);
+      acked = 0;
+      ++epoch;
+    }
+    wake.notify_all();
+    drain(&fn, count);  // 呼んだスレッドも加わる
+    std::unique_lock<std::mutex> lk(mu);
+    done.wait(lk, [&] { return acked == workers.size(); });
+  }
+};
+
 void SelfPlay::parallel_for(int n, const std::function<void(int)>& f) {
   if (threads_ <= 1 || n < 2 * threads_) {
     for (int i = 0; i < n; ++i) f(i);
     return;
   }
-  std::vector<std::thread> ts;
-  int per = (n + threads_ - 1) / threads_;
-  for (int t = 0; t < threads_; ++t) {
-    int lo = t * per, hi = std::min(n, lo + per);
-    if (lo < hi)
-      ts.emplace_back([&, lo, hi] {
-        for (int i = lo; i < hi; ++i) f(i);
-      });
-  }
-  for (auto& t : ts) t.join();
+  if (!pool_) pool_ = std::make_unique<Pool>(threads_);
+  pool_->run(n, f);
 }
 
 void SelfPlay::gather() {

@@ -123,6 +123,8 @@ class SelfPlay {
   void end_game(Game& g);
   void parallel_for(int n, const std::function<void(int)>& f);
   void gather();
+  struct Pool;                  // parallel_for の常駐スレッド（最初の並列呼び出しで作る）
+  std::unique_ptr<Pool> pool_;  // games_ より後に宣言する（先に止めて join する）
 };
 
 }  // namespace libra
