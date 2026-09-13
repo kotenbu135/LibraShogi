@@ -48,6 +48,7 @@ class Runner:
         self.exploiter_stats = {"games": 0, "wins": 0, "draws": 0, "losses": 0}
         self.opponent_step: int | None = None
         self.last_openings_write = 0.0
+        self.last_source_check = 0.0
         self.openings_mtime: float | None = None
         self.openings_checked = 0.0
         self.auto = AutoJobs(sd, cfg, self.state, self.log)
@@ -190,15 +191,38 @@ class Runner:
         self.sd.write_state(self.state)
         self.log(f"exploiter: main refreshed from {src} (step {self.opponent_step}); stats and openings reset at chunk {es['from_chunk']}")
 
+    def source_step(self) -> int | None:
+        """main_source の step だけを読む（mmap なので重みは読まない。123 MB で 0.01 秒）。"""
+        src = Path(str(self.cfg.get("exploiter", {}).get("main_source") or "")).expanduser()
+        try:
+            step = torch.load(src, map_location="cpu", mmap=True, weights_only=False).get("step")
+            return None if step is None else int(step)
+        except Exception:  # noqa: BLE001  書き換え中・無いときは次の確認に回す
+            return None
+
     def maybe_refresh_main(self) -> None:
+        """refresh_hours が過ぎたか、main_source が凍結相手より refresh_steps 以上進んだら作り直す。"""
         ex = self.cfg.get("exploiter", {})
+        if not ex.get("main_source") or self.loop is None or self.loop.opponent is None:
+            return
+        es = self.exploiter_state()
         hours = float(ex.get("refresh_hours", 0.0) or 0.0)
-        if hours <= 0 or not ex.get("main_source") or self.loop is None or self.loop.opponent is None:
+        last = es.get("refreshed_at")
+        if hours > 0 and (last is None or time.time() - float(last) >= hours * 3600):
+            self.refresh_main()
             return
-        last = self.exploiter_state().get("refreshed_at")
-        if last is not None and time.time() - float(last) < hours * 3600:
+        steps = int(ex.get("refresh_steps", 0) or 0)
+        now = time.time()
+        if steps <= 0 or now - self.last_source_check < float(ex.get("refresh_check_minutes", 5.0)) * 60:
             return
-        self.refresh_main()
+        self.last_source_check = now
+        src_step = self.source_step()
+        if src_step is None:
+            return
+        es["source_step"] = src_step
+        if self.opponent_step is None or src_step - int(self.opponent_step) >= steps:
+            self.log(f"exploiter: main_source step {src_step} is {steps}+ steps ahead of opponent step {self.opponent_step}")
+            self.refresh_main()
 
     def maybe_write_openings(self) -> None:
         """搾取者が勝った布石を openings_out に書く（凍結相手を作り直してからの対局だけ）。"""
@@ -276,6 +300,7 @@ class Runner:
             xs = self.state.get("exploiter", {})
             es["main_step"] = xs.get("main_step")
             es["refreshed_at"] = xs.get("refreshed_at")
+            es["source_step"] = xs.get("source_step")  # refresh_steps が有効なときだけ入る（本体の最新 step）
             es["history"] = xs.get("history", [])[-10:]
             status["exploiter"] = es
         write_json_atomic(self.sd.status_json, status)

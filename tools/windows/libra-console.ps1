@@ -764,7 +764,8 @@ function Update-Panel([string]$run, $obj) {
     }
     if ($null -ne $st.exploiter) {
         $ex = $st.exploiter
-        $v.exploiter.Text = "{0:P1}（{1} 局、相手 step {2}{3}）" -f [double]$ex.winrate, (Format-Int $ex.games), (Format-Int $ex.main_step),
+        $v.exploiter.Text = "{0:P1}（{1} 局、相手 step {2}{3}{4}）" -f [double]$ex.winrate, (Format-Int $ex.games), (Format-Int $ex.main_step),
+            $(if ($null -ne $ex.source_step -and $null -ne $ex.main_step) { "（本体より " + (Format-Int ([long]$ex.source_step - [long]$ex.main_step)) + " 古い）" } else { "" }),
             $(if ($null -ne $ex.refreshed_at) { "、作り直し " + (Format-Ago (From-Unix $ex.refreshed_at)) } else { "" })
     } else { $v.exploiter.Text = "-" }
     $rs = @($st.restarts)
