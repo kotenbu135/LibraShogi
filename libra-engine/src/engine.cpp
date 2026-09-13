@@ -115,13 +115,23 @@ bool Engine::ready(std::string* err) {
     eng_threads_ = threads;
     eng_mate_ = mate;
   }
+  const int batch = std::min(1024, std::max(1, geti("DNN_Batch_Size")));
+  if (batch != batch_) {
+    batch_ = batch;
+    sq_.assign(size_t(batch) * SQ_NB * SQ_FEATS, 0.f);
+    glob_.assign(size_t(batch) * GLOB_FEATS, 0.f);
+    logits_.assign(size_t(batch) * POLICY_SIZE, 0.f);
+    wdl_.assign(size_t(batch) * 3, 0.f);
+  }
   return true;
 }
 
+// 葉を最大 DNN_Batch_Size 個まとめて 1 回の推論で評価する（評価待ちの枝には仮の負けを置いて散らす）
 bool Engine::evaluate(std::string* err) {
-  eng_->collect(sq_.data(), glob_.data());
-  if (!infer_.run(1, sq_.data(), glob_.data(), logits_.data(), wdl_.data(), err)) return false;
-  eng_->apply(logits_.data(), wdl_.data());
+  int k = eng_->collect_batch(0, batch_, sq_.data(), glob_.data());
+  if (k == 0) return true;
+  if (!infer_.run(k, sq_.data(), glob_.data(), logits_.data(), wdl_.data(), err)) return false;
+  eng_->apply_batch(0, logits_.data(), wdl_.data(), k);
   return true;
 }
 

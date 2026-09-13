@@ -172,6 +172,27 @@ PYBIND11_MODULE(_search, m) {
       .def("set_active", &SelfPlay::set_active)
       .def("set_openings", &SelfPlay::set_openings, py::arg("openings"), py::arg("prob"))
       .def("set_position", [](SelfPlay& s, int slot, const std::string& line, int sims, bool full, const std::string& mode) { return s.set_position(slot, line, sims, full, mode == "fuseki" ? MODE_FUSEKI : MODE_TENBIN); }, py::arg("slot"), py::arg("usi_line"), py::arg("sims"), py::arg("full") = true, py::arg("mode") = "tenbin")
+      .def("collect_batch",
+           [](SelfPlay& s, int slot, py::array_t<float, py::array::c_style> sq, py::array_t<float, py::array::c_style> glob) {
+             if (sq.ndim() != 3 || sq.shape(1) != SQ_NB || sq.shape(2) != SQ_FEATS || sq.shape(0) < 1)
+               throw py::value_error("sq must be [max_leaves, 81, SQ_FEATS] float32");
+             if (glob.ndim() != 2 || glob.shape(0) != sq.shape(0) || glob.shape(1) != GLOB_FEATS)
+               throw py::value_error("glob must be [max_leaves, GLOB_FEATS] float32");
+             py::gil_scoped_release nogil;
+             return s.collect_batch(slot, int(sq.shape(0)), sq.mutable_data(), glob.mutable_data());
+           },
+           py::arg("slot"), py::arg("sq"), py::arg("glob"))
+      .def("apply_batch",
+           [](SelfPlay& s, int slot, py::array_t<float, py::array::c_style | py::array::forcecast> logits,
+              py::array_t<float, py::array::c_style | py::array::forcecast> wdl) {
+             if (logits.ndim() != 2 || logits.shape(1) != POLICY_SIZE)
+               throw py::value_error("logits must be [k, POLICY_SIZE]");
+             if (wdl.ndim() != 2 || wdl.shape(0) != logits.shape(0) || wdl.shape(1) != 3)
+               throw py::value_error("wdl must be [k, 3]");
+             py::gil_scoped_release nogil;
+             s.apply_batch(slot, logits.data(), wdl.data(), int(logits.shape(0)));
+           },
+           py::arg("slot"), py::arg("logits"), py::arg("wdl"))
       .def("idle", &SelfPlay::idle, py::arg("slot"))
       .def("finish_now", &SelfPlay::finish_now, py::arg("slot"))
       .def("result",

@@ -105,6 +105,12 @@ class SelfPlay {
   // 外部駆動（cfg.external）: 枠 slot に局面を与えて sims 回読む。読み終わると idle になり result が取れる
   bool set_position(int slot, const std::string& usi_line, int sims, bool full, Mode mode = MODE_TENBIN);
   bool idle(int slot) const;
+  // 外部駆動の複数葉の同時評価: 枠 slot の葉を最大 max_leaves 個選んで特徴を書く（sq: max_leaves×81×SQ_FEATS）。
+  // 評価待ちの枝には仮の負け（virtual loss）を置いて、同じ葉を選ばないようにする。戻り値は書いた数（読み終わりなら 0）。
+  // 根が未評価のうちは根だけを返す。max_leaves 1 なら collect / apply と同じ探索になる
+  int collect_batch(int slot, int max_leaves, float* sq, float* glob);
+  // collect_batch で出した k 個の評価を受け取って逆伝播する（finish_now で捨てた後なら無視する）
+  void apply_batch(int slot, const float* logits, const float* wdl, int k);
   void finish_now(int slot);  // 今の訪問数で打ち切って結果を出す（stop）
   const SearchResult& result(int slot) const;
 
@@ -120,6 +126,7 @@ class SelfPlay {
   std::mt19937_64 rng_;
   // 対局ごとの処理はその対局のデータだけを触る（並列に呼べる）。統計と終局記録は対局側に貯め、あとで集める
   void step_game(Game& g);  // 次の葉まで進める（終局・着手・新規対局を含む）
+  int descend(Game& g);     // ルートから 1 回選ぶ（selfplay.cpp の戻り値の説明）
   void apply_game(Game& g, const float* logits, const float* wdl);
   void finish_move(Game& g);
   void play_forced(Game& g, Move m, float value);

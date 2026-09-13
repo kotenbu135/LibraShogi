@@ -31,6 +31,7 @@ class Engine {
   std::string loaded_model_;
   std::unique_ptr<libra::SelfPlay> eng_;
   int eng_threads_ = 0, eng_mate_ = -1;
+  int batch_ = 0;                          // 1 回の推論にまとめる葉の数（DNN_Batch_Size）。バッファはこの大きさ
   std::vector<float> sq_, glob_, logits_, wdl_;
   std::vector<std::pair<int, int>> scale_;  // Scale_Table の釣り合い集合（kb, kw）
   std::string scale_loaded_;

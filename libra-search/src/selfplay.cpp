@@ -19,7 +19,8 @@ constexpr std::uint32_t NONE = 0xffffffffu;
 
 struct Edge {
   Move move;
-  int index;      // 方策の添字
+  std::uint16_t index;     // 方策の添字（POLICY_SIZE 2268 未満）
+  std::uint16_t vloss = 0; // 評価待ちの葉へ向かう数（複数葉の同時評価のときだけ 0 以外）
   float prior;
   int visits = 0;
   float wsum = 0;  // 親の手番側から見た値の和
@@ -33,11 +34,18 @@ struct Node {
   float net_value = 0;
   bool expanded = false;
   bool terminal = false;
+  std::uint16_t vloss = 0;  // この節点を通る評価待ちの数（葉自身も数える）
   float terminal_value = 0;
   std::vector<Edge> edges;
 };
 
 float wdl_value(const float* w) { return w[0] - w[2]; }
+
+// 仮の訪問を含めた辺の値。仮の訪問は親の手番側の負け（−1）として数える。仮の訪問が無ければ edge_q と同じ
+float edge_q_vl(const Node& parent, const Edge& e) {
+  if (e.vloss == 0) return e.visits > 0 ? e.wsum / e.visits : (parent.visits ? parent.wsum / parent.visits : parent.net_value);
+  return (e.wsum - float(e.vloss)) / float(e.visits + e.vloss);
+}
 
 Node make_node(std::uint64_t key) {
   Node n;
@@ -88,6 +96,13 @@ struct SelfPlay::Game {
   int proof_state = 0;
   Move proof_move = MOVE_NONE;
   float proof_value = 0.0f;
+  // 外部駆動の複数葉の同時評価（collect_batch → apply_batch）で評価待ちの葉。g.sp はルートに戻してある
+  struct Pending {
+    std::uint32_t leaf;
+    std::vector<std::pair<std::uint32_t, int>> path;
+    std::vector<Move> moves;
+  };
+  std::vector<Pending> batch;
 
   float root_q() const {
     const Node& r = nodes[0];
@@ -268,7 +283,7 @@ static int gumbel_pick(SelfPlay::Game& g, const SearchConfig& cfg) {
   for (;;) {
     int best = -1, best_v = 1 << 30;
     for (int c : g.cand) {
-      int v = root.edges[c].visits;
+      int v = root.edges[c].visits + root.edges[c].vloss;
       if (v < g.sh_target && v < best_v) {
         best_v = v;
         best = c;
@@ -284,9 +299,10 @@ static int gumbel_pick(SelfPlay::Game& g, const SearchConfig& cfg) {
     std::sort(g.cand.begin(), g.cand.end(), [&](int a, int b) { return score(a) > score(b); });
     g.cand.resize(std::max<size_t>(1, g.cand.size() / 2));
     ++g.sh_phase;
-    int remaining = g.budget - g.sims;
+    int remaining = g.budget - g.sims - int(g.batch.size());
     int phases_left = g.sh_phases - g.sh_phase;
-    g.sh_target = root.edges[g.cand[0]].visits + std::max(1, remaining / std::max(1, phases_left * int(g.cand.size())));
+    g.sh_target = root.edges[g.cand[0]].visits + root.edges[g.cand[0]].vloss +
+                  std::max(1, remaining / std::max(1, phases_left * int(g.cand.size())));
   }
 }
 
@@ -546,113 +562,121 @@ void SelfPlay::step_game(Game& g) {
       continue;
     }
     // 選択
-    g.path.clear();
-    g.path_moves.clear();
-    std::uint32_t ni = 0;
-    for (;;) {
-      Node& n = g.nodes[ni];
-      int ei;
-      if (ni == 0) {
-        ei = gumbel_pick(g, cfg_);
-        if (ei < 0) {
-          g.sims = g.budget;  // 逐次半減が終わった
-          break;
-        }
-      } else {
-        // PUCT
-        float sq_n = std::sqrt(float(std::max(1, n.visits)));
-        float best = -1e30f;
-        ei = 0;
-        for (size_t i = 0; i < n.edges.size(); ++i) {
-          const Edge& e = n.edges[i];
-          float u = edge_q(n, e) + cfg_.cpuct * e.prior * sq_n / (1 + e.visits);
-          if (u > best) {
-            best = u;
-            ei = int(i);
-          }
+    int r = descend(g);
+    if (r == 1) {
+      g.pending = true;  // 評価待ち
+      return;
+    }
+    if (r == 2) g.sims = g.budget;  // 逐次半減が終わった
+    if (r == 3) return;             // 評価待ちの葉にぶつかった（同時評価の途中でだけ起こる。apply_batch を待つ）
+  }
+}
+
+// 葉の値 v（葉の手番側から）を経路に沿って逆伝播する
+static void backprop(SelfPlay::Game& g, Node& child, float v) {
+  child.visits++;
+  child.wsum += v;
+  for (int k = int(g.path.size()) - 1; k >= 0; --k) {
+    v = -v;
+    Node& pn = g.nodes[g.path[k].first];
+    Edge& pe = pn.edges[g.path[k].second];
+    pe.visits++;
+    pe.wsum += v;
+    pn.visits++;
+    pn.wsum += v;
+  }
+  g.sims++;
+}
+
+// ルートから 1 回選ぶ。戻り値: 0 = 終端か合流済みの節点の値を逆伝播した（1 シミュレーション）、
+// 1 = 未評価の葉に着いた（g.leaf・g.path・g.path_moves を設定し、g.sp を葉まで進めた）、2 = 逐次半減が終わった、
+// 3 = 評価待ちの葉にぶつかった（複数葉の同時評価のときだけ起こる。g.sp はルートのまま）
+int SelfPlay::descend(Game& g) {
+  g.path.clear();
+  g.path_moves.clear();
+  std::uint32_t ni = 0;
+  for (;;) {
+    Node& n = g.nodes[ni];
+    int ei;
+    if (ni == 0) {
+      ei = gumbel_pick(g, cfg_);
+      if (ei < 0) return 2;
+    } else {
+      // PUCT（評価待ちの枝は仮の負けを含める）
+      float sq_n = std::sqrt(float(std::max(1, n.visits + n.vloss)));
+      float best = -1e30f;
+      ei = 0;
+      for (size_t i = 0; i < n.edges.size(); ++i) {
+        const Edge& e = n.edges[i];
+        float u = edge_q_vl(n, e) + cfg_.cpuct * e.prior * sq_n / (1 + e.visits + e.vloss);
+        if (u > best) {
+          best = u;
+          ei = int(i);
         }
       }
-      Edge& e = n.edges[ei];
-      g.path.push_back({ni, ei});
-      g.path_moves.push_back(e.move);
-      if (e.child == NONE) {
-        // 新しい葉（布石中は合流を見る）
-        Position& sp = g.sp;
-        for (Move m : g.path_moves) sp.do_move(m);
-        std::uint64_t key = sp.key();
-        bool merged = false;
-        if (sp.phase() == PHASE_FUSEKI) {
-          auto it = g.table.find(key);
-          if (it != g.table.end()) {
-            e.child = it->second;
-            merged = true;
-          }
+    }
+    Edge& e = n.edges[ei];
+    g.path.push_back({ni, ei});
+    g.path_moves.push_back(e.move);
+    if (e.child == NONE) {
+      // 新しい葉（布石中は合流を見る）
+      Position& sp = g.sp;
+      for (Move m : g.path_moves) sp.do_move(m);
+      std::uint64_t key = sp.key();
+      bool merged = false;
+      if (sp.phase() == PHASE_FUSEKI) {
+        auto it = g.table.find(key);
+        if (it != g.table.end()) {
+          e.child = it->second;
+          merged = true;
         }
-        if (!merged) {
-          g.nodes.push_back(make_node(key));
-          e.child = std::uint32_t(g.nodes.size() - 1);
-          if (sp.phase() == PHASE_FUSEKI) g.table[key] = e.child;
-          Node& leaf = g.nodes.back();
-          Outcome o = sp.outcome();
-          if (o.result != ONGOING) {
+      }
+      if (!merged) {
+        g.nodes.push_back(make_node(key));
+        e.child = std::uint32_t(g.nodes.size() - 1);
+        if (sp.phase() == PHASE_FUSEKI) g.table[key] = e.child;
+        Node& leaf = g.nodes.back();
+        Outcome o = sp.outcome();
+        if (o.result != ONGOING) {
+          leaf.terminal = true;
+          leaf.expanded = true;
+          Color mover = sp.turn();
+          leaf.terminal_value = o.result == DRAW ? cfg_.draw_value
+                                : ((o.result == BLACK_WIN) == (mover == BLACK)) ? 1.0f : -1.0f;
+        } else {
+          float pv;
+          if (fuseki_proof(g, sp, cfg_, pv, nullptr)) {
             leaf.terminal = true;
             leaf.expanded = true;
-            Color mover = sp.turn();
-            leaf.terminal_value = o.result == DRAW ? cfg_.draw_value
-                                  : ((o.result == BLACK_WIN) == (mover == BLACK)) ? 1.0f : -1.0f;
-          } else {
-            float pv;
-            if (fuseki_proof(g, sp, cfg_, pv, nullptr)) {
-              leaf.terminal = true;
-              leaf.expanded = true;
-              leaf.terminal_value = pv;
-            }
+            leaf.terminal_value = pv;
           }
         }
-        for (size_t i = 0; i < g.path_moves.size(); ++i) sp.undo_move();
-        ni = e.child;
-        Node& child = g.nodes[ni];
-        if (!child.expanded) {
-          // 評価待ち
-          g.leaf = ni;
-          g.pending = true;
-          for (Move m : g.path_moves) g.sp.do_move(m);
-          return;
-        }
-        // 合流済み or 終端 → 値を逆伝播
-        float v = child.terminal ? child.terminal_value : (child.visits ? child.wsum / child.visits : child.net_value);
-        child.visits++;
-        child.wsum += v;
-        for (int k = int(g.path.size()) - 1; k >= 0; --k) {
-          v = -v;
-          Node& pn = g.nodes[g.path[k].first];
-          Edge& pe = pn.edges[g.path[k].second];
-          pe.visits++;
-          pe.wsum += v;
-          pn.visits++;
-          pn.wsum += v;
-        }
-        g.sims++;
-        break;
       }
+      for (size_t i = 0; i < g.path_moves.size(); ++i) sp.undo_move();
       ni = e.child;
       Node& child = g.nodes[ni];
-      if (child.terminal) {
-        float v = child.terminal_value;
-        child.visits++;
-        child.wsum += v;
-        for (int k = int(g.path.size()) - 1; k >= 0; --k) {
-          v = -v;
-          Node& pn = g.nodes[g.path[k].first];
-          Edge& pe = pn.edges[g.path[k].second];
-          pe.visits++;
-          pe.wsum += v;
-          pn.visits++;
-          pn.wsum += v;
-        }
-        g.sims++;
-        break;
+      if (!child.expanded) {
+        if (child.vloss > 0) return 3;  // 合流した先が評価待ち
+        g.leaf = ni;
+        for (Move m : g.path_moves) g.sp.do_move(m);
+        return 1;
       }
+      // 合流済み or 終端 → 値を逆伝播
+      backprop(g, child, child.terminal ? child.terminal_value : (child.visits ? child.wsum / child.visits : child.net_value));
+      return 0;
+    }
+    ni = e.child;
+    Node& child = g.nodes[ni];
+    if (child.terminal) {
+      backprop(g, child, child.terminal_value);
+      return 0;
+    }
+    if (!child.expanded) {
+      // 同時評価のときだけ起こる: 評価待ちならぶつかった。評価が来なかった葉（apply_batch に k が足りない）なら評価に出す
+      if (child.vloss > 0) return 3;
+      g.leaf = ni;
+      for (Move m : g.path_moves) g.sp.do_move(m);
+      return 1;
     }
   }
 }
@@ -787,7 +811,7 @@ void SelfPlay::apply_game(Game& g, const float* logits, const float* wdl) {
   float mx = -1e30f;
   for (Move m : ml) {
     int idx = move_index(sp, m);
-    leaf.edges.push_back(Edge{m, idx, logits[idx]});
+    leaf.edges.push_back(Edge{m, std::uint16_t(idx), 0, logits[idx]});
     mx = std::max(mx, logits[idx]);
   }
   float z = 0;
@@ -868,11 +892,63 @@ bool SelfPlay::set_position(int slot, const std::string& usi_line, int sims, boo
   g.pending = false;
   g.sims = 0;
   g.idle = false;
+  g.batch.clear();
   step_game(g);
   return true;
 }
 
 bool SelfPlay::idle(int slot) const { return games_[slot]->idle; }
+
+// 評価待ちの経路の仮の訪問を d だけ増減する
+static void add_vloss(SelfPlay::Game& g, const SelfPlay::Game::Pending& p, int d) {
+  for (const auto& pe : p.path) {
+    Node& n = g.nodes[pe.first];
+    n.vloss = std::uint16_t(n.vloss + d);
+    n.edges[pe.second].vloss = std::uint16_t(n.edges[pe.second].vloss + d);
+  }
+  g.nodes[p.leaf].vloss = std::uint16_t(g.nodes[p.leaf].vloss + d);
+}
+
+int SelfPlay::collect_batch(int slot, int max_leaves, float* sq, float* glob) {
+  Game& g = *games_[slot];
+  if (g.idle || !g.batch.empty()) return 0;
+  if (!g.pending) step_game(g);  // 読み終わりなら結果を出して idle、そうでなければ最初の葉で止まる
+  if (g.idle) return 0;
+  int k = 0;
+  // g.sp にある葉の特徴を書き、ルートに戻して評価待ちに積む
+  auto emit = [&] {
+    write_features(g.sp, sq + size_t(k) * SQ_NB * SQ_FEATS, glob + size_t(k) * GLOB_FEATS);
+    for (size_t i = 0; i < g.path_moves.size(); ++i) g.sp.undo_move();
+    g.batch.push_back(Game::Pending{g.leaf, g.path, g.path_moves});
+    add_vloss(g, g.batch.back(), +1);
+    g.pending = false;
+    ++k;
+  };
+  if (g.pending) emit();
+  // 根が未評価なら根だけ。予算は評価待ちも数える
+  for (int guard = 0; guard < 4096 && k < max_leaves && g.root_ready; ++guard) {
+    if (g.sims + int(g.batch.size()) >= g.budget) break;
+    int r = descend(g);
+    if (r == 1) emit();
+    else if (r != 0) break;  // 逐次半減の区切り（評価待ちを反映してから続ける）か、評価待ちの葉にぶつかった
+  }
+  return k;
+}
+
+void SelfPlay::apply_batch(int slot, const float* logits, const float* wdl, int k) {
+  Game& g = *games_[slot];
+  for (size_t i = 0; i < g.batch.size(); ++i) {
+    Game::Pending& p = g.batch[i];
+    add_vloss(g, p, -1);
+    if (int(i) >= k) continue;  // 評価が来なかった葉は未評価のまま残す（次に選ばれたら評価に出す）
+    g.leaf = p.leaf;
+    g.path.swap(p.path);
+    g.path_moves.swap(p.moves);
+    for (Move m : g.path_moves) g.sp.do_move(m);
+    apply_game(g, logits + size_t(i) * POLICY_SIZE, wdl + size_t(i) * 3);
+  }
+  g.batch.clear();
+}
 
 void SelfPlay::finish_now(int slot) {
   Game& g = *games_[slot];
@@ -889,6 +965,11 @@ void SelfPlay::finish_now(int slot) {
     g.forced_budget = 0;
     g.budget = 0;
     return;
+  }
+  if (!g.batch.empty()) {
+    // 同時評価の評価待ちをまとめて捨てる
+    for (const auto& p : g.batch) add_vloss(g, p, -1);
+    g.batch.clear();
   }
   if (g.pending) {
     // 評価待ちの葉は捨てて、今の訪問数で決める

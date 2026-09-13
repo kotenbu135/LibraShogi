@@ -120,6 +120,26 @@ def test_movetime_respected(engine):
     assert bm not in ("resign", "win")
 
 
+def test_batched_leaves_keep_node_budget(engine):
+    """DNN_Batch_Size で葉をまとめて評価しても、指定のノード数どおり読んで合法手を返す。"""
+    engine.send("setoption name DNN_Batch_Size value 8")
+    try:
+        for line in ("position fuseki moves K*5i K*5a", "position fuseki moves K*5i K*5a P*5g P*5c G*4h G*6b"):
+            engine.send(line)
+            engine.send("go nodes 64")
+            lines = engine.wait_for(lambda l: l.startswith("bestmove"), 120)
+            bm = lines[-1].split()[1]
+            pos = ls.Position()
+            pos.set_position(line)
+            assert pos.is_legal(bm), (line, bm)
+            info = [l.split() for l in lines if l.startswith("info") and " multipv 1 " in l][-1]
+            assert int(info[info.index("nodes") + 1]) == 64, line
+        bm, _ = engine.go("position fuseki moves K*5i K*5a", "movetime 300", timeout=30)
+        assert bm not in ("resign", "win")
+    finally:
+        engine.send("setoption name DNN_Batch_Size value 1")
+
+
 def test_scale_table_places_kings(engine, tmp_path):
     import json
 
