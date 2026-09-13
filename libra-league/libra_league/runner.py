@@ -19,6 +19,7 @@ from .config import dump_toml, load_config
 from .replay import ReplayBuffer
 from .selfplay import SelfPlayLoop
 from .state import StateDir, write_json_atomic
+from .supervise import EXIT_ALREADY_RUNNING, acquire_lock
 from .trainer import Trainer
 
 
@@ -377,16 +378,10 @@ def main_run(root: Path, config_path: Path | None) -> None:
     cfg = load_config(cfg_path)
     sd.create()
     lock = sd.root / "run.lock"
-    try:
-        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.write(fd, str(os.getpid()).encode())
-        os.close(fd)
-    except FileExistsError:
-        pid = lock.read_text().strip()
-        if pid and Path(f"/proc/{pid}").exists():
-            print(f"already running (pid {pid})", file=sys.stderr)
-            sys.exit(1)
-        lock.write_text(str(os.getpid()))
+    pid = acquire_lock(lock)
+    if pid is not None:
+        print(f"already running (pid {pid})", file=sys.stderr)
+        sys.exit(EXIT_ALREADY_RUNNING)  # 監視役はこれを見て起動し直さない
     try:
         Runner(sd, cfg).run()
     finally:

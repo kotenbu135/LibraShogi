@@ -13,8 +13,9 @@ docs/libra-local.md §7〜8 の実装。状態はすべて `~/libra-run/<run-id>
 | `replay/chunk_<n>.pkl` | 100 局ごとの対局記録（学習用）。書き終えてから名前を確定する（書きかけは `.tmp`） |
 | `games/games_<n>.jsonl` | 同じ 100 局の棋譜（公開用、CC0）。1 局 1 行: `tokens`, `result`, `reason`, `plies`, `sfen41`, `v41` |
 | `PAUSE` / `STOP` / `EVAL_NOW` / `MATCH_NOW` | フラグファイル。`libra pause/stop/eval-now/match-now` が置き、ランナーが読む |
-| `run.lock` | 実行中の PID。二重起動を防ぐ |
-| `log.txt` | ランナーのログ |
+| `run.lock` | 実行中のランナー本体の PID。二重起動を防ぐ（その pid が libra_league のプロセスでなければ無効） |
+| `log.txt` | ランナーのログ（監視役の再起動の記録 `supervisor:` もここ） |
+| `stdout.log` | ランナー本体の標準出力・標準エラー（監視役が追記。異常終了したときの CUDA のエラー文などはここに残る） |
 
 ## 2. コマンド
 
@@ -33,7 +34,8 @@ Windows 側: `C:\Users\sakis\libra\` に `libra-run.bat`（本体 ls）/ `libra-
 
 ## 3. Windows Update で再起動しても続くようにする
 
-1. タスク スケジューラに「LibraShogi run」（本体 ls、ログオン 1 分後）と「LibraShogi run lx」（搾取者 lx、ログオン 2 分後）を登録済み（`C:\Users\sakis\libra\LibraShogi-run.xml` / `LibraShogi-run-lx.xml`）。それぞれ `wscript.exe libra-run-hidden.vbs` / `libra-run-lx-hidden.vbs` → `wsl.exe -d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra [--run lx] run` を非表示で起動し、失敗時は 1 分後に再起動（999 回まで）。実行時間の上限なし。
+1. タスク スケジューラに「LibraShogi run」（本体 ls、ログオン 1 分後）と「LibraShogi run lx」（搾取者 lx、ログオン 2 分後）を登録済み（`C:\Users\sakis\libra\LibraShogi-run.xml` / `LibraShogi-run-lx.xml`）。それぞれ `wscript.exe libra-run-hidden.vbs` / `libra-run-lx-hidden.vbs` → `wsl.exe -d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra [--run lx] run` を非表示で起動する。実行時間の上限なし。タスクの「失敗時に 1 分後に再起動（999 回まで）」は起動後の異常終了には効かない（9/13 に lx が CUDA の abort で落ちたまま 4.7 h 止まった）。
+   **`libra run` は監視役**で、ランナー本体（子の `run --no-supervise`）が異常終了したら 60 秒後に起動し直す。起動し直さないのは、停止（STOP フラグ、終了コード 0）、二重起動（終了コード 3）、Ctrl+C・kill・`wsl --shutdown`（SIGINT/SIGTERM/SIGHUP）、待機中に STOP が置かれたとき。15 分未満で落ちるのが 5 回続いたら諦めて止まる。記録は log.txt の `supervisor:` 行と `stdout.log`。待機中（最大 60 秒）は status が `not running` と出る。
 2. **自動ログオンは利用者が設定する**（`netplwiz`）。設定しないと再起動後にログオンするまで止まる。
 3. 再起動後の損失はチェックポイント間隔（10 分）＋進行中の対局分。
 4. Windows Update の「アクティブ時間」を広めに設定する。

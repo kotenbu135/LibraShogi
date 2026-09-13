@@ -115,7 +115,7 @@ ctest --test-dir build/libra-search --output-on-failure   # df-pn
 PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-scale python -m pytest -q libra-sim/tests/test_python.py libra-league/tests libra-net/tests libra-engine/tests libra-scale/tests libra-search/tests/test_external.py -p no:warnings
 ```
 
-pytest は 33 件、約 2〜3 分（ランナーのスモークと df-pn の乱数検証が重い。L-S 稼働中は CPU を取り合って伸びる）。CI（`.github/workflows/ci.yml`）は同じ手順を ubuntu-latest の CPU で回す。
+pytest は 54 件、約 10 秒〜3 分（ランナーのスモークと df-pn の乱数検証が重い。L-S 稼働中は CPU を取り合って伸びる）。CI（`.github/workflows/ci.yml`）は同じ手順を ubuntu-latest の CPU で回す。
 
 ## Gotchas
 

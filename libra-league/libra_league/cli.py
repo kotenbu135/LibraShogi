@@ -27,6 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     p_run = sub.add_parser("run", help="前回状態から再開（無ければ新規）")
     p_run.add_argument("--resume", action="store_true", help="（既定と同じ。互換のため）")
     p_run.add_argument("--config", default=None, help="config.toml（初回だけ有効。以後は状態ディレクトリの写しを使う）")
+    p_run.add_argument("--no-supervise", action="store_true", help="監視役を挟まずこのプロセスで回す（監視役が子を起動するときに使う）")
     sub.add_parser("pause", help="PAUSE フラグを置く。ワーカーは現在のバッチを終えて待機")
     sub.add_parser("resume", help="PAUSE フラグを消す")
     sub.add_parser("stop", help="STOP フラグを置く。チェックポイントを書いて終了")
@@ -65,6 +66,11 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     sd = StateDir(Path(a.root) / a.run)
     if a.cmd == "run":
+        if not a.no_supervise:
+            # 異常終了（CUDA の abort など）したら起動し直す。停止フラグでの終了や二重起動では起動し直さない
+            from .supervise import child_argv, supervise
+
+            return supervise(sd, child_argv(a.root, a.run, a.config))
         from .runner import main_run
 
         main_run(sd.root, Path(a.config) if a.config else None)
@@ -174,11 +180,9 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "status":
         st = read_json(sd.status_json)
         state = sd.read_state()
-        lock = sd.root / "run.lock"
-        running = False
-        if lock.exists():
-            pid = lock.read_text().strip()
-            running = Path(f"/proc/{pid}").exists()
+        from .supervise import running_pid
+
+        running = running_pid(sd.root / "run.lock") is not None
         flags = [f for f in StateDir.FLAGS if sd.flag(f)]
         if a.json:
             out = {
