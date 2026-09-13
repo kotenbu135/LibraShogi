@@ -22,6 +22,8 @@ STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 RESTART_DELAY = 60.0
 HEALTHY_SECONDS = 900.0  # これより長く動いてから落ちたら連続失敗の数を数え直す（チェックポイント間隔 10 分より長く）
 MAX_QUICK_FAILURES = 5
+STOP_WAIT = 180.0  # 停止処理中の run に起動が来たら終わるのをこれだけ待つ（チェックポイントと ONNX の書き出しで数秒）
+LEFTOVER_FLAGS = ("STOP", "PAUSE")  # 止まっている run に残っていたら起動時に消す（PAUSE は廃止した一時停止の名残）
 
 
 def exit_code(rc: int) -> int:
@@ -64,13 +66,41 @@ def acquire_lock(lock: Path) -> int | None:
         return None
 
 
+def prepare_start(sd: StateDir, log: Callable[[str], None], stop_wait: float = STOP_WAIT) -> int | None:
+    """起動の前処理。起動してよければ None、起動しないなら終了コード（二重起動）。
+
+    操作は「起動」と「停止」だけなので（docs/decisions.md 2026-09-14）、どの順に押されても起動が空振りしないようにする:
+    停止処理中（STOP があり lock の持ち主が生きている）なら終わるのを待ってから起動し、
+    止まっている run に残った STOP・PAUSE は消す（残っていると起動直後に止まる／待機する）。STOP の無い稼働中の run には起動しない。
+    """
+    lock = sd.root / "run.lock"
+    pid = running_pid(lock)
+    if pid is not None:
+        if not sd.flag("STOP"):
+            log(f"start: already running (pid {pid})")
+            return EXIT_ALREADY_RUNNING
+        log(f"start: waiting for the running process to stop (pid {pid})")
+        end = time.monotonic() + stop_wait
+        while running_pid(lock) is not None:
+            if time.monotonic() >= end:
+                log(f"start: pid {pid} did not stop within {stop_wait:.0f} s; not starting")
+                return EXIT_ALREADY_RUNNING
+            time.sleep(0.5)
+    left = [f for f in LEFTOVER_FLAGS if sd.flag(f)]
+    for f in left:
+        sd.clear_flag(f)
+    if left:
+        log(f"start: cleared leftover flags {' '.join(left)}")
+    return None
+
+
 def child_argv(root: str, run: str, config: str | None) -> list[str]:
     argv = [sys.executable, "-m", "libra_league.cli", "--root", root, "--run", run, "run", "--no-supervise"]
     return argv + (["--config", config] if config else [])
 
 
 def supervise(sd: StateDir, argv: list[str], *, delay: float = RESTART_DELAY, healthy: float = HEALTHY_SECONDS,
-              max_quick: int = MAX_QUICK_FAILURES, log: Callable[[str], None] | None = None) -> int:
+              max_quick: int = MAX_QUICK_FAILURES, log: Callable[[str], None] | None = None, stop_wait: float = STOP_WAIT) -> int:
     """argv を子として回す。子の標準出力・標準エラーは <run>/stdout.log に追記する。戻り値は終了コード。"""
     def _log(msg: str) -> None:
         print(msg, flush=True)
@@ -78,6 +108,9 @@ def supervise(sd: StateDir, argv: list[str], *, delay: float = RESTART_DELAY, he
 
     log = log or _log
     sd.create()
+    code = prepare_start(sd, log, stop_wait)
+    if code is not None:
+        return code
     stopping: list[int] = []
     child: list[subprocess.Popen] = []
 

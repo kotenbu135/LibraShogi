@@ -84,6 +84,70 @@ def test_supervise_stop_flag_during_wait(tmp_path):
     assert _count(sd) == 1 and not sd.flag("STOP")
 
 
+def _holder(sd: StateDir, body: str) -> subprocess.Popen:
+    """run.lock を持つ「稼働中のランナー」（cmdline に libra_league を含むプロセス）。"""
+    sd.create()
+    p = subprocess.Popen([sys.executable, "-c", textwrap.dedent(body), "libra_league"])
+    time.sleep(0.2)  # exec が済むまで（/proc/<pid>/cmdline が子のものになるまで）
+    (sd.root / "run.lock").write_text(str(p.pid))
+    return p
+
+
+def test_start_clears_leftover_flags(tmp_path):
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    sd.set_flag("STOP")  # 止まっている run に残った停止と、廃止した一時停止
+    (sd.root / "PAUSE").write_text("1")
+    argv = _child(tmp_path, """
+        sys.exit(0 if not (root / "STOP").exists() and not (root / "PAUSE").exists() else 1)
+    """)
+    assert supervise(sd, argv, delay=0.0) == 0
+    assert _count(sd) == 1 and not sd.flag("STOP") and not (sd.root / "PAUSE").exists()
+    assert "cleared leftover flags STOP PAUSE" in sd.log.read_text(encoding="utf-8")
+
+
+def test_start_waits_for_stopping_run(tmp_path):
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    sd.set_flag("STOP")  # 停止を押した直後に起動を押した
+    holder = _holder(sd, f"""
+        import time
+        from pathlib import Path
+        root = Path({str(sd.root)!r})
+        time.sleep(1.5)  # チェックポイントを書いている
+        (root / "STOP").unlink()
+        (root / "run.lock").unlink()
+    """)
+    try:
+        argv = _child(tmp_path, "sys.exit(0)\n")
+        t0 = time.monotonic()
+        assert supervise(sd, argv, delay=0.0, stop_wait=20.0) == 0
+        assert time.monotonic() - t0 >= 1.0
+        assert _count(sd) == 1
+        assert "waiting for the running process to stop" in sd.log.read_text(encoding="utf-8")
+    finally:
+        holder.kill()
+        holder.wait()
+
+
+def test_start_refuses_running_run(tmp_path):
+    sd = StateDir(tmp_path / "x")
+    holder = _holder(sd, "import time; time.sleep(30)")
+    try:
+        argv = _child(tmp_path, "sys.exit(0)\n")
+        assert supervise(sd, argv, delay=0.0) == EXIT_ALREADY_RUNNING
+        assert not (sd.root / "count").exists()
+        assert "already running" in sd.log.read_text(encoding="utf-8")
+        sd.set_flag("STOP")  # 停止を送っても止まらない
+        t0 = time.monotonic()
+        assert supervise(sd, argv, delay=0.0, stop_wait=1.0) == EXIT_ALREADY_RUNNING
+        assert 1.0 <= time.monotonic() - t0 < 10.0
+        assert not (sd.root / "count").exists() and sd.flag("STOP")  # 動いている run の STOP は消さない
+    finally:
+        holder.kill()
+        holder.wait()
+
+
 def test_supervise_forwards_sigterm_and_exits(tmp_path):
     sd = StateDir(tmp_path / "x")
     sd.create()

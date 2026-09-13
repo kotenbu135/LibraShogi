@@ -74,13 +74,13 @@ tmux send-keys -t libra 'quit' Enter; tmux kill-session -t libra
 
 ## Run (human path) — 本番のラン
 
-**本番のラン（ls・lx）の操作はユーザーが管理コンソールで行う。Claude は stop / run / pause / resume / eval-now / match-now を実行せず、終了待ちの監視もしない**（CLAUDE.md 「稼働中のランの扱い」）。以下は手順の記録と、driver が使う一時的な run（`driver.py runner`）向け。
+**本番のラン（ls・lx）の操作はユーザーが管理コンソールで行う。Claude は stop / run / eval-now / match-now を実行せず、終了待ちの監視もしない。操作は起動と停止だけ（一時停止・再開は廃止）**（CLAUDE.md 「稼働中のランの扱い」）。以下は手順の記録と、driver が使う一時的な run（`driver.py runner`）向け。
 
 本番の状態は `~/libra-run/ls`（本体 L-S）と `~/libra-run/lx`（搾取者）。冪等で、前回の状態から再開する。詳細は `docs/runbook.md`。
 
 ```bash
 bin/libra status                 # ls の状態（--run lx で搾取者）
-bin/libra pause / resume / stop  # フラグファイル。stop はチェックポイントを書いて終了
+bin/libra stop                   # STOP フラグ。チェックポイントを書いて終了（run は停止処理中なら待ち、残った STOP を消してから起動）
 bin/libra export                 # latest.pt → latest.onnx（チェックポイントごとに自動でも書かれる）
 bin/libra-scale show             # 玉配置表 ~/libra-run/ls/scale/scale.json
 ```
@@ -95,8 +95,7 @@ WinForms の GUI。人はデスクトップの `libra-console.bat` で開く。�
 tools/windows/install.sh
 S='C:\Users\sakis\libra\libra-console.ps1'
 powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot 'C:\Users\sakis\libra\console-shot.png'   # 1 回更新して PNG 保存、要約を表示して終了（約 5 秒）
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -Do 'lx:pause'      # ボタンと同じ呼び出しだけ実行（pause/resume/stop/eval-now/match-now）
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -Do 'lx:resume'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -Do 'ls:status'     # ボタンと同じ呼び出しだけ実行（status/stop/eval-now/match-now。起動は含まない。本番の run に stop を送らない）
 powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot 'C:\Users\sakis\libra\console-shot.png' -Tab 'Elo'   # 下のグラフのタブを選ぶ（局/日, Elo, 対外対局, 学習, 終局内訳, 手数）
 ```
 
@@ -104,7 +103,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -UpdateDesktopModel
 
 要約行には `metrics=`（metrics.jsonl の点数）`evals=` `matches=` `archives=` も出る。自動計測は `bin/libra eval-now` / `match-now`（次のチェックポイントで実行、`~/libra-run/ls/auto.log`）。
 
-PNG は `/mnt/c/Users/sakis/libra/console-shot.png` を Read で見る。`-Do` の出力は `bin/libra` の出力そのもの（`PAUSE set` など）。
+PNG は `/mnt/c/Users/sakis/libra/console-shot.png` を Read で見る。`-Do` の出力は `bin/libra` の出力そのもの（`STOP set` など）。
 
 ## Test
 

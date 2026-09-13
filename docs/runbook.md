@@ -15,7 +15,7 @@ docs/libra-local.md §7〜8 の実装。状態はすべて `~/libra-run/<run-id>
 | `checkpoints/ckpt_<step>.pt`, `latest.pt` | 10 分ごと。モデル・オプティマイザ・乱数状態・設定。直近 3 つと 50,000 ステップごとを残す |
 | `replay/chunk_<n>.pkl` | 100 局ごとの対局記録（学習用）。書き終えてから名前を確定する（書きかけは `.tmp`） |
 | `games/games_<n>.jsonl` | 同じ 100 局の棋譜（公開用、CC0）。1 局 1 行: `tokens`, `result`, `reason`, `plies`, `sfen41`, `v41` |
-| `PAUSE` / `STOP` / `EVAL_NOW` / `MATCH_NOW` | フラグファイル。`libra pause/stop/eval-now/match-now` が置き、ランナーが読む |
+| `STOP` / `EVAL_NOW` / `MATCH_NOW` | フラグファイル。`libra stop/eval-now/match-now` が置き、ランナーが読む。止まっている run に残った `STOP`（と廃止した一時停止の `PAUSE`）は、次の `libra run` が起動前に消す |
 | `run.lock` | 実行中のランナー本体の PID。二重起動を防ぐ（その pid が libra_league のプロセスでなければ無効） |
 | `log.txt` | ランナーのログ（監視役の再起動の記録 `supervisor:` もここ） |
 | `stdout.log` | ランナー本体の標準出力・標準エラー（監視役が追記。異常終了したときの CUDA のエラー文などはここに残る） |
@@ -24,17 +24,20 @@ docs/libra-local.md §7〜8 の実装。状態はすべて `~/libra-run/<run-id>
 ## 2. コマンド
 
 ```bash
-~/LibraShogi/bin/libra run                 # 前回状態から再開（無ければ新規）。冪等
-~/LibraShogi/bin/libra pause               # 現在のバッチを終えて待機（GPU メモリを解放）
-~/LibraShogi/bin/libra resume
-~/LibraShogi/bin/libra stop                # チェックポイントを書いて終了
+~/LibraShogi/bin/libra run                 # 起動。前回状態から再開（無ければ新規）。冪等
+~/LibraShogi/bin/libra stop                # 停止。チェックポイントを書いて終了
 ~/LibraShogi/bin/libra status
 ```
+
+**操作は起動（`run`）と停止（`stop`）だけ**（2026-09-14 のユーザーの決定。一時停止・再開は廃止）。GPU や CPU を空けるときも停止し、終わったら起動する。どの順に押しても起動が空振りしないよう、`libra run` は起動前に次をする（log.txt に `start:` 行）:
+- 停止処理中（STOP があり、まだ動いている）なら、止まるのを最大 180 秒待ってから起動する
+- 止まっている run に残った STOP（と PAUSE）を消す
+- STOP の無い稼働中の run には起動しない（`start: already running`）
 
 `--run <id>` で run-id、`--root <dir>` で親ディレクトリを変えられる（既定 `~/libra-run/ls`）。
 `run --config path.toml` は初回だけ有効。
 
-Windows 側: `C:\Users\sakis\libra\` に `libra-run.bat`（本体 ls）/ `libra-run-lx.bat`（搾取者 lx）と、**ls と lx の両方に効く** `libra-pause.bat` / `libra-resume.bat` / `libra-stop.bat` / `libra-status.bat`。デスクトップに pause / resume / status / stop の写し。
+Windows 側: `C:\Users\sakis\libra\` に `libra-run.bat`（本体 ls）/ `libra-run-lx.bat`（搾取者 lx）と、**ls と lx の両方に効く** `libra-stop.bat` / `libra-status.bat`。デスクトップに status / stop の写し（`install.sh` は前に写した libra-pause.bat / libra-resume.bat を消す）。
 
 ## 3. Windows Update で再起動しても続くようにする
 
@@ -54,16 +57,16 @@ schtasks /Create /TN "LibraShogi run lx" /XML "C:\Users\sakis\libra\LibraShogi-r
 
 Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\Users\<user>\libra` とデスクトップへ写す）。
 
-**管理コンソール（GUI）**: デスクトップの `libra-console.bat`（`tools/windows/libra-console.ps1`、PowerShell 5.1 + WinForms、ビルド不要）。本体 ls と搾取者 lx の状態（稼働 / 一時停止 / 停止、step・世代・総局数、局/日の 1 時間平均と実測、終局内訳、loss、GPU メモリ、最終チェックポイント、搾取者の対本体勝率、log.txt の末尾）を 15 秒ごとに `wsl.exe -d Ubuntu-24.04 -- bin/libra --run <run> status --json --tail 8` で取り、局/日の推移を折れ線で出す。ボタンは bat と同じ操作（一時停止 / 再開 / 停止 / 起動 / 絞る、両 run 一括）。「起動」はタスク スケジューラの「LibraShogi run [lx]」を `schtasks /Run` で起動する（無ければ wsl.exe を直接起動）。局/日の履歴は `%LOCALAPPDATA%\LibraShogi\console-history.csv` に追記（7 日分を表示）。
+**管理コンソール（GUI）**: デスクトップの `libra-console.bat`（`tools/windows/libra-console.ps1`、PowerShell 5.1 + WinForms、ビルド不要）。本体 ls と搾取者 lx の状態（稼働中 / 停止処理中 / 停止、step・世代・総局数、局/日の 1 時間平均と実測、終局内訳、loss、GPU メモリ、最終チェックポイント、搾取者の対本体勝率、log.txt の末尾）を 15 秒ごとに `wsl.exe -d Ubuntu-24.04 -- bin/libra --run <run> status --json --tail 8` で取り、局/日の推移を折れ線で出す。ボタンは「起動」「停止」（run ごとと「全部 起動」「全部 停止」）と自動計測の前倒しだけ。稼働中は「起動」、止まっているときは「停止」を押せなくする。停止処理中は「起動」を押してよい（止まってから起動する）。「起動」はタスク スケジューラの「LibraShogi run [lx]」を `schtasks /Run` で起動し（無ければ wsl.exe を直接起動）、5 分以内に稼働を確かめられなければステータスバーに赤で出す。操作の結果はステータスバーに 1〜15 分残る。局/日の履歴は `%LOCALAPPDATA%\LibraShogi\console-history.csv` に追記（7 日分を表示）。
 
-再起動・一時停止の手順（bat 版）: 一時停止はデスクトップの `libra-pause.bat`（両 run が待機）、復帰は `libra-resume.bat`。PC を再起動するときは `libra-stop.bat` で両 run を止めて（`libra-status.bat` で `not running` を確認）から再起動し、ログオン後に両タスクが自動で再開する。搾取者を止めたままにしたいときは WSL で `bin/libra --run lx stop` だけ実行する（本体は openings を読むだけなので影響しない）。
+再起動の手順（bat 版）: PC を再起動するときは `libra-stop.bat` で両 run を止めて（`libra-status.bat` で `not running` を確認）から再起動し、ログオン後に両タスクが自動で再開する。搾取者を止めたままにしたいときは WSL で `bin/libra --run lx stop` だけ実行する（本体は openings を読むだけなので影響しない）。
 
 ## 4. 別作業でリソースを空けるとき
 
-- GPU を使う作業: デスクトップの `libra-pause.bat` → 終わったら `libra-resume.bat`
-- CPU だけ使う作業: そのままで良い（ワーカーは `nice 10`）。GPU が要る作業は管理コンソールの「一時停止」
-- 数日止めても再開時のコストはゼロ
-- 推論は CUDA Graphs で捕獲している（`[selfplay] compile`、decisions.md 2026-09-14）。起動直後と再開直後の最初のラウンドで捕獲し直すので、起動時は torch.compile の autotune に 5〜25 秒ほど掛かる（WSL の再起動で `/tmp` のキャッシュが消えた後は長め）。`log.txt` に `selfplay: inference model=compile(max-autotune)+cudagraph` が出れば有効、`eager` なら捕獲に失敗していて理由は `stdout.log`
+- GPU を使う作業: 管理コンソールで「停止」→ 終わったら「起動」（一時停止は廃止）
+- CPU だけ使う作業: そのままで良い（ワーカーは `nice 10`）
+- 数日止めても再開時のコストはゼロ（損失は最後のチェックポイント以降の進行中の対局だけ）
+- 推論は CUDA Graphs で捕獲している（`[selfplay] compile`、decisions.md 2026-09-14）。起動直後の最初のラウンドで捕獲するので、起動時は torch.compile の autotune に 5〜25 秒ほど掛かる（WSL の再起動で `/tmp` のキャッシュが消えた後は長め）。`log.txt` に `selfplay: inference model=compile(max-autotune)+cudagraph` が出れば有効、`eager` なら捕獲に失敗していて理由は `stdout.log`
 
 ## 5. 設定を変えるとき
 
@@ -90,7 +93,7 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 ```
 
 `match` は `~/libra-run/ls/matches/<時刻>.jsonl`（1 局 1 行）と `.summary.json`、USI ログ `.log` を書く。裁定は libra-sim（docs/rules.md）。相手のバージョンとハッシュは docs/protocol.md §5。
-GPU を L-S と共有するので、計測中は `libra pause` するか、局/日が落ちることを承知で回す。
+GPU を L-S と共有するので、計測中は ls・lx を停止するか、局/日が落ちることを承知で回す。
 
 ## 8. desktop で Libra と指す（自分で体感する）
 

@@ -54,7 +54,7 @@ class InferenceNet:
         return True
 
     def release(self) -> None:
-        """捕獲したグラフと固定バッファを捨てる（一時停止で GPU メモリを空けるため）。次の呼び出しで捕獲し直す。"""
+        """捕獲したグラフと固定バッファを捨てて GPU メモリを空ける。次の呼び出しで捕獲し直す。"""
         self.graph = None
         self._static = None
 

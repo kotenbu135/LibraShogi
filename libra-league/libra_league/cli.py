@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""`libra` コマンド: run / pause / resume / stop / status（docs/libra-local.md §7.2）。
+"""`libra` コマンド: run / stop / status（docs/libra-local.md §7.2）。
 
-同時進行局数を絞る `throttle` は廃止した（docs/decisions.md 2026-09-12）。負荷を落とすときは pause を使う。
+同時進行局数を絞る `throttle`（decisions.md 2026-09-12）と一時停止の `pause` / `resume`（2026-09-14）は廃止した。
+GPU や CPU を空けるときは stop し、終わったら run する。
 """
 from __future__ import annotations
 
@@ -24,12 +25,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--run", default="ls", help="run-id（状態ディレクトリ ~/libra-run/<run-id>）")
     ap.add_argument("--root", default=str(DEFAULT_ROOT), help="状態ディレクトリの親")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p_run = sub.add_parser("run", help="前回状態から再開（無ければ新規）")
+    p_run = sub.add_parser("run", help="前回状態から再開（無ければ新規）。停止処理中なら終わるのを待ち、残った STOP は消してから起動する")
     p_run.add_argument("--resume", action="store_true", help="（既定と同じ。互換のため）")
     p_run.add_argument("--config", default=None, help="config.toml（初回だけ有効。以後は状態ディレクトリの写しを使う）")
     p_run.add_argument("--no-supervise", action="store_true", help="監視役を挟まずこのプロセスで回す（監視役が子を起動するときに使う）")
-    sub.add_parser("pause", help="PAUSE フラグを置く。ワーカーは現在のバッチを終えて待機")
-    sub.add_parser("resume", help="PAUSE フラグを消す")
     sub.add_parser("stop", help="STOP フラグを置く。チェックポイントを書いて終了")
     p_st = sub.add_parser("status", help="状態を表示")
     p_st.add_argument("--json", action="store_true", help="機械可読な JSON を 1 行で出す（Windows の管理コンソール用）")
@@ -96,14 +95,6 @@ def main(argv: list[str] | None = None) -> int:
         out = Path(a.out) if a.out else sd.root / "openings.json"
         write_openings(out, lines, str(sd.root))
         print(f"wrote {out}: {len(lines)} openings")
-        return 0
-    if a.cmd == "pause":
-        sd.set_flag("PAUSE")
-        print("PAUSE set")
-        return 0
-    if a.cmd == "resume":
-        sd.clear_flag("PAUSE")
-        print("PAUSE cleared")
         return 0
     if a.cmd == "stop":
         sd.set_flag("STOP")

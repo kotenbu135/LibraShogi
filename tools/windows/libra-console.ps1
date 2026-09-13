@@ -1,11 +1,11 @@
 ﻿# SPDX-License-Identifier: Apache-2.0
 # Libra 管理コンソール（Windows 用 GUI）。
 # WSL 内の bin/libra を wsl.exe 経由で呼び、本体 ls と搾取者 lx の進捗・速度・強さの推移を表示し、
-# 一時停止 / 再開 / 停止 / 起動 / 自己評価・対外対局の前倒しを行う。
+# 起動 / 停止 / 自己評価・対外対局の前倒しを行う（一時停止・再開は 2026-09-14 に廃止。docs/decisions.md）。
 # 起動: libra-console.bat（powershell -ExecutionPolicy Bypass -File libra-console.ps1）
 # 自動テスト: -Screenshot C:\path\shot.png で 1 回更新して画面を PNG に保存し終了する（要約を stdout に出す）。
 #             -Tab <タブ名> で保存時に表示するグラフを選ぶ。
-#             -Do "lx:pause" のようにボタンと同じ操作だけを GUI なしで実行して結果を出す。
+#             -Do "lx:stop" のようにボタンと同じ操作だけを GUI なしで実行して結果を出す（起動は含まない）。
 #             -UpdateDesktopModel で desktop（天秤将棋GUI）に登録した libra.exe のモデルを最新の latest.onnx に置き換えて終了する。
 param(
     [string]$Distro = "Ubuntu-24.04",
@@ -43,6 +43,8 @@ $script:Hist = @{}      # run -> ArrayList（コンソール自身の観測: t, 
 $script:Data = @{}      # run -> status --history の結果（metrics, evals, matches, archives, auto, auto_cfg）
 $script:Pending = @{}   # run -> @{proc; out; err; started}
 $script:Last = @{}      # run -> 直近の status オブジェクト
+$script:Notes = @{}     # run -> @{text; error; until}（操作の結果。ステータスバーに until まで出す）
+$script:StartCheck = @{} # run -> 起動を押した後、稼働を確かめる期限
 $script:Ui = @{}        # run -> @{vals; log; buttons; autoButtons; autoTips}
 $script:NextFetch = [datetime]::MinValue
 $script:NextHistory = [datetime]::MinValue
@@ -92,7 +94,7 @@ function New-LibraProcess([string]$run, [string[]]$cmd) {
     return $p
 }
 function Invoke-Libra([string]$run, [string[]]$cmd, [int]$TimeoutMs = 20000) {
-    # 同期呼び出し（pause/resume/stop/eval-now/match-now は 0.3 秒程度）。stdout+stderr を返す。
+    # 同期呼び出し（stop/eval-now/match-now は 0.3 秒程度）。stdout+stderr を返す。
     # UI スレッドから呼ぶので必ず上限を付ける。WSL が起動していないと wsl.exe は長時間返らない。
     $p = New-LibraProcess $run $cmd
     [void]$p.Start()
@@ -254,8 +256,7 @@ $numIv = New-Object System.Windows.Forms.NumericUpDown
 $numIv.Minimum = 5; $numIv.Maximum = 600; $numIv.Value = [Math]::Max(5, $IntervalSec); $numIv.Width = 60
 $numIv.Margin = New-Object System.Windows.Forms.Padding(0, 4, 12, 0)
 $bar.Controls.Add($numIv)
-$bar.Controls.Add((New-Button "全部 一時停止" { Invoke-All @("pause") } 110))
-$bar.Controls.Add((New-Button "全部 再開" { Invoke-All @("resume") }))
+$bar.Controls.Add((New-Button "全部 起動" { foreach ($r in $Runs) { Start-Run $r } }))
 $bar.Controls.Add((New-Button "全部 停止" { if (Confirm-Action "両方の run に STOP を送ります（チェックポイントを書いて終了。再起動前の手順）。よろしいですか？") { Invoke-All @("stop") } }))
 $bar.Controls.Add((New-Label "グラフの期間" 24))
 $cmbRange = New-Object System.Windows.Forms.ComboBox
@@ -400,10 +401,10 @@ function New-RunPanel([string]$run) {
     $btns.Dock = "Fill"; $btns.AutoSize = $true; $btns.WrapContents = $true
     $btns.Margin = New-Object System.Windows.Forms.Padding(0, 4, 0, 4)
     $bl = @()
-    $bl += New-Button "一時停止" { Invoke-Run $run @("pause") }.GetNewClosure() 76
-    $bl += New-Button "再開" { Invoke-Run $run @("resume") }.GetNewClosure() 56
-    $bl += New-Button "停止" { if (Confirm-Action "$run に STOP を送ります（チェックポイントを書いて終了）。よろしいですか？") { Invoke-Run $run @("stop") } }.GetNewClosure() 56
-    $bl += New-Button "起動" { Start-Run $run }.GetNewClosure() 56
+    $bStart = New-Button "起動" { Start-Run $run }.GetNewClosure() 56
+    $bStop = New-Button "停止" { if (Confirm-Action "$run を停止します（チェックポイントを書いて終了）。よろしいですか？") { Invoke-Run $run @("stop") } }.GetNewClosure() 56
+    $bl += $bStart
+    $bl += $bStop
     $be = New-Button "今すぐ自己評価" { if (Confirm-Action "$run : 次のチェックポイント（10 分以内）で archive を作り、直前の archive と自己評価します（GPU を共有、約 10 分）。よろしいですか？") { Invoke-Run $run @("eval-now") } }.GetNewClosure() 110
     $bm = New-Button "今すぐ対外対局" { if (Confirm-Action "$run : 次のチェックポイント（10 分以内）で外部エンジンとの計測対局を積みます（GPU と CPU を共有、10 局で 15 分程度）。よろしいですか？") { Invoke-Run $run @("match-now") } }.GetNewClosure() 110
     foreach ($b in $bl) { $btns.Controls.Add($b) }
@@ -421,7 +422,7 @@ function New-RunPanel([string]$run) {
     $tipMatch = "次のチェックポイントで外部エンジンとの計測対局を積む"
     $script:Tip.SetToolTip($be, $tipEval)
     $script:Tip.SetToolTip($bm, $tipMatch)
-    $script:Ui[$run] = @{ vals = $vals; log = $log; buttons = $bl; autoButtons = @($be, $bm); autoTips = @($tipEval, $tipMatch) }
+    $script:Ui[$run] = @{ vals = $vals; log = $log; startButton = $bStart; stopButton = $bStop; autoButtons = @($be, $bm); autoTips = @($tipEval, $tipMatch) }
     return $g
 }
 $col = 0
@@ -511,7 +512,7 @@ function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt
         $pts = New-Object System.Collections.ArrayList
         $last = $null
         # 定期観測の系列（gap）は、点の間隔の中央値の 3 倍（最低 15 分）より空いたところで線を切る。
-        # 停止・一時停止の区間を直線でつなぐと、その間も同じ値で動いていたように見えるため
+        # 停止の区間を直線でつなぐと、その間も同じ値で動いていたように見えるため
         $gapSec = [double]::MaxValue
         if ($s.gap -and $s.pts.Count -ge 3) {
             $d = @(for ($k = 1; $k -lt $s.pts.Count; $k++) { ($s.pts[$k].t - $s.pts[$k - 1].t).TotalSeconds }) | Sort-Object
@@ -713,16 +714,26 @@ function Update-Panel([string]$run, $obj) {
     }
     $running = ($obj.process -eq "running")
     $flags = @($obj.flags)
-    $ptxt = if ($running) { "稼働中" } else { "停止" }
-    if ($flags -contains "PAUSE") { $ptxt += "（一時停止中）" }
-    if ($flags -contains "STOP") { $ptxt += "（停止処理中）" }
+    # 操作は起動と停止だけ。停止処理中（STOP があり、まだ動いている）に起動を押すと、止まるのを待ってから起動する
+    $stopping = ($running -and ($flags -contains "STOP"))
+    $ptxt = if ($stopping) { "停止処理中" } elseif ($running) { "稼働中" } else { "停止" }
     if ($flags -contains "EVAL_NOW") { $ptxt += "（自己評価 予約）" }
     if ($flags -contains "MATCH_NOW") { $ptxt += "（対外対局 予約）" }
     if (-not $obj.exists) { $ptxt = "run なし（$($obj.root)）" }
     $v.process.Text = $ptxt
-    $v.process.ForeColor = if (-not $running) { [System.Drawing.Color]::Firebrick } elseif ($flags -contains "PAUSE" -or $flags -contains "STOP") { [System.Drawing.Color]::DarkOrange } else { [System.Drawing.Color]::ForestGreen }
+    $v.process.ForeColor = if (-not $running) { [System.Drawing.Color]::Firebrick } elseif ($stopping) { [System.Drawing.Color]::DarkOrange } else { [System.Drawing.Color]::ForestGreen }
     $v.process.Font = New-Object System.Drawing.Font($form.Font, [System.Drawing.FontStyle]::Bold)
-    foreach ($b in $u.buttons) { $b.Enabled = $true }
+    $u.startButton.Enabled = (-not $running -or $stopping)
+    $u.stopButton.Enabled = ($running -and -not $stopping)
+    if ($script:StartCheck.ContainsKey($run)) {
+        if ($running -and -not $stopping) {
+            $script:StartCheck.Remove($run)
+            Set-Note $run "起動しました" $false 60
+        } elseif ([datetime]::Now -gt $script:StartCheck[$run]) {
+            $script:StartCheck.Remove($run)
+            Set-Note $run "起動を確認できません。下のログ欄（start: の行）と stdout.log を見てください" $true 900
+        }
+    }
     # 自動計測が無効な run では前倒しのボタンは効かない（フラグを消費するものが無い）ので押せなくする
     $ac = $obj.auto_cfg
     $autoOn = ($null -ne $ac -and $ac.enabled)
@@ -738,7 +749,7 @@ function Update-Panel([string]$run, $obj) {
     }
     $stTime = [datetime]::ParseExact($st.time, "yyyy-MM-dd HH:mm:ss", $null)
     $v.updated.Text = "{0}（{1}）" -f $st.time, (Format-Ago $stTime)
-    $v.updated.ForeColor = if ($running -and ([datetime]::Now - $stTime).TotalMinutes -gt 5 -and -not ($flags -contains "PAUSE")) { [System.Drawing.Color]::Firebrick } else { [System.Drawing.Color]::Black }
+    $v.updated.ForeColor = if ($running -and ([datetime]::Now - $stTime).TotalMinutes -gt 5) { [System.Drawing.Color]::Firebrick } else { [System.Drawing.Color]::Black }
     $v.step.Text = "{0} / {1}" -f (Format-Int $st.step), $st.generation
     $v.games_total.Text = Format-Int $st.games_total
     $v.gpd.Text = Format-Int $st.games_per_day_1h
@@ -808,30 +819,38 @@ function Update-Panel([string]$run, $obj) {
     $tabs.SelectedTab.Controls[0].Invalidate()
 }
 function Update-StatusBar {
+    # 0.5 秒ごとに書き直すので、操作の結果は $script:Notes に持って期限まで出し続ける
     $parts = @()
+    $bad = $false
     foreach ($r in $Runs) {
-        if ($script:Errors.ContainsKey($r)) { $parts += "$r : " + $script:Errors[$r] }
+        if ($script:Notes.ContainsKey($r)) {
+            $n = $script:Notes[$r]
+            if ([datetime]::Now -lt $n.until) { $parts += "$r : " + $n.text; if ($n.error) { $bad = $true } } else { $script:Notes.Remove($r) }
+        }
+        if ($script:Errors.ContainsKey($r)) { $parts += "$r : " + $script:Errors[$r]; $bad = $true }
     }
-    if ($script:HistNote) { $parts += $script:HistNote }
+    if ($script:HistNote) { $parts += $script:HistNote; $bad = $true }
     $wait = [Math]::Max(0, ($script:NextFetch - [datetime]::Now).TotalSeconds)
     $pend = if ($script:Pending.Count -gt 0) { "  取得中…" } else { "" }
     $status.Text = ("次の更新まで {0:N0} 秒{1}   {2}" -f $wait, $pend, ($parts -join "   "))
-    $status.ForeColor = if ($parts.Count -gt 0) { [System.Drawing.Color]::Firebrick } else { [System.Drawing.Color]::DimGray }
+    $status.ForeColor = if ($bad) { [System.Drawing.Color]::Firebrick } else { [System.Drawing.Color]::DimGray }
 }
 
 # ---- 操作 ----
+function Set-Note([string]$run, [string]$text, [bool]$isError = $false, [int]$sec = 60) {
+    $script:Notes[$run] = @{ text = $text; error = $isError; until = [datetime]::Now.AddSeconds($sec) }
+}
 function Confirm-Action([string]$msg) {
     $r = [System.Windows.Forms.MessageBox]::Show($form, $msg, "確認", "YesNo", "Question")
     return ($r -eq "Yes")
 }
 function Invoke-Run([string]$run, [string[]]$cmd) {
     try {
-        $out = Invoke-Libra $run $cmd
-        $status.Text = "$run : " + ($cmd -join " ") + " → " + $out
-        $status.ForeColor = [System.Drawing.Color]::DimGray
+        $out = "$(Invoke-Libra $run $cmd)".Trim()
+        $msg = if ($cmd[0] -eq "stop") { "停止を送りました（チェックポイントを書いて数十秒で止まります）" } else { ($cmd -join " ") + " → " + $out }
+        Set-Note $run $msg $false 90
     } catch {
-        $status.Text = "$run : " + ($cmd -join " ") + " に失敗: " + $_.Exception.Message
-        $status.ForeColor = [System.Drawing.Color]::Firebrick
+        Set-Note $run (($cmd -join " ") + " に失敗: " + $_.Exception.Message) $true 900
     }
     $script:NextFetch = [datetime]::Now.AddSeconds(1)
 }
@@ -841,9 +860,10 @@ function Invoke-All([string[]]$cmd) {
 function Start-Run([string]$run) {
     # タスク スケジューラの「LibraShogi run [lx]」を起動する（失敗時の自動再起動を含めて bat と同じ経路）。
     # タスクが無ければ wsl.exe を非表示で直接起動する。
+    # 停止処理中なら起動してよい（libra run が止まるのを待ってから起動する。残った STOP も消す）
     $obj = $script:Last[$run]
-    if ($null -ne $obj -and $obj.process -eq "running") {
-        $status.Text = "$run は既に稼働中です"
+    if ($null -ne $obj -and $obj.process -eq "running" -and -not (@($obj.flags) -contains "STOP")) {
+        Set-Note $run "既に稼働中です" $false 30
         return
     }
     $task = if ($script:TaskNames.ContainsKey($run)) { $script:TaskNames[$run] } else { "LibraShogi run $run" }
@@ -855,15 +875,15 @@ function Start-Run([string]$run) {
         $ErrorActionPreference = "Continue"
         $out = (& schtasks.exe /Run /TN $task 2>&1 | Out-String).Trim()
         if ($LASTEXITCODE -eq 0) {
-            $status.Text = "$run : タスク「$task」を起動しました"
+            Set-Note $run "起動中…（タスク「$task」。立ち上がりに 1 分ほど）" $false 300
         } else {
             Start-Process -FilePath "wsl.exe" -ArgumentList (Get-LibraArgs $run @("run")) -WindowStyle Hidden
-            $status.Text = "$run : タスク「$task」を起動できないので wsl.exe を直接起動しました（$out）"
+            Set-Note $run "起動中…（タスク「$task」を起動できないので wsl.exe を直接起動: $out）" $false 300
         }
-        $status.ForeColor = [System.Drawing.Color]::DimGray
+        # 停止処理の待ち（最大 180 秒）＋立ち上がりを見込んで 5 分以内に稼働を確かめる（Update-Panel）
+        $script:StartCheck[$run] = [datetime]::Now.AddMinutes(5)
     } catch {
-        $status.Text = "$run : 起動に失敗: " + $_.Exception.Message
-        $status.ForeColor = [System.Drawing.Color]::Firebrick
+        Set-Note $run ("起動に失敗: " + $_.Exception.Message) $true 900
     }
     $script:NextFetch = [datetime]::Now.AddSeconds(5)
 }
@@ -910,10 +930,10 @@ if ($UpdateDesktopModel) {
     exit 0
 }
 if ($Do) {
-    # GUI なしでボタンと同じ呼び出しを実行する（例: -Do "lx:pause"、-Do "ls:eval-now"）
+    # GUI なしでボタンと同じ呼び出しを実行する（例: -Do "lx:stop"、-Do "ls:eval-now"。起動は含まない）
     $run, $rest = $Do.Split(":", 2)
     if ([string]::IsNullOrWhiteSpace($rest)) {
-        [Console]::WriteLine("-Do は <run>:<コマンド> の形で指定してください（例: ls:status、lx:pause）")
+        [Console]::WriteLine("-Do は <run>:<コマンド> の形で指定してください（例: ls:status、lx:stop）")
         exit 1
     }
     [Console]::WriteLine((Invoke-Libra $run (@($rest.Trim().Split(" ")) | Where-Object { $_ })))

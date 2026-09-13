@@ -41,7 +41,6 @@ class Runner:
         self.started = time.time()
         self.session_games = 0
         self.session_elapsed_offset = 0.0
-        self.paused = False
         self.rate_hist: list[tuple[float, int]] = []
         self.last_train: dict = {}
         self.pool = ThreadPoolExecutor(max_workers=1)
@@ -287,7 +286,6 @@ class Runner:
             gpu = {"mem_alloc_mb": torch.cuda.memory_allocated() // 2**20, "mem_reserved_mb": torch.cuda.memory_reserved() // 2**20}
         status = {
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "paused": self.paused,
             "active_games": self.loop.engine.active if self.loop else 0,
             "step": self.trainer.step_count,
             "generation": self.state.get("generation", 0),
@@ -311,7 +309,7 @@ class Runner:
             es["history"] = xs.get("history", [])[-10:]
             status["exploiter"] = es
         write_json_atomic(self.sd.status_json, status)
-        if now - self.last_metrics >= float(self.cfg["run"].get("metrics_minutes", 5)) * 60 and self.loop is not None and not self.paused:
+        if now - self.last_metrics >= float(self.cfg["run"].get("metrics_minutes", 5)) * 60 and self.loop is not None:
             append_metrics(self.sd, status)
             self.last_metrics = now
 
@@ -343,24 +341,7 @@ class Runner:
                 self.write_status()
                 self.sd.clear_flag("STOP")
                 return
-            if self.sd.flag("PAUSE"):
-                if not self.paused:
-                    self.paused = True
-                    self.auto.stop()  # 一時停止は GPU を空けるためのもの（実行中の計測も止めて積み直す）
-                    self.checkpoint()
-                    self.write_status()
-                    self.loop.release()  # CUDA Graphs の固定メモリも手放す（再開後の最初のラウンドで捕獲し直す）
-                    torch.cuda.empty_cache() if self.device.type == "cuda" else None
-                    self.log("PAUSE flag: waiting")
-                time.sleep(1.0)
-                if time.time() - last_status > rr["status_seconds"]:
-                    self.write_status()
-                    last_status = time.time()
-                continue
-            if self.paused:
-                self.paused = False
-                self.auto.resume()
-                self.log("resume")
+            # 一時停止は廃止した（止めるときは STOP。docs/decisions.md 2026-09-14）
             # 自己対局
             modes = self.infer_modes()
             finished = self.loop.round()

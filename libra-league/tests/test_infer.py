@@ -100,7 +100,7 @@ def test_cuda_graph_matches_eager_after_weight_update(mode):
     ep, ew = _eager(b, sq2, glob2)
     torch.testing.assert_close(p.cpu(), ep, atol=2e-2, rtol=2e-2)
     torch.testing.assert_close(w.cpu(), ew, atol=2e-3, rtol=2e-2)
-    net.release()  # 一時停止: グラフを捨て、次の呼び出しで捕獲し直す
+    net.release()  # グラフを捨てると、次の呼び出しで捕獲し直す
     assert net.graph is None
     p, _ = net(sq2, glob2)
     assert net.graph is not None

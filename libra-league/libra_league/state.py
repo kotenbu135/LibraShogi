@@ -32,7 +32,7 @@ def read_json(path: Path, default: Any = None) -> Any:
 
 
 class StateDir:
-    FLAGS = ("PAUSE", "STOP", "EVAL_NOW", "MATCH_NOW")
+    FLAGS = ("STOP", "EVAL_NOW", "MATCH_NOW")
 
     def __init__(self, root: Path):
         self.root = root
