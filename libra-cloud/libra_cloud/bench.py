@@ -17,12 +17,17 @@ MAX_INET_COST = 0.02
 
 
 def pick_offers(offers: list[dict], *, max_dph: float, price_key: str = "dph_total", min_cores: int = 8, min_down: float = 200.0,
-                min_rel: float = 0.98, min_cuda: float = 12.8, max_inet_cost: float = MAX_INET_COST) -> list[dict]:
-    """条件を満たす 1 GPU のオファーを安い順（同じ値段なら CPU の多い順）に返す。"""
+                min_rel: float = 0.98, min_cuda: float = 12.8, max_inet_cost: float = MAX_INET_COST,
+                min_cpu_ghz: float = 0.0) -> list[dict]:
+    """条件を満たす 1 GPU のオファーを安い順（同じ値段なら CPU の多い順）に返す。
+
+    min_cpu_ghz: CPU の最大周波数（vast.ai の cpu_ghz）の下限。自己対局の探索の反映（apply）は 1 スレッドの速さで決まり、
+    2016 年ごろのサーバー CPU（2.4 GHz 前後）では GPU が半分遊んだ（measurements.md 2026-09-14）。"""
     def ok(o: dict) -> bool:
         price = o.get(price_key)
         return (price is not None and price <= max_dph and o.get("num_gpus") == 1
                 and (o.get("cpu_cores_effective") or 0) >= min_cores
+                and float(o.get("cpu_ghz") or 0) >= min_cpu_ghz
                 and (o.get("inet_down") or 0) >= min_down
                 and (o.get("reliability2") or o.get("reliability") or 0) >= min_rel
                 and float(o.get("cuda_max_good") or 0) >= min_cuda

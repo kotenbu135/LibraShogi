@@ -42,6 +42,11 @@ def test_pick_offers_filters_and_sorts():
     got = [o["id"] for o in pick_offers(offers, max_dph=0.5)]
     assert got == [10, 2, 1]
     assert pick_offers(offers, max_dph=0.5, price_key="min_bid") == []  # 価格の欄が無いオファーは選ばない
+    # CPU の速さの下限（探索の反映は 1 スレッドの速さで決まる）。cpu_ghz が無いオファーは外す
+    fast = [_offer(20, 0.17, cpu_ghz=5.76, cpu_name="AMD Ryzen 9 7950X3D"), _offer(21, 0.15, cpu_ghz=2.4, cpu_name="AMD EPYC 7532"),
+            _offer(22, 0.14)]
+    assert [o["id"] for o in pick_offers(fast, max_dph=0.5, min_cpu_ghz=4.4)] == [20]
+    assert [o["id"] for o in pick_offers(fast, max_dph=0.5)] == [22, 21, 20]
 
 
 def test_games_per_day_uses_window_after_warmup():

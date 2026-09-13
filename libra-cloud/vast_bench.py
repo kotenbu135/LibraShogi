@@ -133,6 +133,7 @@ def main() -> int:
     ap.add_argument("--image", default=IMAGE)
     ap.add_argument("--min-credit", type=float, default=2.0)
     ap.add_argument("--min-cores", type=int, default=8, help="CPU コア数の下限（ワーカーは 12 スレッド。CPU 律速を避けて比べるときは 16 以上）")
+    ap.add_argument("--min-cpu-ghz", type=float, default=0.0, help="CPU の最大周波数の下限（探索の反映は 1 スレッドの速さで決まる。例: 4.4）")
     ap.add_argument("--dry-run", action="store_true", help="オファーを選ぶだけで借りない")
     ap.add_argument("--instance", type=int, default=0, help="借りてあるインスタンスを使う（新しく借りない。終わったら消す）")
     a = ap.parse_args()
@@ -148,9 +149,10 @@ def main() -> int:
         return 2
     q = f"gpu_name={a.gpu.replace(' ', '_')} num_gpus=1 rentable=true verified=true reliability>0.98 inet_down>=200 cuda_max_good>=12.8 disk_space>={a.disk}"
     offers = v.search_offers(query=q, type="on-demand", order="dph_total", limit=100, storage=a.disk) or []
-    cands = pick_offers(offers, max_dph=a.max_dph, min_cores=a.min_cores)
+    cands = pick_offers(offers, max_dph=a.max_dph, min_cores=a.min_cores, min_cpu_ghz=a.min_cpu_ghz)
     log(f"{len(offers)} offers, {len(cands)} usable; cheapest: "
-        + ", ".join(f"#{o['id']} ${o['dph_total']:.3f}/h cpu {o.get('cpu_cores_effective')} {o.get('geolocation', '')}" for o in cands[:3]))
+        + ", ".join(f"#{o['id']} ${o['dph_total']:.3f}/h cpu {o.get('cpu_cores_effective')} {str(o.get('cpu_name'))[:28]} "
+                    f"{o.get('cpu_ghz')} GHz {o.get('geolocation', '')}" for o in cands[:3]))
     if a.dry_run or (not cands and not a.instance):
         return 0 if cands else 3
     pub = KEY.with_suffix(".pub").read_text().strip()
