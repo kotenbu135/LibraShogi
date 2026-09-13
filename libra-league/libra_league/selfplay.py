@@ -2,6 +2,9 @@
 """自己対局ループ: C++ エンジンが葉を集め、PyTorch がバッチ評価し、エンジンが進める。"""
 from __future__ import annotations
 
+import copy
+import logging
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -10,73 +13,186 @@ import librasearch
 import librashogi as ls
 from libra_net.model import LibraNet
 
+COMPILE_MODES = ("none", "default", "max-autotune")
+
+
+class InferenceNet:
+    """推論用の写し。1 回だけ作り、学習後の重みは load でその場に書き込む（番地を変えない）。
+
+    CUDA では固定バッチ n の forward（方策ロジットと WDL 確率、どちらも float32）を CUDA Graphs で捕獲する。
+    compile が none 以外なら torch.compile した forward を捕獲する（max-autotune は行列積のカーネルも選ぶ。
+    GPU 単独の実測で eager の 1.14 倍、docs/measurements.md 2026-09-14）。捕獲に失敗したら段を落として続ける。
+    """
+
+    def __init__(self, model: LibraNet, n: int, device: torch.device, dtype: torch.dtype, compile: str = "none"):
+        if compile not in COMPILE_MODES:
+            raise ValueError(f"selfplay.compile must be one of {COMPILE_MODES}: {compile!r}")
+        m = copy.deepcopy(model).to(device).eval()
+        if dtype != torch.float32:
+            m = m.to(dtype)
+        for p in m.parameters():
+            p.requires_grad_(False)
+        self.net = m
+        self.n = n
+        self.device = device
+        self.dtype = dtype
+        self.compile = compile
+        self.compiled = None
+        self.graph: torch.cuda.CUDAGraph | None = None
+        self.mode_used = "eager"
+        self._static: tuple[torch.Tensor, torch.Tensor, tuple[torch.Tensor, torch.Tensor]] | None = None
+        self._broken: set[str] = set()  # 捕獲に失敗した段（起動し直すまで再挑戦しない）
+
+    @torch.no_grad()
+    def load(self, model: LibraNet) -> bool:
+        """重みを書き込む。ネットの形が違えば何もせず False（呼び出し側が作り直す）。"""
+        if model.cfg != self.net.cfg:
+            return False
+        src = dict(model.named_parameters())
+        for name, p in self.net.named_parameters():
+            p.copy_(src[name].detach())
+        return True
+
+    def release(self) -> None:
+        """捕獲したグラフと固定バッファを捨てる（一時停止で GPU メモリを空けるため）。次の呼び出しで捕獲し直す。"""
+        self.graph = None
+        self._static = None
+
+    def _forward(self, fn, sq: torch.Tensor, glob: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        p, w, _ = fn(sq, glob)
+        return p.float(), F.softmax(w.float(), dim=-1)
+
+    def _capture(self) -> None:
+        for stage in ("compile", "graph"):
+            if stage in self._broken or (stage == "compile" and self.compile == "none"):
+                continue
+            try:
+                fn = self.net
+                if stage == "compile":
+                    if self.compiled is None:
+                        _quiet_inductor()
+                        mode = "max-autotune-no-cudagraphs" if self.compile == "max-autotune" else "default"
+                        self.compiled = torch.compile(self.net, mode=mode, fullgraph=True)
+                    fn = self.compiled
+                sq = torch.zeros((self.n, 81, ls.SQ_FEATS), device=self.device, dtype=self.dtype)
+                glob = torch.zeros((self.n, ls.GLOB_FEATS), device=self.device, dtype=self.dtype)
+                for _ in range(2):  # compile と autotune はここで済ませる
+                    self._forward(fn, sq, glob)
+                side = torch.cuda.Stream(self.device)
+                with torch.cuda.stream(side):
+                    for _ in range(3):
+                        self._forward(fn, sq, glob)
+                torch.cuda.current_stream(self.device).wait_stream(side)
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph):
+                    out = self._forward(fn, sq, glob)
+                self.graph, self._static = graph, (sq, glob, out)
+                self.mode_used = (f"compile({self.compile})+" if stage == "compile" else "eager+") + "cudagraph"
+                return
+            except Exception as e:  # noqa: BLE001  捕獲できない環境では段を落として自己対局を続ける
+                self._broken.add(stage)
+                self.graph, self._static = None, None
+                print(f"selfplay: {stage} capture failed, falling back: {type(e).__name__}: {str(e)[:300]}", flush=True)
+        self.mode_used = "eager"
+
+    @torch.no_grad()
+    def __call__(self, sq: torch.Tensor, glob: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """sq [n, 81, SQ_FEATS]・glob [n, GLOB_FEATS]（CPU、float32。CUDA なら pin 済み）→ (ロジット, WDL 確率)。
+
+        CUDA Graphs のときは戻り値が固定バッファなので、次の呼び出しの前に写し取ること。"""
+        if self.device.type == "cuda" and self.graph is None and len(self._broken) < 2:
+            self._capture()
+        if self._static is not None:
+            s_sq, s_glob, out = self._static
+            s_sq.copy_(sq, non_blocking=True)
+            s_glob.copy_(glob, non_blocking=True)
+            self.graph.replay()
+            return out
+        return self._forward(self.net, sq.to(self.device, non_blocking=True).to(self.dtype), glob.to(self.device, non_blocking=True).to(self.dtype))
+
+
+def _quiet_inductor() -> None:
+    """max-autotune が候補ごとの計時表と失敗した候補を標準エラーに出すので止める（stdout.log を埋めるため）。"""
+    import warnings
+
+    import torch._inductor.config as ic
+
+    warnings.filterwarnings("ignore", message="TypedStorage is deprecated")
+    ic.max_autotune_report_choices_stats = False
+    ic.autotune_num_choices_displayed = 0
+    logging.getLogger("torch._inductor.select_algorithm").setLevel(logging.CRITICAL)
+
 
 class SelfPlayLoop:
-    def __init__(self, search_cfg: dict, n_games: int, threads: int, seed: int, device: torch.device, infer_dtype: str = "float16"):
+    def __init__(self, search_cfg: dict, n_games: int, threads: int, seed: int, device: torch.device, infer_dtype: str = "float16",
+                 compile: str = "none"):
         self.engine = librasearch.SelfPlay(search_cfg, n_games, seed, threads)
         self.n_games = n_games
         self.device = device
         self.dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[infer_dtype]
+        if compile not in COMPILE_MODES:
+            raise ValueError(f"selfplay.compile must be one of {COMPILE_MODES}: {compile!r}")
+        self.compile = compile
         pin = device.type == "cuda"
         self.sq = torch.empty((n_games, 81, ls.SQ_FEATS), dtype=torch.float32, pin_memory=pin)
         self.glob = torch.empty((n_games, ls.GLOB_FEATS), dtype=torch.float32, pin_memory=pin)
         self.sq_np = self.sq.numpy()
         self.glob_np = self.glob.numpy()
-        self.model: LibraNet | None = None
-        self.opponent: LibraNet | None = None  # 搾取者モード: 凍結した本体。奇数枠では本体が先手
+        self.logits = torch.empty((n_games, ls.POLICY_SIZE), dtype=torch.float32, pin_memory=pin)
+        self.wdl = torch.empty((n_games, 3), dtype=torch.float32, pin_memory=pin)
+        self.model: InferenceNet | None = None
+        self.opponent: InferenceNet | None = None  # 搾取者モード: 凍結した本体。奇数枠では本体が先手
+
+    def _install(self, cur: InferenceNet | None, model: LibraNet) -> InferenceNet:
+        if cur is not None and cur.load(model):
+            return cur
+        return InferenceNet(model, self.n_games, self.device, self.dtype, self.compile)
 
     def set_model(self, model: LibraNet) -> None:
-        """学習中のモデルから推論用の写しを作る（半精度・eval）。"""
-        import copy
-
-        m = copy.deepcopy(model).to(self.device).eval()
-        if self.dtype != torch.float32:
-            m = m.to(self.dtype)
-        for p in m.parameters():
-            p.requires_grad_(False)
-        self.model = m
+        """学習中のモデルの重みを推論用の写しに移す（写しは 1 回だけ作る）。"""
+        self.model = self._install(self.model, model)
 
     def set_opponent(self, model: LibraNet | None) -> None:
-        if model is None:
-            self.opponent = None
-            return
-        m = model.to(self.device).eval()
-        if self.dtype != torch.float32:
-            m = m.to(self.dtype)
-        for p in m.parameters():
-            p.requires_grad_(False)
-        self.opponent = m
+        self.opponent = None if model is None else self._install(self.opponent, model)
+
+    def release(self) -> None:
+        for net in (self.model, self.opponent):
+            if net is not None:
+                net.release()
 
     @staticmethod
     def exploiter_is_sente(slot: int) -> bool:
         return slot % 2 == 0
 
     @torch.no_grad()
+    def evaluate(self, who: np.ndarray | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+        """self.sq・self.glob を評価する。who[i] が 1 の枠は凍結した本体、0 は自分のネット（搾取者モードのみ）。
+
+        CUDA Graphs が固定バッチなので、搾取者モードでも両方のネットで全枠を評価してから行を選ぶ。"""
+        assert self.model is not None
+        logits, wdl = self.model(self.sq, self.glob)
+        if self.opponent is None or who is None:
+            return logits, wdl
+        o_logits, o_wdl = self.opponent(self.sq, self.glob)
+        mask = torch.from_numpy(np.asarray(who) != 0).to(logits.device, non_blocking=True).unsqueeze(1)
+        return torch.where(mask, o_logits, logits), torch.where(mask, o_wdl, wdl)
+
+    @torch.no_grad()
     def round(self) -> list[dict]:
         assert self.model is not None
         self.engine.collect(self.sq_np, self.glob_np)
-        sq = self.sq.to(self.device, non_blocking=True).to(self.dtype)
-        glob = self.glob.to(self.device, non_blocking=True).to(self.dtype)
-        if self.opponent is None:
-            policy, wdl, _ = self.model(sq, glob)
-            logits = policy.float().cpu().numpy()
-            wdl_p = F.softmax(wdl.float(), dim=-1).cpu().numpy()
-        else:
+        who = None
+        if self.opponent is not None:
             # 手番が搾取者側なら自分のネット、相手側なら凍結した本体（偶数枠は搾取者が先手）
             turns = self.engine.root_turns()  # 0 先手、1 後手
             slot_swap = (np.arange(self.n_games) % 2).astype(np.int8)
             who = turns ^ slot_swap  # 0 なら搾取者
-            logits = np.zeros((self.n_games, ls.POLICY_SIZE), np.float32)
-            wdl_p = np.zeros((self.n_games, 3), np.float32)
-            for k, model in ((0, self.model), (1, self.opponent)):
-                idx = np.flatnonzero(who == k)
-                if idx.size == 0:
-                    continue
-                it = torch.from_numpy(idx).to(self.device)
-                p, w, _ = model(sq[it], glob[it])
-                logits[idx] = p.float().cpu().numpy()
-                wdl_p[idx] = F.softmax(w.float(), dim=-1).cpu().numpy()
-        self.engine.apply(np.ascontiguousarray(logits), np.ascontiguousarray(wdl_p))
+        logits, wdl = self.evaluate(who)
+        self.logits.copy_(logits, non_blocking=True)
+        self.wdl.copy_(wdl, non_blocking=True)
+        if self.device.type == "cuda":
+            torch.cuda.current_stream(self.device).synchronize()
+        self.engine.apply(self.logits.numpy(), self.wdl.numpy())
         games = self.engine.take_finished()
         if self.opponent is not None:
             for g in games:

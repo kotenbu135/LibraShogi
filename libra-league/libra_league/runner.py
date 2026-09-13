@@ -59,6 +59,13 @@ class Runner:
         print(msg, flush=True)
         self.sd.append_log(msg)
 
+    def infer_modes(self) -> str:
+        """推論の捕獲の状態（例: model=compile(max-autotune)+cudagraph）。変わったらログに出す。"""
+        if self.loop is None:
+            return ""
+        nets = (("model", self.loop.model), ("opponent", self.loop.opponent))
+        return " ".join(f"{k}={n.mode_used}" for k, n in nets if n is not None)
+
     def load(self) -> None:
         st = self.sd.read_state()
         if st:
@@ -317,7 +324,8 @@ class Runner:
         self.auto.recover()  # 前回が abort で終わっていれば、残った計測ジョブを止めて積み直す
         self.sd.write_state(self.state)
         sp = self.cfg["selfplay"]
-        self.loop = SelfPlayLoop(self.cfg["search"], sp["n_games"], sp["threads"], int(self.rng.integers(0, 2**63)), self.device, sp["infer_dtype"])
+        self.loop = SelfPlayLoop(self.cfg["search"], sp["n_games"], sp["threads"], int(self.rng.integers(0, 2**63)), self.device, sp["infer_dtype"],
+                                 sp.get("compile", "none"))
         self.loop.set_model(self.model)
         self.load_opponent()
         self.reload_openings(force=True)
@@ -341,6 +349,7 @@ class Runner:
                     self.auto.stop()  # 一時停止は GPU を空けるためのもの（実行中の計測も止めて積み直す）
                     self.checkpoint()
                     self.write_status()
+                    self.loop.release()  # CUDA Graphs の固定メモリも手放す（再開後の最初のラウンドで捕獲し直す）
                     torch.cuda.empty_cache() if self.device.type == "cuda" else None
                     self.log("PAUSE flag: waiting")
                 time.sleep(1.0)
@@ -353,7 +362,10 @@ class Runner:
                 self.auto.resume()
                 self.log("resume")
             # 自己対局
+            modes = self.infer_modes()
             finished = self.loop.round()
+            if self.infer_modes() != modes:
+                self.log(f"selfplay: inference {self.infer_modes()}")
             if finished:
                 for g in finished:
                     if "exploiter_result" in g:

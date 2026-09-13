@@ -33,6 +33,7 @@ DEFAULTS: dict[str, Any] = {
         "n_games": 512,
         "threads": 12,
         "infer_dtype": "float16",
+        "compile": "max-autotune",  # 推論の捕獲: none | default | max-autotune（CUDA のときだけ効く。CUDA Graphs は常に使う）
         "openings": "",            # 搾取者が見つけた布石（openings.json）。空なら使わない
         "openings_prob": 0.1,      # 新規対局が openings から始まる確率
         "openings_reload_seconds": 600,

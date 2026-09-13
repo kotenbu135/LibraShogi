@@ -63,6 +63,7 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 - GPU を使う作業: デスクトップの `libra-pause.bat` → 終わったら `libra-resume.bat`
 - CPU だけ使う作業: そのままで良い（ワーカーは `nice 10`）。GPU が要る作業は管理コンソールの「一時停止」
 - 数日止めても再開時のコストはゼロ
+- 推論は CUDA Graphs で捕獲している（`[selfplay] compile`、decisions.md 2026-09-14）。起動直後と再開直後の最初のラウンドで捕獲し直すので、起動時は torch.compile の autotune に 5〜25 秒ほど掛かる（WSL の再起動で `/tmp` のキャッシュが消えた後は長め）。`log.txt` に `selfplay: inference model=compile(max-autotune)+cudagraph` が出れば有効、`eager` なら捕獲に失敗していて理由は `stdout.log`
 
 ## 5. 設定を変えるとき
 
