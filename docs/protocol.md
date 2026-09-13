@@ -80,10 +80,11 @@ usiok
 6. **`Eval_Coef`。** DNN 系エンジンの目盛りは申告の `Eval_Coef`（offset 0）→ 既知名 → 600/0 の順。Libra は `winrate` を常に出すので影響しない（想定どおり）。ただし Libra の `score cp`（435/+34）と GUI に登録される既定の目盛り（600/0）は一致しないので、cp を GUI の目盛りで読み直す場面（winrate の無い行）を作らない。
 7. **リポジトリ。** `kotenbu135/LibraShogi` のリモートは空だった（LICENSE のコミットが無い）。apache.org の Apache-2.0 原文を `LICENSE` として置いた。
 8. **環境。** WSL に `cmake`、`ninja`、`node`、`mingw-w64` が無く、`sudo` にパスワードが要るため apt を使えない。cmake/ninja/pybind11 は pip、node は nvm で入れる。`mingw-w64` は apt が要る（`sudo apt install mingw-w64` を依頼）。Windows 側の `node.exe` は `/mnt/c/Program Files/nodejs/node.exe` にある。
+9. **ルールの版 `Fuseki_Rules`。** desktop 0.8.0（tenbin-shogi-desktop#1）は棋譜ごとにルールの版（`1`=二飛香の前、`2`=いま）を持ち、`option name Fuseki_Rules` を名乗ったエンジンにだけ `position` より先に `setoption name Fuseki_Rules value 1|2` を送る。Libra は名乗らず、今のルール（docs/rules.md、二飛香あり）だけを扱う（ユーザーの決定、2026-09-13）。desktop で二飛香の前の棋譜を開いて Libra に検討・対局させると、二飛香に当たる局面は `info string bad position` と `bestmove resign` になる。
 
 ## 5. 相手側（計測用）の起動情報
 
-fuseki-shogi-ai `d2ce104`（2026-09-11）、`scripts/fuseki_usi_server.py`:
+fuseki-shogi-ai `d2ce104`（2026-09-11）、`scripts/fuseki_usi_server.py`（2026-09-13 に `eb3870f` へ更新。`option name Fuseki_Rules type combo default 2 var 1 var 2` が増え、`Fuseki_Mode=tenbin` かつ `2` で二飛香を掛ける。ハーネスは `Fuseki_Rules=2` を明示して送る）:
 
 - 起動: `~/fuseki-shogi-ai/.venv/bin/python scripts/fuseki_usi_server.py`、作業フォルダ `~/fuseki-shogi-ai`。
 - `id name Tenbin Fuseki Engine 0.1`。既定: `Fuseki_Method=value`、`Fuseki_Mode=tenbin`、`Fuseki_Candidates=16`、`Fuseki_Device=cuda`、`MultiPV=5`、`Threads=8`、`USI_Hash=512`。
