@@ -16,6 +16,7 @@ docs/libra-local.md §7〜8 の実装。状態はすべて `~/libra-run/<run-id>
 | `run.lock` | 実行中のランナー本体の PID。二重起動を防ぐ（その pid が libra_league のプロセスでなければ無効） |
 | `log.txt` | ランナーのログ（監視役の再起動の記録 `supervisor:` もここ） |
 | `stdout.log` | ランナー本体の標準出力・標準エラー（監視役が追記。異常終了したときの CUDA のエラー文などはここに残る） |
+| `auto_job.json` | 実行中の自動計測ジョブ（pid・引数）。ランナーが abort で落ちたとき、起動し直したランナーがこれを見て孤児のジョブを止めて積み直す |
 
 ## 2. コマンド
 
@@ -75,7 +76,7 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 - **基準比（`anchor_games`=100、これが主）**: 固定の基準ネット（`state.json` の `auto.anchor`）と対局する。結果は `eval/anchor-*.json` と 1 行ずつの `eval/anchor.jsonl`（`elo` は基準の `offset` を足した値）。基準に `anchor_rebaseline`（0.85）以上勝ったら基準を新しい世代に置き換え、そこまでの差を `offset` に足す。連続世代どうしの差（1 日で +30 Elo 程度）は 100 局の測定幅 ±70 Elo に埋もれ、鎖にすると誤差が回数の平方根で積み上がるため、基準との大きな差で測る。
 - **鎖（`chain_eval`、補助）**: 直前の archive との差を足した累積。基準が直前の archive と同じときは同じ対局になるので 1 回で兼ねる。
 
-同じ周期で `libra match`（`match_games`=10 局、`match_go`="movetime 1000"、相手は fuseki_usi_server.py に `Threads=2`）も回す。どちらも別プロセス（`auto.log`）で GPU を共有し、結果は `eval/auto-*.json` と `matches/auto-*.summary.json`。前倒しは `libra eval-now` / `libra match-now`（フラグ EVAL_NOW / MATCH_NOW。次のチェックポイントで実行。コンソールの「今すぐ自己評価」「今すぐ対外対局」）。相手側は 41 手目以降を必ずやねうら王（水匠5 の評価関数）に中継するので「方策ネットだけの相手」は無い。ランナーを stop すると実行中のジョブは止め、再開後に積み直す。
+同じ周期で `libra match`（`match_games`=10 局、`match_go`="movetime 1000"、相手は fuseki_usi_server.py に `Threads=2`）も回す。どちらも別プロセス（`auto.log`）で GPU を共有し、結果は `eval/auto-*.json` と `matches/auto-*.summary.json`。前倒しは `libra eval-now` / `libra match-now`（フラグ EVAL_NOW / MATCH_NOW。次のチェックポイントで実行。コンソールの「今すぐ自己評価」「今すぐ対外対局」）。相手側は 41 手目以降を必ずやねうら王（水匠5 の評価関数）に中継するので「方策ネットだけの相手」は無い。ランナーを stop すると実行中のジョブは止め、再開後に積み直す。ランナーが異常終了した場合は、起動し直したランナーが残ったジョブ（孫の相手エンジンを含むプロセス グループ）を止めて積み直す。途中まで書いた出力は `<out>.interrupted` に改名する。
 
 ## 7. 計測（外部エンジンとの対局）
 

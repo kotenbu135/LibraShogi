@@ -12,14 +12,40 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from .state import StateDir
+from .state import StateDir, write_json_atomic
 
 _CKPT_RE = re.compile(r"ckpt_(\d+)\.pt$")
+JOB_FILE = "auto_job.json"  # 実行中の計測ジョブ（pid・引数）。ランナーが abort しても孤児を見つけられるように state とは別に置く
+
+
+def _job_alive(pid: int, out: str) -> bool:
+    """pid が生きていて、コマンド行に出力先 out を含む（使い回された pid の別プロセスには触らない）。"""
+    if not out:
+        return False
+    try:
+        return out.encode() in Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return False
+
+
+def _kill_job_group(pid: int, out: str) -> None:
+    """start_new_session=True で起動したジョブ（pgid = pid）を、match の相手エンジンなど孫ごと止める。"""
+    for sig, wait in ((signal.SIGTERM, 10.0), (signal.SIGKILL, 5.0)):
+        try:
+            os.killpg(pid, sig)
+        except (ProcessLookupError, PermissionError):
+            return
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            if not _job_alive(pid, out):
+                return
+            time.sleep(0.1)
 
 METRIC_ENGINE_KEYS = ("games", "moves", "sims", "sente_wins", "draws", "gote_wins", "ruling41", "no_legal_move",
                       "sennichite", "perpetual_check", "max_ply", "plies_sum", "mate_found", "proof_found")
@@ -320,6 +346,7 @@ class AutoJobs:
             self.log(f"auto: {job.get('kind')} finished rc={rc} ({job['finished'] - job.get('started', job['finished']):.0f}s)")
             self.proc = None
             self.current = None
+            (self.sd.root / JOB_FILE).unlink(missing_ok=True)
         if not st["queue"] or self.suspended:
             return changed
         job = st["queue"].pop(0)
@@ -336,7 +363,8 @@ class AutoJobs:
             return True
         logf.close()
         self.current = job
-        st["running"] = {"kind": job["kind"], "started": job["started"], "out": job["out"]}
+        st["running"] = {"kind": job["kind"], "started": job["started"], "out": job["out"], "args": job["args"], "pid": self.proc.pid}
+        write_json_atomic(self.sd.root / JOB_FILE, st["running"])
         self.log(f"auto: started {job['kind']} (pid {self.proc.pid})")
         return True
 
@@ -355,11 +383,47 @@ class AutoJobs:
                 self.proc.kill()
             self.log("auto: job terminated and requeued")
             if self.current:
-                self.state["auto"]["queue"].insert(0, {k: self.current[k] for k in ("kind", "args", "out")})
+                self._requeue(self.current)
             self.state["auto"]["running"] = None
             self.proc = None
             self.current = None
+            (self.sd.root / JOB_FILE).unlink(missing_ok=True)
 
     def resume(self) -> None:
         """一時停止から戻ったとき（積んであるジョブを再び起動できるようにする）。"""
         self.suspended = False
+
+    def _requeue(self, job: dict) -> None:
+        """止めたジョブを待ち行列の先頭に戻す。途中まで書いた出力は .interrupted に改名する（match の棋譜は追記なので二重になる）。"""
+        st = self._st()
+        out = Path(job["out"])
+        if out.exists():
+            out.replace(out.with_name(out.name + ".interrupted"))
+        if not any(q.get("out") == job["out"] for q in st["queue"]):
+            st["queue"].insert(0, {k: job[k] for k in ("kind", "args", "out")})
+
+    def recover(self) -> None:
+        """前のランナーが stop() を通らずに終わった（abort など）ときに残った計測ジョブを止めて積み直す。load() の後に 1 回呼ぶ。
+
+        子は start_new_session=True なので親が死んでも GPU を使い続け、state の running も回収されずに残る。
+        監視役（supervise.py）が 60 秒後にランナーを起動し直すので、放置すると次の計測と二重に走る。
+        """
+        st = self._st()
+        f = self.sd.root / JOB_FILE
+        try:
+            rec = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            rec = None
+        if rec and rec.get("pid") and _job_alive(int(rec["pid"]), str(rec.get("out", ""))):
+            _kill_job_group(int(rec["pid"]), str(rec["out"]))
+            self.log(f"auto: stopped orphaned {rec.get('kind')} job (pid {rec['pid']}) left by a crashed runner")
+        f.unlink(missing_ok=True)
+        lost = st.get("running") or rec
+        st["running"] = None
+        if not lost:
+            return
+        if lost.get("args"):
+            self._requeue(lost)
+            self.log(f"auto: requeued {lost.get('kind')} interrupted by a crashed runner")
+        else:
+            self.log(f"auto: dropped {lost.get('kind')} interrupted by a crashed runner (no args recorded)")

@@ -289,6 +289,7 @@ class Runner:
         if not self.sd.config_toml.exists():
             self.sd.config_toml.write_text(dump_toml(self.cfg), encoding="utf-8")
         self.load()
+        self.auto.recover()  # 前回が abort で終わっていれば、残った計測ジョブを止めて積み直す
         self.sd.write_state(self.state)
         sp = self.cfg["selfplay"]
         self.loop = SelfPlayLoop(self.cfg["search"], sp["n_games"], sp["threads"], int(self.rng.integers(0, 2**63)), self.device, sp["infer_dtype"])

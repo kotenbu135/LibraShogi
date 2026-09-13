@@ -2,8 +2,10 @@
 """進捗の時系列・archive・自動ジョブ（libra_league.auto）。"""
 import json
 import os
+import subprocess
 import sys
 import time
+from pathlib import Path
 
 from libra_league.auto import AutoJobs, append_metrics, collect_anchor, archive_checkpoint, collect_evals, collect_matches, list_archives, load_metrics
 from libra_league.cli import main
@@ -90,6 +92,7 @@ def test_autojobs_runs_subprocess(tmp_path):
     assert json.loads(open(hist[1]["out"]).read())["kind"] == "eval"
     assert state["auto"]["anchor"]["step"] == 10  # 最初の archive が基準
     assert (sd.root / "auto.log").exists()
+    assert not (sd.root / "auto_job.json").exists()  # 終わったジョブの記録は消える
     jobs.stop()
 
 
@@ -222,3 +225,91 @@ def test_no_spawn_while_suspended(tmp_path):
         assert False, "子プロセスが残っている"
     except (ProcessLookupError, PermissionError):
         pass
+    assert not (sd.root / "auto_job.json").exists()
+
+
+def _crash_setup(tmp_path):
+    """途中まで出力を書いて眠る計測ジョブ。ランナーの abort は stop() を通らないので、子は孤児として残る。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    fake = tmp_path / "fake.py"
+    fake.write_text("import sys, pathlib, time\no = pathlib.Path(sys.argv[sys.argv.index('--out') + 1])\n"
+                    "o.parent.mkdir(parents=True, exist_ok=True)\no.write_text('partial\\n')\ntime.sleep(60)\n")
+    cfg = load_config(None)
+    cfg["auto"].update({"enabled": True, "every_hours": 1.0, "match_games": 2})
+    return sd, cfg, [sys.executable, str(fake)]
+
+
+def _wait_file(p, timeout=15.0):
+    deadline = time.monotonic() + timeout
+    while not p.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert p.exists()
+
+
+def test_recover_kills_orphan_and_requeues(tmp_path):
+    sd, cfg, prefix = _crash_setup(tmp_path)
+    state1: dict = {}
+    jobs1 = AutoJobs(sd, cfg, state1, lambda _m: None, cmd_prefix=prefix)
+    jobs1.enqueue_match()
+    assert jobs1.poll() is True
+    out = Path(state1["auto"]["running"]["out"])
+    _wait_file(out)
+    assert (sd.root / "auto_job.json").exists()
+    saved = json.loads(json.dumps(state1))  # 起動後のチェックポイントで保存された state
+
+    logs: list = []
+    state2 = saved
+    jobs2 = AutoJobs(sd, cfg, state2, logs.append, cmd_prefix=prefix)
+    jobs2.recover()
+    assert jobs1.proc.wait(timeout=15) is not None  # 孤児は止まる
+    assert state2["auto"]["running"] is None
+    assert [j["out"] for j in state2["auto"]["queue"]] == [str(out)]
+    assert not out.exists() and Path(str(out) + ".interrupted").exists()  # 途中の棋譜に追記しない
+    assert not (sd.root / "auto_job.json").exists()
+    assert any("orphan" in m for m in logs)
+    assert jobs2.poll() is True and jobs2.proc is not None  # 積み直した分が走る
+    jobs2.stop()
+
+
+def test_recover_job_started_after_last_save(tmp_path):
+    """最後の保存より後に起動したジョブ: state では待ち行列に残っているので、二重に積まない。"""
+    sd, cfg, prefix = _crash_setup(tmp_path)
+    state1: dict = {}
+    jobs1 = AutoJobs(sd, cfg, state1, lambda _m: None, cmd_prefix=prefix)
+    jobs1.enqueue_match()
+    saved = json.loads(json.dumps(state1))
+    assert jobs1.poll() is True
+    _wait_file(Path(state1["auto"]["running"]["out"]))
+
+    state2 = saved
+    jobs2 = AutoJobs(sd, cfg, state2, lambda _m: None, cmd_prefix=prefix)
+    jobs2.recover()
+    assert jobs1.proc.wait(timeout=15) is not None
+    assert len(state2["auto"]["queue"]) == 1 and state2["auto"]["running"] is None
+
+
+def test_recover_legacy_running_without_args(tmp_path):
+    sd, cfg, prefix = _crash_setup(tmp_path)
+    state = {"auto": {"queue": [], "history": [], "running": {"kind": "eval", "started": 1.0, "out": str(sd.root / "eval" / "a.json")}}}
+    jobs = AutoJobs(sd, cfg, state, lambda _m: None, cmd_prefix=prefix)
+    jobs.recover()
+    assert state["auto"]["running"] is None and state["auto"]["queue"] == []
+
+
+def test_recover_does_not_kill_reused_pid(tmp_path):
+    sd, cfg, prefix = _crash_setup(tmp_path)
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True)
+    try:
+        (sd.root / "auto_job.json").write_text(json.dumps({"pid": other.pid, "kind": "match", "args": ["match", "--out", "/nonexistent/x.jsonl"],
+                                                            "out": "/nonexistent/x.jsonl", "started": 1.0}))
+        state: dict = {}
+        jobs = AutoJobs(sd, cfg, state, lambda _m: None, cmd_prefix=prefix)
+        jobs.recover()
+        time.sleep(0.3)
+        assert other.poll() is None  # 別のプロセスには触らない
+        assert not (sd.root / "auto_job.json").exists()
+        assert [j["kind"] for j in state["auto"]["queue"]] == ["match"]
+    finally:
+        other.kill()
+        other.wait()
