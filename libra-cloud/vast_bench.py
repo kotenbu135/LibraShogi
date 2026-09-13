@@ -38,8 +38,11 @@ class Host:
 
     def ssh(self, cmd: str, timeout: float, log_path: Path | None = None, check: bool = True) -> int:
         argv = ["ssh", *self._opts("-p"), f"root@{self.host}", cmd]
-        with open(log_path, "ab") if log_path else subprocess.DEVNULL as out:
-            p = subprocess.run(argv, stdout=out, stderr=subprocess.STDOUT, timeout=timeout)
+        if log_path is None:
+            p = subprocess.run(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout)
+        else:
+            with open(log_path, "ab") as out:
+                p = subprocess.run(argv, stdout=out, stderr=subprocess.STDOUT, timeout=timeout)
         if check and p.returncode != 0:
             raise RuntimeError(f"ssh failed rc={p.returncode}: {cmd[:80]}")
         return p.returncode
@@ -134,7 +137,7 @@ def main() -> int:
             t_rent = time.time()
             try:
                 v.attach_ssh(iid, pub)
-                host = wait_ssh(v, iid, timeout=900)
+                host = wait_ssh(v, iid, timeout=1200)  # イメージ 4.3 GB の取得が遅いホストで 15 分を超えた
                 break
             except Exception as e:  # noqa: BLE001  起動しないホストは消して次へ
                 log(f"instance {iid} failed to start: {type(e).__name__}: {str(e)[:200]}")

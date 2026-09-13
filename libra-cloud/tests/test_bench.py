@@ -117,6 +117,32 @@ def test_write_run_dir_and_bundle(tmp_path: Path):
     assert not any(n.startswith(("libra-engine", "third_party", ".venv", "build/")) for n in names)
 
 
+def test_host_ssh_with_and_without_log(tmp_path: Path, monkeypatch):
+    """到達確認（ログ無し）とセットアップ（ログあり）の両方で ssh を呼べる（9/14 にログ無しの経路で落ち、起動済みのホストを 2 台消した）。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("vast_bench", ROOT / "libra-cloud" / "vast_bench.py")
+    vb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vb)
+    calls = []
+
+    def fake_run(argv, stdout=None, stderr=None, timeout=None, **kw):
+        calls.append((argv, stdout))
+        if hasattr(stdout, "write"):
+            stdout.write(b"ok\n")
+        return subprocess.CompletedProcess(argv, 0 if argv[-1] != "false" else 1)
+
+    monkeypatch.setattr(vb.subprocess, "run", fake_run)
+    h = vb.Host("ssh1.example", 12345)
+    assert h.ssh("true", timeout=5, check=False) == 0
+    assert calls[-1][0][-2:] == ["root@ssh1.example", "true"] and "12345" in calls[-1][0]
+    log = tmp_path / "setup.log"
+    assert h.ssh("echo hi", timeout=5, log_path=log) == 0
+    assert log.read_bytes() == b"ok\n"
+    with pytest.raises(RuntimeError):
+        h.ssh("false", timeout=5)
+
+
 def test_host_scripts_parse():
     for s in sorted((ROOT / "libra-cloud" / "bench").glob("*.sh")):
         subprocess.run(["bash", "-n", str(s)], check=True)
