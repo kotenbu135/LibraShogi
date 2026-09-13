@@ -58,15 +58,20 @@ class Host:
                        stdout=subprocess.DEVNULL)
 
 
-def wait_ssh(v, iid: int, timeout: float) -> Host:
+def wait_ssh(v, iid: int, timeout: float, stall: float = 480.0) -> Host:
+    """ssh で入れるまで待つ。状態（イメージ取得の進み具合など）が stall 秒変わらなければ見切って TimeoutError。"""
     end = time.monotonic() + timeout
     last = ""
+    changed = time.monotonic()
     while time.monotonic() < end:
         inst = v.show_instance(iid) or {}
         st = f"{inst.get('actual_status')} / {inst.get('status_msg') or ''}".strip()
         if st != last:
             log(f"instance {iid}: {st[:160]}")
             last = st
+            changed = time.monotonic()
+        elif time.monotonic() - changed > stall:
+            raise TimeoutError(f"instance {iid} stalled for {stall:.0f} s: {st[:120]}")
         if inst.get("actual_status") == "running" and inst.get("ssh_host") and inst.get("ssh_port"):
             h = Host(inst["ssh_host"], int(inst["ssh_port"]))
             try:

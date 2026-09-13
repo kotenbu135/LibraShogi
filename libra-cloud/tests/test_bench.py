@@ -143,6 +143,27 @@ def test_host_ssh_with_and_without_log(tmp_path: Path, monkeypatch):
         h.ssh("false", timeout=5)
 
 
+def test_wait_ssh_gives_up_on_stalled_instance(monkeypatch):
+    """イメージの取得が止まったホストは全体の待ち時間を待たずに見切る（9/14 に 17 分待った）。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("vast_bench", ROOT / "libra-cloud" / "vast_bench.py")
+    vb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vb)
+    clock = [0.0]
+    monkeypatch.setattr(vb.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(vb.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    monkeypatch.setattr(vb, "log", lambda m: None)
+
+    class Stuck:
+        def show_instance(self, iid):
+            return {"actual_status": "loading", "status_msg": "Pulling from pytorch/pytorch"}
+
+    with pytest.raises(TimeoutError, match="stalled"):
+        vb.wait_ssh(Stuck(), 1, timeout=1200, stall=480)
+    assert 480 < clock[0] < 600  # 20 分待たずに 8 分強で見切る
+
+
 def test_host_scripts_parse():
     for s in sorted((ROOT / "libra-cloud" / "bench").glob("*.sh")):
         subprocess.run(["bash", "-n", str(s)], check=True)
