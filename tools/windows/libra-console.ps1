@@ -437,7 +437,7 @@ function Get-Range {
     }
 }
 function New-Series([string]$name, $color, [bool]$marker = $false, [bool]$dash = $false) {
-    return @{ name = $name; color = $color; pts = (New-Object System.Collections.ArrayList); marker = $marker; dash = $dash }
+    return @{ name = $name; color = $color; pts = (New-Object System.Collections.ArrayList); marker = $marker; dash = $dash; gap = $false }
 }
 function Add-Pt($series, [datetime]$t, [double]$y, $lo = $null, $hi = $null, [string]$label = "") {
     [void]$series.pts.Add(@{ t = $t; y = $y; lo = $lo; hi = $hi; label = $label })
@@ -510,8 +510,22 @@ function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt
         if ($s.dash) { $rp.DashStyle = [System.Drawing.Drawing2D.DashStyle]::Dash }
         $pts = New-Object System.Collections.ArrayList
         $last = $null
+        # 定期観測の系列（gap）は、点の間隔の中央値の 3 倍（最低 15 分）より空いたところで線を切る。
+        # 停止・一時停止の区間を直線でつなぐと、その間も同じ値で動いていたように見えるため
+        $gapSec = [double]::MaxValue
+        if ($s.gap -and $s.pts.Count -ge 3) {
+            $d = @(for ($k = 1; $k -lt $s.pts.Count; $k++) { ($s.pts[$k].t - $s.pts[$k - 1].t).TotalSeconds }) | Sort-Object
+            $gapSec = [Math]::Max(900.0, 3 * $d[[int][Math]::Floor($d.Count / 2)])
+        }
+        $prevT = $null
         foreach ($p in $s.pts) {
             if ($p.t -lt $tmin) { continue }
+            if ($null -ne $prevT -and ($p.t - $prevT).TotalSeconds -gt $gapSec) {
+                if ($pts.Count -ge 2) { $g.DrawLines($rp, [System.Drawing.PointF[]]$pts.ToArray()) }
+                elseif ($pts.Count -eq 1) { $g.FillEllipse($brush, $pts[0].X - 2, $pts[0].Y - 2, 4, 4) }
+                $pts.Clear()
+            }
+            $prevT = $p.t
             $x = $left + $pw * (($p.t - $tmin).TotalSeconds / $span)
             $y = $top + $ph * (1 - ($p.y - $ymin) / ($ymax - $ymin))
             [void]$pts.Add((New-Object System.Drawing.PointF([single]$x, [single]$y)))
@@ -654,6 +668,8 @@ function Build-Series([string]$tab) {
             $series = @($pl, $sm)
         }
     }
+    # 5 分ごとの metrics（とコンソールの 30 秒観測）から作る系列は、観測の途切れで線を切る
+    if (@("局/日", "学習", "終局内訳", "手数") -contains $tab) { foreach ($s in $series) { $s.gap = $true } }
     return @{ title = $title; series = $series; yfmt = $yfmt; zero = $zero; note = $note }
 }
 
