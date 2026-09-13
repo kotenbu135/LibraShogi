@@ -550,12 +550,22 @@ function Build-Series([string]$tab) {
     $sel = [string]$cmbRun.SelectedItem
     switch ($tab) {
         "局/日" {
-            $title = "局/日（1 時間平均）の推移"
+            $title = "局/日（5 分平均）の推移"
             $i = 0
             foreach ($r in $Runs) {
                 $s = New-Series $r (Run-Color $r $i)
-                foreach ($m in (Get-Metrics $r)) { if ($null -ne $m.gpd) { Add-Pt $s (From-Unix $m.t) ([double]$m.gpd) } }
-                if ($s.pts.Count -eq 0) { foreach ($p in $script:Hist[$r]) { Add-Pt $s $p.t $p.gpd } }
+                # gpd_5m は libra status --history が metrics.jsonl の隣り合う行の局数差から出す（間が 15 分を超えたら null）
+                foreach ($m in (Get-Metrics $r)) { if ($null -ne $m.gpd_5m) { Add-Pt $s (From-Unix $m.t) ([double]$m.gpd_5m) } }
+                if ($s.pts.Count -eq 0) {
+                    # metrics.jsonl が無いときはコンソール自身の 30 秒ごとの観測から、5 分以上 15 分以内の窓で出す
+                    $h = $script:Hist[$r]; $b = 0
+                    for ($k = 1; $k -lt $h.Count; $k++) {
+                        while ($b + 1 -lt $k -and ($h[$k].t - $h[$b + 1].t).TotalMinutes -ge 5) { $b++ }
+                        $dt = ($h[$k].t - $h[$b].t).TotalMinutes
+                        if ($dt -lt 5 -or $dt -gt 15 -or $h[$k].games -lt $h[$b].games) { continue }
+                        Add-Pt $s $h[$k].t (($h[$k].games - $h[$b].games) / ($dt / 1440))
+                    }
+                }
                 $series += $s; $i++
             }
         }

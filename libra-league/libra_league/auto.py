@@ -81,6 +81,26 @@ def append_metrics(sd: StateDir, status: dict) -> None:
         f.write(json.dumps(metrics_row(status), ensure_ascii=False) + "\n")
 
 
+GPD_5M_MAX_GAP_S = 900  # 行の間隔（metrics_minutes=5）の 3 倍。これより空いたら一時停止・再起動をまたぐので出さない
+
+
+def add_gpd_5m(rows: list[dict]) -> None:
+    """各行に直前の行との局数差から局/日（`gpd_5m`、約 5 分平均）を足す。出せない行は None。
+    間引く前に計算するので、グラフの点を間引いても各点は 5 分の値のまま。"""
+    prev = None
+    for r in rows:
+        r["gpd_5m"] = None
+        try:
+            if prev is not None:
+                dt = float(r["t"]) - float(prev["t"])
+                dg = float(r["games_total"]) - float(prev["games_total"])
+                if 0 < dt <= GPD_5M_MAX_GAP_S and dg >= 0:
+                    r["gpd_5m"] = round(dg / dt * 86400)
+        except (KeyError, TypeError, ValueError):
+            pass
+        prev = r
+
+
 def load_metrics(sd: StateDir, max_points: int = 600) -> list[dict]:
     p = sd.root / "metrics.jsonl"
     if not p.exists():
@@ -91,6 +111,7 @@ def load_metrics(sd: StateDir, max_points: int = 600) -> list[dict]:
             rows.append(json.loads(line))
         except json.JSONDecodeError:
             continue
+    add_gpd_5m(rows)
     if len(rows) > max_points:
         stride = -(-len(rows) // max_points)
         rows = rows[::stride] + ([rows[-1]] if (len(rows) - 1) % stride else [])

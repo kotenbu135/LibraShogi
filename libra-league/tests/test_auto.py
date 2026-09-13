@@ -34,6 +34,20 @@ def test_metrics_append_and_downsample(tmp_path):
     assert len(load_metrics(sd, 1000)) == 50
 
 
+def test_metrics_gpd_5m(tmp_path):
+    # 局/日の 5 分平均は間引く前の隣り合う行の差で出す。一時停止などで間が空いた行と局数が戻った行は出さない
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    rows = [(0, 0), (300, 100), (600, 300), (3600, 400), (3900, 350), (4200, 450)]
+    with open(sd.root / "metrics.jsonl", "w", encoding="utf-8") as f:
+        for t, g in rows:
+            f.write(json.dumps({"t": t, "games_total": g}) + "\n")
+        f.write("{broken\n")
+    got = [r["gpd_5m"] for r in load_metrics(sd, 1000)]
+    assert got == [None, 28800, 57600, None, None, 28800]
+    assert [r["gpd_5m"] for r in load_metrics(sd, 3)] == [None, 57600, None, 28800]  # 間引いても各点は 5 分の値
+
+
 def test_archive_and_eval_chain(tmp_path):
     sd = StateDir(tmp_path / "x")
     sd.create()

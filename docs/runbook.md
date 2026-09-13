@@ -69,7 +69,7 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 
 `libra status` の `games/day(1h)` を docs/measurements.md に週 1 回記録する（Windows では管理コンソール `libra-console.bat` で常時見える。§3）。`libra status --json [--tail N] [--history N]` は機械可読（`process`、`flags`、`state`、`status`、`log_tail`、`--history` で `metrics`・`evals`・`matches`・`archives`・`auto`・`auto_cfg`）。`status.json` の `engine` に終局理由の内訳（ruling41、mate、sennichite、perpetual、max_ply）がある。
 
-**進捗の時系列**: ランナーは `metrics.jsonl` に 5 分ごと（`run.metrics_minutes`）に 1 行追記する（step、局数、局/日、loss 系、終局内訳の累積カウンタ、搾取者成績、GPU）。管理コンソールの「学習」「終局内訳」「手数」タブはこれを差分で割合にして描く。
+**進捗の時系列**: ランナーは `metrics.jsonl` に 5 分ごと（`run.metrics_minutes`）に 1 行追記する（step、局数、局/日、loss 系、終局内訳の累積カウンタ、搾取者成績、GPU）。管理コンソールの「学習」「終局内訳」「手数」タブはこれを差分で割合にして描く。「局/日」タブは隣り合う行の `games_total` の差から出した 5 分平均（`status --history` の `gpd_5m`。間が 15 分を超えた行は出さない）を描く。
 
 **自動計測（`[auto]`、本体 ls のみ有効）**: `every_hours`（24）ごとにチェックポイントを `checkpoints/archive/` に残し、`libra eval`（`eval_sims`=96）で 2 通りの対局をする。
 
