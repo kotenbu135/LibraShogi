@@ -14,7 +14,7 @@ target_include_directories(libra PRIVATE ${LIBRA_ORT_DIR}/include src)
 target_link_libraries(libra PRIVATE libra_search ${CMAKE_DL_LIBS})
 target_compile_options(libra PRIVATE -Wall -Wextra)
 if(MINGW)
-  # 依存ライブラリは静的リンクし、onnxruntime.dll だけを同梱する（docs/libra-local.md §6.2）
+  # 依存ライブラリは静的リンクし、ONNX Runtime（と DirectML）の DLL だけを同梱する（docs/libra-local.md §6.2、decisions.md 2026-09-14）
   target_link_options(libra PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
 # 実行時にロードする ONNX Runtime の共有ライブラリを実行ファイルの隣へ写す
