@@ -117,7 +117,9 @@ GPU（CUDA）で読ませたいときは「エンジン」→「実行ファイ�
 
 **凍結相手の作り直し**: `[exploiter]` の `refresh_hours`（24）が過ぎたとき、または `main_source`（本体の `checkpoints/latest.pt`）の step が凍結相手より `refresh_steps`（25,000。本体の約 4.9k step/h で約 5 h、vast.ai のワーカーを足すと約 3 h）以上進んだとき（`refresh_check_minutes` の 5 分ごとに step だけ読む）に、`main_source` を `main_ckpt` に写し、対本体成績を履歴（`state.json` の `exploiter.history`）へ移して 0 から数え直す。本体が強くなると古い相手への勝率が飽和し（2026-09-12 に 98.3%）、収束判定「対本体勝率が頭打ち」が意味を失うため。初回は起動直後に行う。
 
-**布石**: `openings_minutes`（60）ごとに、作り直してからのチャンクだけから搾取者が勝った布石を `openings_out` に書く。本体 ls は `[selfplay] openings` でこれを読み、新規対局の 20%（`openings_prob`）をそこから始める。相手を作り直した時点で布石は空にする（古い相手の穴なので本体に渡さない）。手動で書き出すときは `bin/libra --run lx openings`。
+**布石**: `openings_minutes`（60）ごとに、作り直してからのチャンクだけから搾取者が勝った布石を `openings_out` に書く。本体 ls は `[selfplay] openings` でこれを読み、新規対局の 10%（`openings_prob`）をそこから始める。相手を作り直した時点で布石は空にする（古い相手の穴なので本体に渡さない）。手動で書き出すときは `bin/libra --run lx openings`。
+
+**本体と過去の搾取者の対局**（`[league]`、2026-09-14 から）: 本体 ls は自己対局（512 局）とは別のエンジンで `n_games`（64）局を過去の lx と打ち、自分の手だけを方策の学習に使う（価値は結果から。lx の手は学習しない）。lx は起動時（プールが空のとき）と凍結相手を作り直すたびに、作り直す前の自分を `[exploiter] pool_out`（`~/libra-run/lx/pool/lx-<step>.pt`、新しい `pool_keep` 10 個）に保存する。ls は `[league] pool` の新しい `recent`（5）体から、本体が勝てていない相手ほど多く選び（PFSP、(1 − 勝率)²）、`switch_games`（256）局ごとに選び直す。成績は `status.json` の `league`（`pool` に相手ごとの本体の勝敗と勝率）と `log.txt` の `league: opponent lx step ...`。プールが空なら `pool_check_minutes`（10）ごとに見に行く。止めるときは ls の `[league] enabled = false` にして停止・起動する。
 
 状態は `bin/libra --run lx status`（`exploiter` に勝率、`main_step`、`refreshed_at`）。管理コンソールの「対本体 勝率」行にも出る。
 

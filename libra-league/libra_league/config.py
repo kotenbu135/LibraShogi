@@ -54,7 +54,15 @@ DEFAULTS: dict[str, Any] = {
                   "openings_out": "",        # 見つけた布石の書き出し先（空なら書かない）。本体はこれを読む
                   "openings_minutes": 60.0,
                   "openings_chunks": 50,
-                  "openings_moves": 12},
+                  "openings_moves": 12,
+                  # 自分のスナップショットの保存先（本体の run の [league] pool が読む）。起動時にプールが空なら今の自分を、
+                  # 凍結相手を作り直すたびに作り直す前の自分を lx-<step>.pt で保存し、新しい pool_keep 個を残す。空なら保存しない
+                  "pool_out": "",
+                  "pool_keep": 10},
+    # 本体と過去の搾取者の対局（libra_league/league.py、docs/decisions.md 2026-09-14）: 自己対局とは別のエンジン（別の固定バッチ）で
+    # n_games 局を pool（搾取者の [exploiter] pool_out）の新しい recent 体と打ち、本体の手だけを方策の学習に使う。本体はふだん通り自分のネットで読む。
+    # 相手は PFSP（本体の勝率 x に (1 − x)²）で switch_games 局ごとに選び直す。プールが空なら pool_check_minutes ごとに見に行く。搾取者の run では無効
+    "league": {"enabled": False, "pool": "", "n_games": 64, "threads": 4, "recent": 5, "switch_games": 256, "pool_check_minutes": 10.0},
     "train": {
         "batch_size": 1024,
         "lr": 2e-4,

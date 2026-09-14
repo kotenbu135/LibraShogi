@@ -16,12 +16,13 @@ from libra_net.model import LibraNet, NetConfig
 
 from .auto import AutoJobs, append_metrics
 from .config import dump_toml, load_config
+from .league import add_result, list_pool, main_winrate, pfsp_pick, pool_name, prune_pool, tag_league_game
 from .replay import ReplayBuffer
 from .selfplay import SelfPlayLoop
 from .state import StateDir, write_json_atomic
 from .supervise import EXIT_ALREADY_RUNNING, acquire_lock
 from .trainer import Trainer
-from .workers import Inbox, publish_weights
+from .workers import Inbox, load_weights, publish_weights
 
 
 def train_steps(new_games: int, avg_len: float, tr: dict) -> int:
@@ -63,6 +64,13 @@ class Runner:
         wk = cfg.get("workers", {})
         if wk.get("enabled") and not cfg.get("exploiter", {}).get("main_ckpt"):
             self.inbox = Inbox(sd.inbox, cfg["run_id"], int(wk.get("max_lag_steps", 0)), self.log)
+        # 本体と過去の搾取者の対局（[league] enabled）: 自己対局とは別のエンジンで打つ。搾取者の run では使わない
+        self.league_enabled = bool(cfg.get("league", {}).get("enabled")) and not cfg.get("exploiter", {}).get("main_ckpt")
+        self.league_loop: SelfPlayLoop | None = None
+        self.league_opponent: int | None = None
+        self.league_since_switch = 0
+        self.league_checked = 0.0
+        self.league_waiting_logged = False
 
     # ---- 永続化 ----
     def log(self, msg: str) -> None:
@@ -73,7 +81,9 @@ class Runner:
         """推論の捕獲の状態（例: model=compile(max-autotune)+cudagraph）。変わったらログに出す。"""
         if self.loop is None:
             return ""
-        nets = (("model", self.loop.model), ("opponent", self.loop.opponent))
+        nets = [("model", self.loop.model), ("opponent", self.loop.opponent)]
+        if self.league_loop is not None:
+            nets += [("league_model", self.league_loop.model), ("league_opponent", self.league_loop.opponent)]
         return " ".join(f"{k}={n.mode_used}" for k, n in nets if n is not None)
 
     def load(self) -> None:
@@ -206,6 +216,7 @@ class Runner:
         if not src.exists() or not str(dst):
             self.log(f"exploiter: main_source not found: {src}")
             return
+        self.save_pool_snapshot()  # 作り直す前の自分（この相手の穴を突くよう学んだ搾取者）を本体の対局相手に残す
         es = self.exploiter_state()
         if self.exploiter_stats["games"]:
             g = max(1, self.exploiter_stats["games"])
@@ -283,6 +294,98 @@ class Runner:
         write_openings(Path(out).expanduser(), lines, str(self.sd.root))
         self.log(f"exploiter: wrote {len(lines)} openings to {out} (chunks >= {es.get('from_chunk', 0)})")
 
+    # ---- 搾取者のスナップショット（搾取者の run）と、本体と過去の搾取者の対局（本体の run） ----
+    def save_pool_snapshot(self) -> None:
+        """今の重みを [exploiter] pool_out に lx-<step>.pt（workers.publish_weights の形式）で保存し、新しい pool_keep 個を残す。"""
+        ex = self.cfg.get("exploiter", {})
+        out = str(ex.get("pool_out") or "")
+        if not out:
+            return
+        pool = Path(out).expanduser()
+        step = self.trainer.step_count
+        try:
+            pool.mkdir(parents=True, exist_ok=True)
+            publish_weights(pool / pool_name(step), self.model, step, self.cfg["net"], self.cfg["run_id"])
+            prune_pool(pool, int(ex.get("pool_keep", 10)))
+            self.log(f"exploiter: saved snapshot step {step} to {pool}")
+        except OSError as e:
+            self.log(f"exploiter: snapshot failed: {e}")
+
+    def ensure_pool_snapshot(self) -> None:
+        """プールが空なら今の自分を保存する（起動時。本体の run がすぐ相手にできるように）。"""
+        out = str(self.cfg.get("exploiter", {}).get("pool_out") or "")
+        if out and not list_pool(Path(out).expanduser(), 1):
+            self.save_pool_snapshot()
+
+    def start_league(self) -> None:
+        lg, sp = self.cfg["league"], self.cfg["selfplay"]
+        self.league_loop = SelfPlayLoop(self.cfg["search"], int(lg["n_games"]), int(lg["threads"]), int(self.rng.integers(0, 2**63)), self.device,
+                                        sp["infer_dtype"], sp.get("compile", "none"))
+        self.league_loop.set_model(self.model)
+        self.state.setdefault("league", {}).setdefault("stats", {})
+        self.league_switch()
+
+    def league_switch(self) -> None:
+        """プールの新しい recent 体から PFSP で相手を選び、相手のネットに重みを入れる。
+        対局中の局は新しい相手で続き、結果は終局時の相手に数える。"""
+        lg = self.cfg["league"]
+        self.league_checked = time.time()
+        pool = list_pool(Path(str(lg.get("pool") or "")).expanduser(), int(lg.get("recent", 5)))
+        if not pool:
+            if not self.league_waiting_logged:
+                self.log(f"league: no exploiter snapshots in {lg.get('pool')}; checking every {lg.get('pool_check_minutes', 10.0)} min")
+                self.league_waiting_logged = True
+            return
+        self.league_waiting_logged = False
+        st = self.state.setdefault("league", {})
+        steps = [s for s, _ in pool]
+        keep = {str(s) for s in steps} | {str(self.league_opponent)}
+        stats = st["stats"] = {k: v for k, v in st.get("stats", {}).items() if k in keep}
+        step = pfsp_pick(steps, stats, self.rng)
+        self.league_since_switch = 0
+        if step == self.league_opponent:
+            return
+        path = dict(pool)[step]
+        try:
+            m, step, _ = load_weights(path)
+        except Exception as e:  # noqa: BLE001  消された・書きかけなら次の選び直しに回す
+            self.log(f"league: failed to load {path}: {type(e).__name__}: {e}")
+            return
+        assert self.league_loop is not None
+        self.league_loop.set_opponent(m, opponent_prior=False)  # 相手（lx）も木を丸ごと自分のネットで読む
+        self.league_opponent = step
+        st["opponent_step"] = step
+        self.log(f"league: opponent lx step {step} (pool {steps}, main winrate {[round(main_winrate(stats.get(str(s))), 3) for s in steps]})")
+
+    def league_round(self) -> list[dict]:
+        """対 lx の対局を 1 ラウンド進め、終局した局に印を付けて返す。相手がまだ無ければプールを見に行くだけ。"""
+        if self.league_loop is None:
+            return []
+        lg = self.cfg["league"]
+        if self.league_opponent is None:
+            if time.time() - self.league_checked >= float(lg.get("pool_check_minutes", 10.0)) * 60:
+                self.league_switch()
+            return []
+        games = self.league_loop.round()
+        st = self.state["league"]
+        for g in games:
+            tag_league_game(g, self.league_opponent)
+            add_result(st["stats"], self.league_opponent, g["league_result"])
+        st["games"] = st.get("games", 0) + len(games)
+        self.league_since_switch += len(games)
+        if self.league_since_switch >= int(lg.get("switch_games", 256)):
+            self.league_switch()
+        return games
+
+    def league_status(self) -> dict:
+        lg = self.cfg["league"]
+        st = self.state.get("league", {})
+        stats = st.get("stats", {})
+        pool = list_pool(Path(str(lg.get("pool") or "")).expanduser(), int(lg.get("recent", 5)))
+        return {"opponent_step": self.league_opponent, "games": st.get("games", 0), "n_games": int(lg["n_games"]),
+                "pool": [{"step": s, **(stats.get(str(s)) or {"games": 0, "wins": 0, "draws": 0, "losses": 0}),
+                          "main_winrate": round(main_winrate(stats.get(str(s))), 4)} for s, _ in pool]}
+
     def reload_openings(self, force: bool = False) -> None:
         """cfg.selfplay.openings（openings.json）が更新されていればエンジンに渡す。"""
         sp = self.cfg["selfplay"]
@@ -344,6 +447,8 @@ class Runner:
             es["source_step"] = xs.get("source_step")  # refresh_steps が有効なときだけ入る（本体の最新 step）
             es["history"] = xs.get("history", [])[-10:]
             status["exploiter"] = es
+        if self.league_loop is not None:
+            status["league"] = self.league_status()
         write_json_atomic(self.sd.status_json, status)
         if now - self.last_metrics >= float(self.cfg["run"].get("metrics_minutes", 5)) * 60 and self.loop is not None:
             append_metrics(self.sd, status)
@@ -362,7 +467,10 @@ class Runner:
                                  sp.get("compile", "none"))
         self.loop.set_model(self.model)
         self.load_opponent()
+        self.ensure_pool_snapshot()
         self.reload_openings(force=True)
+        if self.league_enabled:
+            self.start_league()
         tr, rr = self.cfg["train"], self.cfg["run"]
         last_ck = time.time()
         last_status = 0.0
@@ -375,7 +483,8 @@ class Runner:
         elif self.cfg.get("workers", {}).get("enabled"):
             self.log("workers: disabled (exploiter runs do not take worker games)")
         self.log(f"run: device={self.device} params={self.model.n_params()/1e6:.1f}M n_games={sp['n_games']} threads={sp['threads']}"
-                 + (f" workers=inbox(max_lag_steps={self.inbox.max_lag_steps})" if self.inbox else ""))
+                 + (f" workers=inbox(max_lag_steps={self.inbox.max_lag_steps})" if self.inbox else "")
+                 + (f" league=n_games {self.cfg['league']['n_games']} vs {self.cfg['league']['pool']}" if self.league_loop is not None else ""))
         while True:
             # フラグ
             if self.sd.flag("STOP"):
@@ -389,8 +498,15 @@ class Runner:
             # 自己対局
             modes = self.infer_modes()
             finished = self.loop.round()
+            league_games = self.league_round()  # 対 lx（[league] enabled のときだけ。自己対局と同じ回数だけ進める）
             if self.infer_modes() != modes:
                 self.log(f"selfplay: inference {self.infer_modes()}")
+            if league_games:
+                self.replay.add_games(league_games)
+                new_games += len(league_games)
+                self.session_games += len(league_games)
+                self.state["games_total"] = self.replay.total_games
+                self.state["chunk_index"] = self.replay.chunk_index
             if finished:
                 for g in finished:
                     if "exploiter_result" in g:
@@ -423,6 +539,8 @@ class Runner:
                 self.last_train["steps"] = steps
                 self.last_train["sec"] = round(time.time() - t0, 1)
                 self.loop.set_model(self.model)
+                if self.league_loop is not None:
+                    self.league_loop.set_model(self.model)
                 self.publish_weights()
                 self.state["step"] = self.trainer.step_count
                 new_games = 0
