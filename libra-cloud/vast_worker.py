@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """vast.ai で GPU を 1 台借りて自己対局ワーカーを常駐させ、手元の学習側の run に局を足す。
-終わったら（時間切れ・失敗・Ctrl+C・SIGTERM のどれでも）ワーカーを止めて残りを取り、必ずインスタンスを消す。
+終わったら（時間切れ・失敗・Ctrl+C・SIGTERM・SIGHUP のどれでも）ワーカーを止めて残りを取り、必ずインスタンスを消す。
 
     ~/.venvs/vastai/bin/python libra-cloud/vast_worker.py --gpu "RTX 5070 Ti" --max-dph 0.28 --hours 3 \\
       --run-dir ~/libra-run/ls --bundle <dir>/bundle.tar.gz --out <dir>
 
-束は `python -m libra_cloud.prepare --worker` で作る。重みの送信と局の回収・検査はブリッジ（libra_cloud.bridge、
-プロジェクトの .venv の Python で別プロセス）が行う。学習側の run は [workers] enabled で起動しておく（inbox/ が無い間は取ってこない）。
-<out>/STOP を置くとブリッジが止まり、ワーカーを止めて残りを取ってから抜ける。
+ふだんは bin/libra-vast start（管理コンソールのクラウドのタブ）から起動する。束は `python -m libra_cloud.prepare --worker` で作る。
+重みの送信と局の回収・検査はブリッジ（libra_cloud.bridge、プロジェクトの .venv の Python で別プロセス）が行う。
+学習側の run は [workers] enabled で起動しておく（inbox/ が無い間は取ってこない）。
+<out>/bridge/STOP を置くとブリッジが止まり、ワーカーを止めて残りを取ってから抜ける。
+<out>/instance.json に借りたインスタンスと時刻（t_rent、t_bridge）を書く（bin/libra-vast status が経過時間と費用を出す）。
 """
 from __future__ import annotations
 
@@ -21,12 +23,19 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from libra_cloud.bench import pick_offers  # noqa: E402
+from libra_cloud.bench import offer_query, pick_offers  # noqa: E402
 from vast_bench import IMAGE, KEY, ONSTART, image_cuda, log, try_create, wait_ssh  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 PROJECT_PY = REPO / ".venv" / "bin" / "python"
 PYTHONPATH = ":".join(str(REPO / p) for p in ("libra-sim/python", "libra-search/python", "libra-net", "libra-league", "libra-cloud"))
+LABEL = "libra-worker"  # bin/libra-vast cleanup は libra- で始まるラベルのインスタンスを消す
+
+
+def write_json(path: Path, obj: dict) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def main() -> int:
@@ -62,9 +71,8 @@ def main() -> int:
         log(f"credit below ${a.min_credit:.2f}; not renting")
         return 2
     min_cuda = image_cuda(a.image)
-    q = (f"gpu_name={a.gpu.replace(' ', '_')} num_gpus=1 rentable=true verified=true reliability>{a.min_rel} inet_down>=200 "
-         f"cuda_max_good>={min_cuda} disk_space>={a.disk}")
-    offers = v.search_offers(query=q, type="on-demand", order="dph_total", limit=100, storage=a.disk) or []
+    offers = v.search_offers(query=offer_query(a.gpu, a.min_rel, min_cuda, a.disk), type="on-demand", order="dph_total", limit=100,
+                             storage=a.disk) or []
     cands = pick_offers(offers, max_dph=a.max_dph, min_cores=a.min_cores, min_cpu_ghz=a.min_cpu_ghz, min_cuda=min_cuda, min_rel=a.min_rel)
     log(f"{len(offers)} offers, {len(cands)} usable; cheapest: "
         + ", ".join(f"#{o['id']} ${o['dph_total']:.3f}/h cpu {o.get('cpu_cores_effective')} {str(o.get('cpu_name'))[:28]} "
@@ -88,14 +96,15 @@ def main() -> int:
         else:
             raise KeyboardInterrupt
 
-    signal.signal(signal.SIGTERM, on_signal)
-    signal.signal(signal.SIGINT, on_signal)
+    # SIGHUP も同じに扱う（管理コンソールから起動した wsl.exe が終わったとき。黙って死ぬとインスタンスが残って課金が続く）
+    for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(s, on_signal)
     t_rent = time.time()
     result: dict = {"gpu": a.gpu, "image": a.image, "hours": a.hours, "n_games": a.n_games, "run_id": run_id, "worker": a.id}
     rc = 0
     try:
         for offer in cands[:3]:
-            iid, why = try_create(v, offer["id"], image=a.image, disk=a.disk, label="libra-worker", ssh=True, direct=True,
+            iid, why = try_create(v, offer["id"], image=a.image, disk=a.disk, label=LABEL, ssh=True, direct=True,
                                   cancel_unavail=True, onstart_cmd=ONSTART)
             log(f"create #{offer['id']} ${offer['dph_total']:.3f}/h -> instance {iid} {why}")
             if not iid:
@@ -104,6 +113,7 @@ def main() -> int:
                                                         "geolocation", "cuda_max_good", "inet_up_cost", "inet_down_cost")}
             result["instance"] = iid
             t_rent = time.time()
+            write_json(out / "instance.json", {"instance": iid, "offer": result["offer"], "t_rent": t_rent})
             try:
                 v.attach_ssh(iid, pub)
                 host = wait_ssh(v, iid, timeout=1200)
@@ -111,6 +121,7 @@ def main() -> int:
             except Exception as e:  # noqa: BLE001  起動しないホストは消して次へ
                 log(f"instance {iid} failed to start: {type(e).__name__}: {str(e)[:200]}")
                 v.destroy_instance(iid)
+                write_json(out / "instance.json", {"instance": iid, "offer": result["offer"], "t_rent": t_rent, "destroyed": time.time()})
                 iid = None
         if iid is None:
             log("no instance started")
@@ -131,6 +142,8 @@ def main() -> int:
         env = dict(os.environ, PYTHONPATH=PYTHONPATH)
         bridge = subprocess.Popen([str(PROJECT_PY), "-m", "libra_cloud.bridge", "--run-dir", str(run_dir), "--host", host.host,
                                    "--port", str(host.port), "--out", str(out / "bridge"), "--hours", str(a.hours)], env=env)
+        write_json(out / "instance.json", {"instance": iid, "offer": result["offer"], "t_rent": t_rent, "t_bridge": time.time(),
+                                           "host": f"{host.host}:{host.port}"})
         log(f"bridge pid {bridge.pid} for {a.hours} h (stop: touch {out / 'bridge' / 'STOP'})")
         while True:
             try:

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# libra-vast コマンド。vast.ai の自己対局ワーカーを起動・停止・確認する（libra-cloud/libra_cloud/vast_cli.py）。
+# vastai の SDK を入れた ~/.venvs/vastai の Python で動かす（libra-cloud/README.md）。
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$ROOT/libra-cloud${PYTHONPATH:+:$PYTHONPATH}"
+exec "${LIBRA_VAST_PY:-$HOME/.venvs/vastai/bin/python}" -m libra_cloud.vast_cli "$@"

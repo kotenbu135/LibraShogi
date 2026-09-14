@@ -22,7 +22,25 @@ PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-clo
 ~/.venvs/vastai/bin/python libra-cloud/vast_bench.py --gpu "RTX 3090" --max-dph 0.25 --minutes 20 --bundle $S/bench/bundle.tar.gz --out $S/vast-3090
 ```
 
-## 本番の run にワーカーを足す（vast_worker.py）
+## 本番の run にワーカーを足す（管理コンソール / bin/libra-vast）
+
+ふだんは管理コンソールの **クラウド** タブから「起動」「停止」する（docs/runbook.md の自己対局ワーカーの節）。同じことをコマンドで行うとき:
+
+```bash
+bin/libra-vast offers --gpu RTX_5070_Ti --max-dph 0.28          # 条件に合うオファー（借りない）
+bin/libra-vast start --run ls --gpu RTX_5070_Ti --max-dph 0.28 --hours 3   # すぐ返る。準備に 5〜15 分
+bin/libra-vast status --account                                  # 段階・借りた時間・費用・回収局数・残高・インスタンス
+bin/libra-vast stop                                              # 残りの局を取ってからインスタンスを消す
+bin/libra-vast cleanup --yes                                     # libra- のラベルのインスタンスをすべて消す（残ったとき）
+```
+
+| ファイル | 内容 |
+|---|---|
+| `libra_cloud/vast_cli.py`（`bin/libra-vast`） | セッション（`~/libra-run/cloud/<run>-<時刻>/`）を作り、束の作成と `vast_worker.py` を setsid で切り離して起動する。同時に動かせるのは 1 つ。停止はブリッジが動いていれば `bridge/STOP`、借りる途中ならプロセスグループに SIGTERM。`~/.venvs/vastai` の Python で動く |
+
+GPU 名の空白は `_` でもよい（コンソールは wsl.exe に渡すので `_` を使う）。CPU GHz の下限の既定は 4.4（CPU が遅いホストでは探索が律速して GPU が遊ぶ）。
+
+### 中身（vast_worker.py を直接使うとき）
 
 | ファイル | 内容 |
 |---|---|

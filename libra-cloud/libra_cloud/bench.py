@@ -36,6 +36,12 @@ def pick_offers(offers: list[dict], *, max_dph: float, price_key: str = "dph_tot
     return sorted((o for o in offers if ok(o)), key=lambda o: (o[price_key], -(o.get("cpu_cores_effective") or 0)))
 
 
+def offer_query(gpu: str, min_rel: float, min_cuda: float, disk: float) -> str:
+    """vast.ai のオファー検索の条件（1 GPU、verified、下り 200 Mbps 以上、イメージの CUDA 以上のドライバー、ディスク）。"""
+    return (f"gpu_name={gpu.replace(' ', '_')} num_gpus=1 rentable=true verified=true reliability>{min_rel} inet_down>=200 "
+            f"cuda_max_good>={min_cuda} disk_space>={disk}")
+
+
 def bench_config(cfg: dict, n_games: int, threads: int) -> dict:
     """本番の設定からベンチ用を作る: 探索とネットはそのまま、手元のファイルを参照する項目と学習側の機能は外す。"""
     b = copy.deepcopy(cfg)

@@ -2,10 +2,12 @@
 # Libra 管理コンソール（Windows 用 GUI）。
 # WSL 内の bin/libra を wsl.exe 経由で呼び、本体 ls と搾取者 lx の進捗・速度・強さの推移を表示し、
 # 起動 / 停止 / 自己評価・対外対局の前倒しを行う（一時停止・再開は 2026-09-14 に廃止。docs/decisions.md）。
+# クラウド タブ: bin/libra-vast で vast.ai の自己対局ワーカーを起動 / 停止し、段階・回収局数・費用・残高を表示する。
 # 起動: libra-console.bat（powershell -ExecutionPolicy Bypass -File libra-console.ps1）
 # 自動テスト: -Screenshot C:\path\shot.png で 1 回更新して画面を PNG に保存し終了する（要約を stdout に出す）。
 #             -Tab <タブ名> で保存時に表示するグラフを選ぶ。
 #             -Do "lx:stop" のようにボタンと同じ操作だけを GUI なしで実行して結果を出す（起動は含まない）。
+#             -Do "vast:status" で bin/libra-vast を呼ぶ（例: vast:offers --gpu RTX_5070_Ti）。
 #             -UpdateDesktopModel で desktop（天秤将棋GUI）に登録した libra.exe のモデルを最新の latest.onnx に置き換えて終了する。
 param(
     [string]$Distro = "Ubuntu-24.04",
@@ -19,6 +21,8 @@ param(
     [string]$Do = "",
     [string]$RunRoot = "/home/sakis/libra-run",
     [string]$ModelRun = "ls",
+    [string]$LibraVast = "/home/sakis/LibraShogi/bin/libra-vast",
+    [int]$VastAccountSec = 300,
     [string]$DesktopExe = "C:\Users\sakis\AppData\Local\天秤将棋GUI\tenbin-shogi-gui.exe",
     [string]$DesktopEngineDir = (Join-Path $env:APPDATA "com.fusekishogi.tenbin\engines\libra\engine"),
     [switch]$UpdateDesktopModel
@@ -51,6 +55,12 @@ $script:NextHistory = [datetime]::MinValue
 $script:ShotDone = $false
 $script:Errors = @{}
 $script:HistNote = ""
+$script:Vast = $null          # 直近の libra-vast status --json
+$script:VastPending = $null   # @{proc; out; err; started}
+$script:NextVast = [datetime]::MinValue
+$script:NextVastAccount = [datetime]::MinValue
+$script:VastError = ""
+$script:VastLeak = $false     # セッションが動いていないのにインスタンスが残っている
 $script:Tip = New-Object System.Windows.Forms.ToolTip
 $script:Tip.AutoPopDelay = 12000
 
@@ -110,6 +120,64 @@ function Invoke-Libra([string]$run, [string[]]$cmd, [int]$TimeoutMs = 20000) {
         throw "wsl.exe の出力を読み終えられません: libra --run $run $($cmd -join ' ')"
     }
     return (($out.Result + $err.Result).Trim())
+}
+# ---- bin/libra-vast（クラウド タブ） ----
+function New-VastProcess([string[]]$cmd) {
+    # 引数は wsl.exe のコマンド行になるので空白を含めない（GPU 名は RTX_5070_Ti のように _ でつなぐ）
+    $p = New-LibraProcess "" @()
+    $p.StartInfo.Arguments = (@("-d", $Distro, "--", $LibraVast) + $cmd) -join " "
+    return $p
+}
+function Invoke-Vast([string[]]$cmd, [int]$TimeoutMs = 60000) {
+    # 同期呼び出し（start・stop は 1 秒程度、offers・cleanup は vast.ai の API で数秒）。終了コードと stdout+stderr を返す
+    $p = New-VastProcess $cmd
+    [void]$p.Start()
+    $out = $p.StandardOutput.ReadToEndAsync()
+    $err = $p.StandardError.ReadToEndAsync()
+    if (-not $p.WaitForExit($TimeoutMs)) {
+        try { $p.Kill() } catch {}
+        throw ("wsl.exe が {0} 秒で返りません: libra-vast {1}" -f [int]($TimeoutMs / 1000), ($cmd -join " "))
+    }
+    [void][System.Threading.Tasks.Task]::WaitAll(@($out, $err), 5000)
+    return @{ code = $p.ExitCode; text = (($out.Result + $err.Result).Trim()) }
+}
+function Start-VastFetch {
+    if ($null -ne $script:VastPending) { return }
+    $cmd = @("status", "--json", "--tail", "12")
+    if ([datetime]::Now -ge $script:NextVastAccount) {
+        $cmd += "--account"
+        $script:NextVastAccount = [datetime]::Now.AddSeconds($VastAccountSec)
+    }
+    $p = New-VastProcess $cmd
+    [void]$p.Start()
+    $script:VastPending = @{ proc = $p; out = $p.StandardOutput.ReadToEndAsync(); err = $p.StandardError.ReadToEndAsync(); started = [datetime]::Now }
+}
+function Complete-VastFetch {
+    $f = $script:VastPending
+    if ($null -eq $f) { return }
+    if (-not $f.proc.HasExited -or -not $f.out.IsCompleted) {
+        if (([datetime]::Now - $f.started).TotalSeconds -gt 90) {
+            try { $f.proc.Kill() } catch {}
+            $script:VastError = "libra-vast status がタイムアウト（90 秒）"
+            $script:VastPending = $null
+        }
+        return
+    }
+    $script:VastPending = $null
+    $text = $f.out.Result.Trim()
+    try {
+        if (-not $text) { throw ("出力なし: " + $f.err.Result.Trim()) }
+        $obj = $text | ConvertFrom-Json
+        # 残高とインスタンスは VastAccountSec ごとにしか取らないので、取らなかった回は前の値を引き継ぐ
+        if ($null -eq $obj.PSObject.Properties["account"] -and $null -ne $script:Vast -and $null -ne $script:Vast.PSObject.Properties["account"]) {
+            $obj | Add-Member -NotePropertyName account -NotePropertyValue $script:Vast.account
+        }
+        $script:Vast = $obj
+        $script:VastError = ""
+        Update-VastPanel
+    } catch {
+        $script:VastError = "libra-vast status の読み取りに失敗: " + $_.Exception.Message
+    }
 }
 function Start-Fetch([string]$run, [bool]$withHistory) {
     if ($script:Pending.ContainsKey($run)) { return }
@@ -693,8 +761,78 @@ foreach ($name in $script:TabNames) {
     $page.Controls.Add($panel)
     [void]$tabs.TabPages.Add($page)
 }
+# ---- クラウド タブ（vast.ai の自己対局ワーカー。bin/libra-vast。docs/runbook.md） ----
+function New-Num([decimal]$min, [decimal]$max, [decimal]$val, [decimal]$inc, [int]$dec, [int]$w = 64) {
+    $n = New-Object System.Windows.Forms.NumericUpDown
+    $n.Minimum = $min; $n.Maximum = $max; $n.DecimalPlaces = $dec; $n.Increment = $inc; $n.Value = $val; $n.Width = $w
+    $n.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
+    return $n
+}
+$vpage = New-Object System.Windows.Forms.TabPage
+$vpage.Text = "クラウド"
+$vroot = New-Object System.Windows.Forms.TableLayoutPanel
+$vroot.Dock = "Fill"; $vroot.ColumnCount = 2; $vroot.RowCount = 2
+$vroot.BackColor = [System.Drawing.Color]::White
+[void]$vroot.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle("Absolute", 560)))
+[void]$vroot.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle("Percent", 100)))
+[void]$vroot.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("AutoSize")))
+[void]$vroot.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("Percent", 100)))
+$vbar = New-Object System.Windows.Forms.FlowLayoutPanel
+$vbar.Dock = "Fill"; $vbar.AutoSize = $true; $vbar.WrapContents = $true
+$vbar.Controls.Add((New-Label "GPU" 4))
+$cmbGpu = New-Object System.Windows.Forms.ComboBox
+$cmbGpu.DropDownStyle = "DropDownList"; $cmbGpu.Width = 100
+[void]$cmbGpu.Items.AddRange(@("RTX 5070 Ti", "RTX 5080", "RTX 4090", "RTX 5090", "RTX 3090"))
+$cmbGpu.SelectedIndex = 0
+$cmbGpu.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
+$vbar.Controls.Add($cmbGpu)
+$vbar.Controls.Add((New-Label '上限 $/h' 4)); $numDph = New-Num 0.05 2.00 0.28 0.01 2; $vbar.Controls.Add($numDph)
+$vbar.Controls.Add((New-Label "時間" 4)); $numHours = New-Num 0.5 24 3 0.5 1; $vbar.Controls.Add($numHours)
+$vbar.Controls.Add((New-Label "信頼度の下限" 4)); $numRel = New-Num 0.90 0.99 0.94 0.01 2; $vbar.Controls.Add($numRel)
+$vbar.Controls.Add((New-Label "CPU GHz の下限" 4)); $numGhz = New-Num 0 9 4.4 0.1 1; $vbar.Controls.Add($numGhz)
+$bVastStart = New-Button "起動" { Start-Vast } 56
+$bVastStop = New-Button "停止" { Stop-Vast } 56
+$bVastOffers = New-Button "候補を見る" { Show-VastOffers } 90
+$bVastAccount = New-Button "残高を更新" { $script:NextVastAccount = [datetime]::MinValue; $script:NextVast = [datetime]::MinValue } 90
+$bVastCleanup = New-Button "後始末" { Cleanup-Vast } 70
+foreach ($b in @($bVastStart, $bVastStop, $bVastOffers, $bVastAccount, $bVastCleanup)) { $vbar.Controls.Add($b) }
+$script:Tip.SetToolTip($bVastStart, "GPU を借りて自己対局ワーカーを起動し、ls に局を足す（準備に 5〜15 分。時間が来たら残りの局を取ってインスタンスを消す）")
+$script:Tip.SetToolTip($bVastStop, "ワーカーを止めて残りの局を取り、インスタンスを消す")
+$script:Tip.SetToolTip($bVastOffers, "条件に合うオファーを安い順に出す（借りない）")
+$script:Tip.SetToolTip($bVastCleanup, "libra- で始まるラベルのインスタンスをすべて消す（起動の途中で落ちて残ったとき）")
+$script:Tip.SetToolTip($numGhz, "CPU が遅いホストでは探索が律速して GPU が遊ぶ（5070 Ti で Xeon 2.4 GHz 35 万局/日、Ryzen 4.5 GHz 48 万局/日）")
+$vroot.Controls.Add($vbar, 0, 0)
+$vroot.SetColumnSpan($vbar, 2)
+$script:VastKeys = @(
+    @("phase", "状態"), @("session", "セッション"), @("gpu", "GPU / ホスト"), @("time", "借りた時間 / 残り"), @("cost", "費用（見積もり）"),
+    @("bridge", "回収（ブリッジ）"), @("learner", "取り込み（ls）"), @("verify", "検査"), @("credit", "残高"), @("instances", "借りているインスタンス")
+)
+$vgrid = New-Object System.Windows.Forms.TableLayoutPanel
+$vgrid.Dock = "Fill"; $vgrid.ColumnCount = 2; $vgrid.AutoScroll = $true
+[void]$vgrid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle("Absolute", 150)))
+[void]$vgrid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle("Percent", 100)))
+$script:VastVals = @{}
+$vrow = 0
+foreach ($k in $script:VastKeys) {
+    $lk = New-Object System.Windows.Forms.Label
+    $lk.Text = $k[1]; $lk.AutoSize = $true; $lk.ForeColor = [System.Drawing.Color]::DimGray
+    $lk.Margin = New-Object System.Windows.Forms.Padding(2, 1, 2, 1)
+    $lv = New-Object System.Windows.Forms.Label
+    $lv.Text = "-"; $lv.AutoSize = $true; $lv.MaximumSize = New-Object System.Drawing.Size(400, 0)
+    $lv.Margin = New-Object System.Windows.Forms.Padding(2, 1, 2, 1)
+    $vgrid.Controls.Add($lk, 0, $vrow); $vgrid.Controls.Add($lv, 1, $vrow)
+    $script:VastVals[$k[0]] = $lv
+    $vrow++
+}
+$vroot.Controls.Add($vgrid, 0, 1)
+$vlog = New-Object System.Windows.Forms.TextBox
+$vlog.Multiline = $true; $vlog.ReadOnly = $true; $vlog.ScrollBars = "Both"; $vlog.WordWrap = $false
+$vlog.Dock = "Fill"; $vlog.Font = New-Object System.Drawing.Font("Consolas", 8.5); $vlog.BackColor = [System.Drawing.Color]::White
+$vroot.Controls.Add($vlog, 1, 1)
+$vpage.Controls.Add($vroot)
+[void]$tabs.TabPages.Add($vpage)
 $tabs.Add_SelectedIndexChanged({ $tabs.SelectedTab.Controls[0].Invalidate() })
-if ($Tab) { $idx = [array]::IndexOf($script:TabNames, $Tab); if ($idx -ge 0) { $tabs.SelectedIndex = $idx } }
+if ($Tab) { foreach ($pg in $tabs.TabPages) { if ($pg.Text -eq $Tab) { $tabs.SelectedTab = $pg } } }
 $root.Controls.Add($tabs, 0, 2)
 
 # ステータス行
@@ -822,7 +960,7 @@ function Update-StatusBar {
     # 0.5 秒ごとに書き直すので、操作の結果は $script:Notes に持って期限まで出し続ける
     $parts = @()
     $bad = $false
-    foreach ($r in $Runs) {
+    foreach ($r in (@($Runs) + @("vast"))) {
         if ($script:Notes.ContainsKey($r)) {
             $n = $script:Notes[$r]
             if ([datetime]::Now -lt $n.until) { $parts += "$r : " + $n.text; if ($n.error) { $bad = $true } } else { $script:Notes.Remove($r) }
@@ -830,6 +968,8 @@ function Update-StatusBar {
         if ($script:Errors.ContainsKey($r)) { $parts += "$r : " + $script:Errors[$r]; $bad = $true }
     }
     if ($script:HistNote) { $parts += $script:HistNote; $bad = $true }
+    if ($script:VastError) { $parts += "vast : " + $script:VastError; $bad = $true }
+    if ($script:VastLeak) { $parts += "vast : セッションが動いていないのにインスタンスが残っています（課金中）。クラウド タブの「後始末」を押してください"; $bad = $true }
     $wait = [Math]::Max(0, ($script:NextFetch - [datetime]::Now).TotalSeconds)
     $pend = if ($script:Pending.Count -gt 0) { "  取得中…" } else { "" }
     $status.Text = ("次の更新まで {0:N0} 秒{1}   {2}" -f $wait, $pend, ($parts -join "   "))
@@ -888,12 +1028,127 @@ function Start-Run([string]$run) {
     $script:NextFetch = [datetime]::Now.AddSeconds(5)
 }
 
+# ---- クラウドの操作と表示 ----
+function Get-VastArgs {
+    return @("--gpu", ([string]$cmbGpu.SelectedItem -replace " ", "_"), "--max-dph", ("{0:0.00}" -f [double]$numDph.Value),
+             "--min-rel", ("{0:0.00}" -f [double]$numRel.Value), "--min-cpu-ghz", ("{0:0.0}" -f [double]$numGhz.Value))
+}
+function Start-Vast {
+    $o = $script:Vast
+    if ($null -ne $o -and $null -ne $o.session -and $o.session.alive) { Set-Note "vast" "既に動いています" $false 30; return }
+    $gpu = [string]$cmbGpu.SelectedItem
+    $dph = [double]$numDph.Value; $hours = [double]$numHours.Value
+    $credit = if ($null -ne $o -and $null -ne $o.account -and $null -ne $o.account.credit) { '${0:N2}' -f [double]$o.account.credit } else { "不明" }
+    $msg = ('{0} を最大 ${1:N2}/h で {2} 時間借りて、ls に自己対局の局を足します。' -f $gpu, $dph, $hours) + "`r`n" +
+           ('費用は最大 ${0:N2} 程度（準備の 5〜15 分を含む）。残高 {1}。' -f ($dph * ($hours + 0.25)), $credit) + "`r`n" +
+           "時間が来たら残りの局を取ってインスタンスを消します。途中で止めるときは「停止」。よろしいですか？"
+    if (-not (Confirm-Action $msg)) { return }
+    try {
+        $r = Invoke-Vast (@("start", "--run", "ls", "--hours", ("{0:0.0}" -f $hours)) + (Get-VastArgs))
+        Set-Note "vast" $r.text ($r.code -ne 0) $(if ($r.code -eq 0) { 300 } else { 900 })
+    } catch {
+        Set-Note "vast" ("起動に失敗: " + $_.Exception.Message) $true 900
+    }
+    $script:NextVast = [datetime]::Now.AddSeconds(3)
+}
+function Stop-Vast {
+    if (-not (Confirm-Action "クラウドのワーカーを止めます（残りの局を取ってからインスタンスを消します。数分）。よろしいですか？")) { return }
+    try {
+        $r = Invoke-Vast @("stop")
+        Set-Note "vast" $r.text ($r.code -ne 0) 300
+    } catch {
+        Set-Note "vast" ("停止に失敗: " + $_.Exception.Message) $true 900
+    }
+    $script:NextVast = [datetime]::Now.AddSeconds(3)
+}
+function Show-VastOffers {
+    try {
+        $r = Invoke-Vast (@("offers") + (Get-VastArgs))
+        [void][System.Windows.Forms.MessageBox]::Show($form, $r.text, ("候補（{0}）" -f [string]$cmbGpu.SelectedItem), "OK", "Information")
+    } catch {
+        Set-Note "vast" ("候補の取得に失敗: " + $_.Exception.Message) $true 300
+    }
+}
+function Cleanup-Vast {
+    $o = $script:Vast
+    $n = if ($null -ne $o -and $null -ne $o.account -and $null -ne $o.account.instances) { @($o.account.instances).Count } else { "?" }
+    if (-not (Confirm-Action ("libra- で始まるラベルの vast.ai インスタンスをすべて消します（表示中 {0} 台。動いているセッションがあるときは消しません）。よろしいですか？" -f $n))) { return }
+    try {
+        $r = Invoke-Vast @("cleanup", "--yes")
+        Set-Note "vast" $r.text ($r.code -ne 0) 300
+    } catch {
+        Set-Note "vast" ("後始末に失敗: " + $_.Exception.Message) $true 900
+    }
+    $script:NextVastAccount = [datetime]::MinValue
+    $script:NextVast = [datetime]::MinValue
+}
+function Update-VastPanel {
+    $v = $script:VastVals
+    $o = $script:Vast
+    if ($null -eq $o) { return }
+    $black = [System.Drawing.Color]::Black
+    $s = $o.session
+    $alive = ($null -ne $s -and [bool]$s.alive)
+    $bVastStart.Enabled = -not $alive
+    $bVastStop.Enabled = ($alive -and -not $s.stop_requested)
+    $bVastCleanup.Enabled = -not $alive
+    if ($null -eq $s) {
+        $v.phase.Text = "セッションはまだありません"; $v.phase.ForeColor = [System.Drawing.Color]::DimGray
+        foreach ($k in @("session", "gpu", "time", "cost", "bridge", "verify")) { $v[$k].Text = "-" }
+    } else {
+        $v.phase.Text = [string]$s.phase
+        $v.phase.ForeColor = if ($s.phase -like "異常終了*") { [System.Drawing.Color]::Firebrick } elseif ($alive) { [System.Drawing.Color]::ForestGreen } else { [System.Drawing.Color]::DimGray }
+        $v.phase.Font = New-Object System.Drawing.Font($form.Font, [System.Drawing.FontStyle]::Bold)
+        $started = if ($null -ne $s.started) { (From-Unix $s.started).ToString("MM/dd HH:mm") } else { "-" }
+        $v.session.Text = '{0}（開始 {1}、{2} を最大 ${3:N2}/h で {4} 時間）' -f ([string]$s.dir -split "/")[-1], $started, $s.gpu, [double]$s.max_dph, $s.hours
+        $inst = $o.instance
+        if ($null -ne $inst -and $null -ne $inst.offer) {
+            $off = $inst.offer
+            $v.gpu.Text = '{0}、{1}（{2}）#{3}、${4:N3}/h' -f $off.gpu_name, ([string]$off.cpu_name).Trim(), $off.geolocation, $inst.instance, [double]$off.dph_total
+        } else { $v.gpu.Text = "-" }
+        $v.time.Text = if ($null -ne $o.rented_h) { '{0:N2} 時間{1}' -f [double]$o.rented_h, $(if ($null -ne $o.remaining_h) { ' / 残り {0:N2} 時間' -f [double]$o.remaining_h } else { "" }) } else { "-" }
+        $v.cost.Text = if ($null -ne $o.est_cost_usd) { '${0:N2}' -f [double]$o.est_cost_usd } else { "-" }
+        $b = $o.bridge
+        if ($null -ne $b) {
+            $last = if ($null -ne $b.last_pull) { "、最終 " + (Format-Ago (From-Unix $b.last_pull)) } else { "" }
+            $v.bridge.Text = '{0} 局（{1} ファイル）、弾いた {2}、エラー {3}{4}' -f (Format-Int $b.games), $b.files, $b.rejected_files, $b.errors, $last
+            $v.bridge.ForeColor = if ([int]$b.rejected_files -gt 0 -or [int]$b.errors -gt 0) { [System.Drawing.Color]::DarkOrange } else { $black }
+            $v.verify.Text = if ($null -ne $b.verify_ms_per_game) { '{0} ms/局' -f $b.verify_ms_per_game } else { "-" }
+        } else { $v.bridge.Text = "-"; $v.verify.Text = "-" }
+    }
+    $wk = $null
+    if ($script:Last.ContainsKey("ls") -and $null -ne $script:Last["ls"].status) { $wk = $script:Last["ls"].status.workers }
+    $v.learner.Text = if ($null -ne $wk) { '{0} 局（古くて捨てた {1}、不正 {2}）' -f (Format-Int $wk.games), (Format-Int $wk.stale_games), $wk.rejected_files } else { "（ls の [workers] が無効か、まだ取り込みなし）" }
+    $ac = $o.account
+    if ($null -ne $ac) {
+        if ($null -ne $ac.error) {
+            $v.credit.Text = "取得失敗: " + $ac.error; $v.credit.ForeColor = [System.Drawing.Color]::Firebrick
+        } else {
+            $v.credit.Text = '${0:N2}（{1}）' -f [double]$ac.credit, (Format-Ago (From-Unix $ac.time)); $v.credit.ForeColor = $black
+            $ins = @($ac.instances)
+            $v.instances.Text = if ($ins.Count -eq 0) { "なし" } else { ($ins | ForEach-Object { '#{0} {1} {2} {3} ${4:N3}/h' -f $_.id, $_.label, $_.status, $_.gpu, [double]$_.dph }) -join "、" }
+            $script:VastLeak = ($ins.Count -gt 0 -and -not $alive)
+            $v.instances.ForeColor = if ($script:VastLeak) { [System.Drawing.Color]::Firebrick } else { $black }
+        }
+    }
+    if ($null -ne $o.log_tail) {
+        $vlog.Text = (@($o.log_tail) -join "`r`n")
+        $vlog.SelectionStart = $vlog.Text.Length
+        $vlog.ScrollToCaret()
+    }
+}
+
 # ---- タイマー ----
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 500
 $timer.Add_Tick({
     try {
         Complete-Fetches
+        Complete-VastFetch
+        if ($null -eq $script:VastPending -and [datetime]::Now -ge $script:NextVast) {
+            $script:NextVast = [datetime]::Now.AddSeconds([int]$numIv.Value)
+            Start-VastFetch
+        }
         if ($script:Pending.Count -eq 0 -and [datetime]::Now -ge $script:NextFetch) {
             $script:NextFetch = [datetime]::Now.AddSeconds([int]$numIv.Value)
             $withHistory = ([datetime]::Now -ge $script:NextHistory)
@@ -901,7 +1156,7 @@ $timer.Add_Tick({
             foreach ($r in $Runs) { Start-Fetch $r $withHistory }
         }
         Update-StatusBar
-        if ($Screenshot -and -not $script:ShotDone -and $script:Pending.Count -eq 0 -and $script:Data.Count -eq $Runs.Count) {
+        if ($Screenshot -and -not $script:ShotDone -and $script:Pending.Count -eq 0 -and $script:Data.Count -eq $Runs.Count -and $null -eq $script:VastPending -and ($null -ne $script:Vast -or $script:VastError)) {
             $script:ShotDone = $true
             $tabs.SelectedTab.Controls[0].Refresh()
             $bmp = New-Object System.Drawing.Bitmap($form.Width, $form.Height)
@@ -913,6 +1168,8 @@ $timer.Add_Tick({
                 $d = $script:Data[$r]
                 [Console]::WriteLine(("{0}: {1} flags={2} step={3} games={4} gpd={5} metrics={6} evals={7} matches={8} archives={9}" -f $r, $d.process, (@($d.flags) -join "+"), $d.status.step, $d.status.games_total, $d.status.games_per_day_1h, @($d.metrics).Count, @($d.evals).Count, @($d.matches).Count, @($d.archives).Count))
             }
+            $vphase = if ($null -ne $script:Vast -and $null -ne $script:Vast.session) { $script:Vast.session.phase } else { "-" }
+            [Console]::WriteLine(("vast: phase={0} credit={1} error={2}" -f $vphase, $(if ($null -ne $script:Vast -and $null -ne $script:Vast.account) { $script:Vast.account.credit } else { "-" }), $script:VastError))
             $form.Close()
         }
     } catch {
@@ -922,7 +1179,7 @@ $timer.Add_Tick({
     }
 })
 $form.Add_Shown({ $timer.Start() })
-$form.Add_FormClosing({ $timer.Stop(); foreach ($f in $script:Pending.Values) { try { $f.proc.Kill() } catch {} } })
+$form.Add_FormClosing({ $timer.Stop(); foreach ($f in $script:Pending.Values) { try { $f.proc.Kill() } catch {} }; if ($null -ne $script:VastPending) { try { $script:VastPending.proc.Kill() } catch {} } })
 
 if ($UpdateDesktopModel) {
     $info = Update-DesktopModel
@@ -931,6 +1188,11 @@ if ($UpdateDesktopModel) {
 }
 if ($Do) {
     # GUI なしでボタンと同じ呼び出しを実行する（例: -Do "lx:stop"、-Do "ls:eval-now"。起動は含まない）
+    if ($Do.StartsWith("vast:")) {
+        $r = Invoke-Vast (@($Do.Substring(5).Trim().Split(" ")) | Where-Object { $_ })
+        [Console]::WriteLine($r.text)
+        exit $r.code
+    }
     $run, $rest = $Do.Split(":", 2)
     if ([string]::IsNullOrWhiteSpace($rest)) {
         [Console]::WriteLine("-Do は <run>:<コマンド> の形で指定してください（例: ls:status、lx:stop）")

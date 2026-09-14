@@ -59,7 +59,7 @@ schtasks /Create /TN "LibraShogi run lx" /XML "C:\Users\sakis\libra\LibraShogi-r
 
 Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\Users\<user>\libra` とデスクトップへ写す）。
 
-**管理コンソール（GUI）**: デスクトップの `libra-console.bat`（`tools/windows/libra-console.ps1`、PowerShell 5.1 + WinForms、ビルド不要）。本体 ls と搾取者 lx の状態（稼働中 / 停止処理中 / 停止、step・世代・総局数、局/日の 1 時間平均と実測、終局内訳、loss、GPU メモリ、最終チェックポイント、搾取者の対本体勝率、log.txt の末尾）を 15 秒ごとに `wsl.exe -d Ubuntu-24.04 -- bin/libra --run <run> status --json --tail 8` で取り、局/日の推移を折れ線で出す。ボタンは「起動」「停止」（run ごとと「全部 起動」「全部 停止」）と自動計測の前倒しだけ。稼働中は「起動」、止まっているときは「停止」を押せなくする。停止処理中は「起動」を押してよい（止まってから起動する）。「起動」はタスク スケジューラの「LibraShogi run [lx]」を `schtasks /Run` で起動し（無ければ wsl.exe を直接起動）、5 分以内に稼働を確かめられなければステータスバーに赤で出す。操作の結果はステータスバーに 1〜15 分残る。局/日の履歴は `%LOCALAPPDATA%\LibraShogi\console-history.csv` に追記（7 日分を表示）。
+**管理コンソール（GUI）**: デスクトップの `libra-console.bat`（`tools/windows/libra-console.ps1`、PowerShell 5.1 + WinForms、ビルド不要）。本体 ls と搾取者 lx の状態（稼働中 / 停止処理中 / 停止、step・世代・総局数、局/日の 1 時間平均と実測、終局内訳、loss、GPU メモリ、最終チェックポイント、搾取者の対本体勝率、log.txt の末尾）を 15 秒ごとに `wsl.exe -d Ubuntu-24.04 -- bin/libra --run <run> status --json --tail 8` で取り、局/日の推移を折れ線で出す。ボタンは「起動」「停止」（run ごとと「全部 起動」「全部 停止」）と自動計測の前倒しだけ。稼働中は「起動」、止まっているときは「停止」を押せなくする。停止処理中は「起動」を押してよい（止まってから起動する）。「起動」はタスク スケジューラの「LibraShogi run [lx]」を `schtasks /Run` で起動し（無ければ wsl.exe を直接起動）、5 分以内に稼働を確かめられなければステータスバーに赤で出す。操作の結果はステータスバーに 1〜15 分残る。局/日の履歴は `%LOCALAPPDATA%\LibraShogi\console-history.csv` に追記（7 日分を表示）。**クラウド** タブは vast.ai の自己対局ワーカーの起動 / 停止 / 候補 / 後始末と、段階・費用・回収局数・残高を出す（`bin/libra-vast`。§「自己対局ワーカー」の 4）。コンソールを直したら `tools/windows/install.sh` で写し直す。
 
 再起動の手順（bat 版）: PC を再起動するときは `libra-stop.bat` で両 run を止めて（`libra-status.bat` で `not running` を確認）から再起動し、ログオン後に両タスクが自動で再開する。搾取者を止めたままにしたいときは WSL で `bin/libra --run lx stop` だけ実行する（本体は openings を読むだけなので影響しない）。
 
@@ -128,4 +128,9 @@ GPU（CUDA）で読ませたいときは「エンジン」→「実行ファイ�
 1. 学習側の `config.toml` に `[workers]` `enabled = true` を書き、停止 → 起動。学習側は今までどおり自分でも自己対局し、加えて `weights/latest.pt` を配り、`inbox/` の局を 10 秒ごとに取り込む（取り込んだ局も新規局数に数えるので、学習量の規則 `replay_ratio` は変わらない）。搾取者の run では無効。
 2. ワーカーを起動: `bin/libra --run ls worker --id w1 [--n-games 512] [--threads 12]`。重みを読み、`chunk_games`（100）局ごとに `inbox/` にファイルを置き、学習側が新しい重みを配ると 10 秒以内に読み直す。同じマシンでは学習側が動いている間だけ打ち、停止（STOP）か学習側の終了で残りを書いて抜ける（学習側が止まっている間は待つ）。ワーカーは run.lock を取らないので、コンソールの状態と 起動 / 停止 は学習側だけを見る。別マシンで run ディレクトリの写し（`config.toml` と `weights/`）を使うときは `--detached`。
 3. 学習側は、局を打った重みが `max_lag_steps`（2000）より古いファイルを捨て、型・形・値域が合わないファイルを `inbox/rejected/` に移す（手の合法性や方策・価値の改ざんは確かめない）。件数は `status` の `workers:` 行と status.json の `workers`。
-4. vast.ai の GPU で回すとき（decisions.md 2026-09-14）: `libra-cloud/vast_worker.py` が借りてワーカーを常駐させ、手元のブリッジ（`libra_cloud.bridge`）が重みと布石を送り、ホストの局を取ってきて手を再生して検査してから学習側の `inbox/` に置く。手順は `libra-cloud/README.md`。`--hours` が過ぎるか `<out>/bridge/STOP` でワーカーを止めて残りを取り、インスタンスを消す。学習側を止めている間はホストに局が溜まり、再開後に `max_lag_steps` より古い分は捨てられる。
+4. **vast.ai の GPU を足す**（decisions.md 2026-09-14）: 管理コンソールの **クラウド** タブで GPU・上限 $/h・時間・信頼度の下限・CPU GHz の下限を選んで「起動」（確認に費用の見積もりと残高が出る）。準備に 5〜15 分。借りたホストでワーカーが打ち、手元のブリッジ（`libra_cloud.bridge`）が重みと布石を送り、局を取ってきて手を再生して検査してから `inbox/` に置く。
+   - 表示（15 秒ごと。残高とインスタンスは 5 分ごと、「残高を更新」で今すぐ）: 状態（準備 → インスタンス作成 → セットアップ → 稼働 → 停止処理 → 終了）、借りた時間と残り、費用の見積もり、回収した局数と弾いた数、ls の取り込み、残高、借りているインスタンス、launcher.log の末尾。
+   - 「停止」: ワーカーを止めて残りの局を取ってからインスタンスを消す（数分）。時間が来たときも同じ。「候補を見る」: 条件に合うオファーを安い順に出す（借りない）。
+   - **状態が「異常終了」か、セッションが動いていないのに「借りているインスタンス」が残っている（ステータスバーが赤）ときは課金が続いている。**「後始末」で libra- のラベルのインスタンスをすべて消す。
+   - 同じ操作をコマンドで: `bin/libra-vast start [--gpu RTX_5070_Ti --max-dph 0.28 --hours 3]`・`stop`・`status [--account]`・`offers`・`cleanup --yes`。セッションの記録は `~/libra-run/cloud/<run>-<時刻>/`（launcher.log、setup.log、bridge/bridge.log、bridge/rejected/、result.json）。
+   - 前提: ls の `config.toml` に `[workers] enabled = true`（無いと起動を断る）、vast.ai の API キーと SSH 鍵（libra-cloud/README.md）。学習側を止めている間はホストに局が溜まり、再開後に `max_lag_steps` より古い分は捨てられる。
