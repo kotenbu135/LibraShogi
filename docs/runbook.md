@@ -113,7 +113,7 @@ GPU（CUDA）で読ませたいときは「エンジン」→「実行ファイ�
 
 ## 搾取者リーグ（Main exploiter）
 
-搾取者 lx（`~/libra-run/lx`、1.9M、64 局同時）は凍結した本体（`lx/main.pt`）と対局し、自分の手だけを学習する。偶数枠で搾取者が先手。
+搾取者 lx（`~/libra-run/lx`、1.9M、64 局同時）は凍結した本体（`lx/main.pt`）と対局し、自分の手だけを学習する。偶数枠で搾取者が先手。本体の手番の手は本体のネットで木を丸ごと読む。lx の手番の手は、価値を lx のネット、木の中の本体の手番の葉の方策を本体のネットから取る（`[exploiter] opponent_prior`、既定 true。本体の応手を本体の方策で予測する。docs/exploiter-literature.md）。
 
 **凍結相手の作り直し**: `[exploiter]` の `refresh_hours`（24）が過ぎたとき、または `main_source`（本体の `checkpoints/latest.pt`）の step が凍結相手より `refresh_steps`（25,000。本体の約 4.9k step/h で約 5 h、vast.ai のワーカーを足すと約 3 h）以上進んだとき（`refresh_check_minutes` の 5 分ごとに step だけ読む）に、`main_source` を `main_ckpt` に写し、対本体成績を履歴（`state.json` の `exploiter.history`）へ移して 0 から数え直す。本体が強くなると古い相手への勝率が飽和し（2026-09-12 に 98.3%）、収束判定「対本体勝率が頭打ち」が意味を失うため。初回は起動直後に行う。
 
