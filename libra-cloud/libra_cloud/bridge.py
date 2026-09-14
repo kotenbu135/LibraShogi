@@ -145,7 +145,7 @@ class Bridge:
         self.staging.mkdir(parents=True, exist_ok=True)
         self.pushed: dict[str, int] = {}
         self.waiting_logged = False
-        self.stats: dict = {"pushes": {}, "files": 0, "games": 0, "rejected_files": 0, "verify_s": 0.0, "verify_ms_per_game": None,
+        self.stats: dict = {"pushes": {}, "push_s": {}, "files": 0, "games": 0, "rejected_files": 0, "verify_s": 0.0, "verify_ms_per_game": None,
                             "last_pull": None, "last_push": None, "errors": 0}
 
     def push_if_changed(self, src: Path, rel: str) -> None:
@@ -155,10 +155,22 @@ class Bridge:
             return
         if self.pushed.get(rel) == mt:
             return
+        nbytes = src.stat().st_size
+        t0 = time.time()
         self.t.push(src, rel)
+        now = time.time()
         self.pushed[rel] = mt
         self.stats["pushes"][rel] = self.stats["pushes"].get(rel, 0) + 1
-        self.stats["last_push"] = time.time()
+        self.stats["last_push"] = now
+        # 送信にかかった時間と、学習側が書いてからホストに届くまでの時間（age）。ワーカーの重みの遅れの内訳を見るため
+        # （2026-09-14 22:17 のオーストラリアのホストで、ls が古すぎて 8,900 局を捨てた。measurements.md 2026-09-15）
+        dt, age = now - t0, now - mt / 1e9
+        ps = self.stats["push_s"].setdefault(rel, {"n": 0, "total": 0.0, "max": 0.0, "max_age": 0.0})
+        ps["n"] += 1
+        ps["total"] = round(ps["total"] + dt, 3)
+        ps["max"] = round(max(ps["max"], dt), 3)
+        ps["max_age"] = round(max(ps["max_age"], age), 3)
+        self.log(f"bridge: pushed {rel} {nbytes / 1e6:.1f} MB in {dt:.1f} s (age {age:.1f} s)")
 
     def pull(self) -> int:
         """ホストの対局ファイルを取ってきて検査し、学習側の inbox に置く。置いた局数を返す。"""

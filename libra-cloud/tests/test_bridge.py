@@ -127,6 +127,31 @@ def test_push_failure_does_not_stop_pulling_and_is_retried(tmp_path: Path):
     assert b.cycle() == 0 and (host / "weights" / "latest.pt").read_bytes() == b"w1" and b.stats["pushes"]["weights/latest.pt"] == 1
 
 
+def test_push_records_duration_and_age(tmp_path: Path):
+    """送信ごとに、かかった時間と学習側が書いてからホストに届くまでの時間（age）をログと状態に残す。"""
+    run = _learner(tmp_path)
+    host = tmp_path / "host"
+
+    class SlowPush(LocalTransport):
+        def push(self, src: Path, rel: str) -> None:
+            time.sleep(0.05)
+            super().push(src, rel)
+
+    w = run / "weights" / "latest.pt"
+    st = w.stat()
+    os.utime(w, ns=(st.st_atime_ns, st.st_mtime_ns - 2 * 10**9))  # 学習側が 2 秒前に書いた
+    logs: list[str] = []
+    b = Bridge(run, SlowPush(host), tmp_path / "out", log=logs.append)
+    b.cycle()
+    ps = b.stats["push_s"]["weights/latest.pt"]
+    assert ps["n"] == 1 and 0.05 <= ps["max"] < 1.0 and ps["total"] == ps["max"] and 2.0 <= ps["max_age"] < 5.0
+    assert any(s.startswith("bridge: pushed weights/latest.pt 0.0 MB in 0.1 s (age 2.") for s in logs)
+    b.cycle()
+    assert b.stats["push_s"]["weights/latest.pt"]["n"] == 1  # 変わっていなければ送らないので記録もしない
+    b.write_status()
+    assert json.loads((tmp_path / "out" / "bridge.json").read_text())["push_s"]["openings.json"]["n"] == 1
+
+
 def test_push_timeout_scales_with_size():
     assert push_timeout(0) == 60.0
     assert 150 < push_timeout(20_501_387) < 170  # ls の fp16 の重み。通常は 10 秒で送れる

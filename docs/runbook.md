@@ -136,3 +136,4 @@ GPU（CUDA）で読ませたいときは「エンジン」→「実行ファイ�
    - **状態が「異常終了」か、セッションが動いていないのに「借りているインスタンス」が残っている（ステータスバーが赤）ときは課金が続いている。**「後始末」で libra- のラベルのインスタンスをすべて消す。
    - 同じ操作をコマンドで: `bin/libra-vast start [--gpu RTX_5070_Ti --max-dph 0.28 --hours 3]`・`stop`・`status [--account]`・`offers`・`cleanup --yes`。セッションの記録は `~/libra-run/cloud/<run>-<時刻>/`（launcher.log、setup.log、bridge/bridge.log、bridge/rejected/、result.json）。
    - 前提: ls の `config.toml` に `[workers] enabled = true`（無いと起動を断る）、vast.ai の API キーと SSH 鍵（libra-cloud/README.md）。学習側を止めている間はホストに局が溜まり、再開後に `max_lag_steps` より古い分は捨てられる。
+   - ls のログに `workers: dropped ... stale games` が多いときは、bridge.log の `bridge: pushed weights/latest.pt ... in X s (age Y s)` で重みがホストに届くまでの時間を見る（bridge.json の `push_s` に最大値）。
