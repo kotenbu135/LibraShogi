@@ -146,6 +146,7 @@ class SelfPlayLoop:
         self.wdl = torch.empty((n_games, 3), dtype=torch.float32, pin_memory=pin)
         self.model: InferenceNet | None = None
         self.opponent: InferenceNet | None = None  # 搾取者モード: 凍結した本体。奇数枠では本体が先手
+        self.opponent_prior = False
         # 段ごとの時間（秒の累計）。dict を入れたときだけ測る: collect（CPU）、eval（H2D・forward・D2H、CUDA は同期まで。proof を除く）、
         # proof（根の証明探索、CPU。GPU の評価と重なる）、apply（CPU）
         self.timing: dict | None = None
@@ -160,8 +161,10 @@ class SelfPlayLoop:
         self.model = self._install(self.model, model)
         self.engine.clear_eval_cache()
 
-    def set_opponent(self, model: LibraNet | None) -> None:
+    def set_opponent(self, model: LibraNet | None, opponent_prior: bool = True) -> None:
+        """opponent_prior: 搾取者の手の探索木の中で、本体の手番の葉の方策を本体のネットから取る（価値は搾取者のネット）。"""
         self.opponent = None if model is None else self._install(self.opponent, model)
+        self.opponent_prior = opponent_prior
         if model is not None:
             # 枠ごとに手番でネットが替わるので、前の手の探索（相手の手番のネット）の評価を使えない
             self.engine.set_eval_cache(False)
@@ -177,8 +180,9 @@ class SelfPlayLoop:
         return slot % 2 == 0
 
     @torch.no_grad()
-    def evaluate(self, who: np.ndarray | None = None) -> tuple[torch.Tensor, torch.Tensor]:
-        """self.sq・self.glob を評価する。who[i] が 1 の枠は凍結した本体、0 は自分のネット（搾取者モードのみ）。
+    def evaluate(self, who: np.ndarray | None = None, prior_who: np.ndarray | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+        """self.sq・self.glob を評価する（搾取者モードのみ行を選ぶ）。who[i] が 1 の行は価値を凍結した本体、0 は自分のネットから取る。
+        prior_who[i] が 1 の行は方策を凍結した本体から取る（None なら who と同じ）。
 
         CUDA Graphs が固定バッチなので、搾取者モードでも両方のネットで全枠を評価してから行を選ぶ。"""
         assert self.model is not None
@@ -186,8 +190,9 @@ class SelfPlayLoop:
         if self.opponent is None or who is None:
             return logits, wdl
         o_logits, o_wdl = self.opponent(self.sq, self.glob)
-        mask = torch.from_numpy(np.asarray(who) != 0).to(logits.device, non_blocking=True).unsqueeze(1)
-        return torch.where(mask, o_logits, logits), torch.where(mask, o_wdl, wdl)
+        vmask = torch.from_numpy(np.asarray(who) != 0).to(logits.device, non_blocking=True).unsqueeze(1)
+        pmask = vmask if prior_who is None else torch.from_numpy(np.asarray(prior_who) != 0).to(logits.device, non_blocking=True).unsqueeze(1)
+        return torch.where(pmask, o_logits, logits), torch.where(vmask, o_wdl, wdl)
 
     @torch.no_grad()
     def round(self) -> list[dict]:
@@ -196,13 +201,16 @@ class SelfPlayLoop:
         t0 = time.perf_counter() if tm is not None else 0.0
         self.engine.collect(self.sq_np, self.glob_np)
         t1 = time.perf_counter() if tm is not None else 0.0
-        who = None
+        who = prior_who = None
         if self.opponent is not None:
-            # 手番が搾取者側なら自分のネット、相手側なら凍結した本体（偶数枠は搾取者が先手）
-            turns = self.engine.root_turns()  # 0 先手、1 後手
+            # 根の手番が本体なら、その手の探索木は丸ごと凍結した本体のネットで読む（本体はふだん通りに指す）。
+            # 根の手番が搾取者なら価値は自分のネット。opponent_prior のとき、木の中の本体の手番の葉だけ方策を本体のネットから取り、
+            # 本体の応手を本体の方策で予測する（偶数枠は搾取者が先手）
             slot_swap = (np.arange(self.n_games) % 2).astype(np.int8)
-            who = turns ^ slot_swap  # 0 なら搾取者
-        logits, wdl = self.evaluate(who)
+            who = self.engine.root_turns() ^ slot_swap  # 0 先手・1 後手 → 0 なら搾取者
+            if self.opponent_prior:
+                prior_who = who | (self.engine.leaf_turns() ^ slot_swap)
+        logits, wdl = self.evaluate(who, prior_who)
         self.logits.copy_(logits, non_blocking=True)
         self.wdl.copy_(wdl, non_blocking=True)
         tp = time.perf_counter() if tm is not None else 0.0

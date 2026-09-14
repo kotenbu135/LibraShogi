@@ -165,6 +165,24 @@ def test_gumbel_noise_off_makes_moves_independent_of_seed():
     assert on1 != on2 and any(m != on1[0] for m in on1 + on2)
 
 
+def test_leaf_turns_report_the_side_to_move_of_each_row():
+    """leaf_turns: 未評価の根を出す最初の collect では根の手番と同じ。探索が進むと木の中の相手の手番の葉も出る。"""
+    n = 16
+    sp = librasearch.SelfPlay(CFG, n, seed=5, threads=2)
+    sq = np.zeros((n, 81, ls.SQ_FEATS), np.float32)
+    glob = np.zeros((n, ls.GLOB_FEATS), np.float32)
+    sp.collect(sq, glob)
+    assert (sp.leaf_turns() == sp.root_turns()).all()
+    differ = 0
+    for _ in range(200):
+        sp.apply(*fake_net(sq, glob))
+        sp.collect(sq, glob)
+        leaf, root = sp.leaf_turns(), sp.root_turns()
+        assert set(np.unique(leaf)) <= {0, 1}
+        differ += int((leaf != root).sum())
+    assert differ > 0
+
+
 def test_eval_cache_is_off_by_default_and_can_be_switched_off():
     sp = librasearch.SelfPlay(CFG, 4, seed=1, threads=1)
     assert not sp.eval_cache_enabled()

@@ -184,10 +184,12 @@ class Runner:
         m = LibraNet(NetConfig.from_dict(sd.get("config", {}).get("net", {}))).to(self.device)
         m.load_state_dict(sd["model"])
         assert self.loop is not None
-        self.loop.set_opponent(m)
+        prior = bool(ex.get("opponent_prior", True))
+        self.loop.set_opponent(m, opponent_prior=prior)
         self.opponent_step = sd.get("step")
         self.exploiter_state()["main_step"] = self.opponent_step
-        self.log(f"exploiter: opponent {path} step {sd.get('step', '?')} params {m.n_params()/1e6:.1f}M (even slots: exploiter sente)")
+        self.log(f"exploiter: opponent {path} step {sd.get('step', '?')} params {m.n_params()/1e6:.1f}M (even slots: exploiter sente; "
+                 f"opponent_prior {'on' if prior else 'off'})")
 
     # ---- 凍結相手の作り直しと布石の書き出し（搾取者の run だけ） ----
     def exploiter_state(self) -> dict:

@@ -131,6 +131,7 @@ struct SelfPlay::Game {
   std::uint64_t eval_cache_gen = 0;
   std::uint64_t leaf_hash = 0;  // collect で評価に出した葉の鍵（0 = 数えていない）
   std::uint32_t leaf_aux = 0;
+  std::int8_t leaf_turn = 0;    // collect で評価に出した葉の手番（0 先手、1 後手）。葉を出さない行は根の手番
 
   float root_q() const {
     const Node& r = nodes[0];
@@ -856,6 +857,7 @@ int SelfPlay::collect(float* sq, float* glob) {
     Game& g = *games_[i];
     float* rs = sq + size_t(i) * SQ_NB * SQ_FEATS;
     float* rg = glob + size_t(i) * GLOB_FEATS;
+    g.leaf_turn = g.pos.turn() == BLACK ? 0 : 1;
     if (i >= active_ || g.idle) {
       // 止めている対局: 特徴はゼロのまま（apply で無視する）
       std::fill(rs, rs + SQ_NB * SQ_FEATS, 0.0f);
@@ -880,6 +882,7 @@ int SelfPlay::collect(float* sq, float* glob) {
         g.leaf_aux = aux;
       }
       write_features(g.sp, rs, rg);
+      g.leaf_turn = g.sp.turn() == BLACK ? 0 : 1;
       break;
     }
   });
@@ -1103,6 +1106,10 @@ const SearchResult& SelfPlay::result(int slot) const { return games_[slot]->resu
 
 void SelfPlay::root_turns(std::int8_t* out) const {
   for (size_t i = 0; i < games_.size(); ++i) out[i] = games_[i]->pos.turn() == BLACK ? 0 : 1;
+}
+
+void SelfPlay::leaf_turns(std::int8_t* out) const {
+  for (size_t i = 0; i < games_.size(); ++i) out[i] = games_[i]->leaf_turn;
 }
 
 std::vector<GameRecord> SelfPlay::take_finished() {

@@ -230,6 +230,12 @@ PYBIND11_MODULE(_search, m) {
              s.root_turns(out.mutable_data());
              return out;
            })
+      .def("leaf_turns",
+           [](const SelfPlay& s) {
+             py::array_t<std::int8_t> out(s.n_games());
+             s.leaf_turns(out.mutable_data());
+             return out;
+           })
       .def_property_readonly("active", &SelfPlay::active)
       .def("stats", [](const SelfPlay& s) {
         SelfPlayStats st = s.stats();

@@ -48,6 +48,9 @@ DEFAULTS: dict[str, Any] = {
                   "refresh_hours": 0.0,      # 作り直しの間隔（0 で無効。初回は起動直後に行う）
                   "refresh_steps": 0,        # main_source の step が凍結相手より何 step 進んだら作り直すか（0 で無効）
                   "refresh_check_minutes": 5.0,  # refresh_steps のために main_source の step を読む間隔
+                  # 搾取者の手の探索木の中で、本体の手番の葉の方策を凍結した本体のネットから取る（価値は常に搾取者のネット）。
+                  # 本体の応手を本体の方策で予測する（Wang+ 2023 の A-MCTS に倣う。docs/exploiter-literature.md）。false で木を丸ごと根の手番のネットで評価
+                  "opponent_prior": True,
                   "openings_out": "",        # 見つけた布石の書き出し先（空なら書かない）。本体はこれを読む
                   "openings_minutes": 60.0,
                   "openings_chunks": 50,

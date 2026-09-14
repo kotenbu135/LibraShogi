@@ -116,6 +116,9 @@ class SelfPlay {
   int active() const { return active_; }
   // 各対局のルート（いま考えている手番）の色を書く（0 先手、1 後手）。評価対局で「どちらのネットで読むか」を決めるのに使う
   void root_turns(std::int8_t* out) const;
+  // 直前の collect で各行に書いた葉の手番を書く（0 先手、1 後手。葉を出さなかった行は根の手番）。
+  // 搾取者の探索木の中で、相手の手番の葉の方策を相手のネットから取るのに使う
+  void leaf_turns(std::int8_t* out) const;
   // 外部駆動（cfg.external）: 枠 slot に局面を与えて sims 回読む。読み終わると idle になり result が取れる
   bool set_position(int slot, const std::string& usi_line, int sims, bool full, Mode mode = MODE_TENBIN);
   bool idle(int slot) const;
