@@ -99,7 +99,7 @@ GPU を L-S と共有するので、計測中は ls・lx を停止するか、�
 
 ## 8. desktop で Libra と指す（自分で体感する）
 
-desktop（天秤将棋GUI 0.5.0、`C:\Users\sakis\AppData\Local\天秤将棋GUI\tenbin-shogi-gui.exe`）には Windows 版 `libra.exe` を「LibraShogi 0.0.2」として登録済み（`%APPDATA%\com.fusekishogi.tenbin\engines\libra\engine\`。モデルは同じフォルダの `libra.onnx`、CPU 実行）。
+desktop（天秤将棋GUI 0.5.0、`C:\Users\sakis\AppData\Local\天秤将棋GUI\tenbin-shogi-gui.exe`）には Windows 版 `libra.exe` を「LibraShogi 0.0.2」として登録済み（`%APPDATA%\com.fusekishogi.tenbin\engines\libra\engine\`。モデルは同じフォルダの `libra.onnx`）。2026-09-14 から DirectML 版の DLL（`onnxruntime.dll` 1.24.4・`DirectML.dll`）に差し替え、GPU で読む（`isready` で `info string … provider dml`）。以前の CPU 版は同じフォルダの `*.cpu-prev`、以前の exe は `libra.exe.prev`。学習中の ls・lx と GPU を共有するので、desktop で読ませている間は局/日が少し落ちる。
 
 最新のネットで指すには管理コンソールの「desktop で対局」を押す。WSL の `~/libra-run/ls/checkpoints/latest.onnx` をそのフォルダの `libra.onnx` に写し（`libra.onnx.json` に step と時刻を残す）、desktop を起動する。desktop が既に起動しているときはモデルだけ更新するので、エンジンを立て直す（desktop を開き直す）と新しいネットになる。対局画面でエンジンに「LibraShogi」を選ぶ。無人で行うには `powershell -File libra-console.ps1 -UpdateDesktopModel`。
 
