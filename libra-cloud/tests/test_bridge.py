@@ -11,7 +11,7 @@ import numpy as np
 
 import librasearch
 import librashogi as ls
-from libra_cloud.bridge import NAME, Bridge, LocalTransport, SSHTransport, serve
+from libra_cloud.bridge import NAME, Bridge, LocalTransport, SSHTransport, push_timeout, serve
 from libra_league.config import dump_toml, load_config
 from libra_league.workers import read_games_file, write_games_file
 
@@ -101,6 +101,35 @@ def test_bridge_does_not_pull_until_learner_takes_worker_games(tmp_path: Path):
     assert sum("not pulling" in s for s in logs) == 1
     (run / "inbox").mkdir()  # 学習側が [workers] enabled で起動した
     assert b.cycle() == 2
+
+
+def test_push_failure_does_not_stop_pulling_and_is_retried(tmp_path: Path):
+    """重みの送信が詰まって失敗しても、同じ周回で局を回収する。送れなかった重みは次の周回で送り直す。"""
+    run = _learner(tmp_path)
+    host = tmp_path / "host"
+    (host / "inbox").mkdir(parents=True)
+    write_games_file(host / "inbox", "vast1", 5, "ls", _games(2, 26))
+
+    class StalledPush(LocalTransport):
+        fail = True
+
+        def push(self, src: Path, rel: str) -> None:
+            if self.fail and rel == "weights/latest.pt":
+                raise subprocess.TimeoutExpired(["scp"], 163.0)
+            super().push(src, rel)
+
+    t = StalledPush(host)
+    logs: list[str] = []
+    b = Bridge(run, t, tmp_path / "out", log=logs.append)
+    assert b.cycle() == 2 and b.stats["errors"] == 1 and not (host / "weights" / "latest.pt").exists()
+    assert (host / "openings.json").exists() and any("push weights/latest.pt failed" in s for s in logs)
+    t.fail = False
+    assert b.cycle() == 0 and (host / "weights" / "latest.pt").read_bytes() == b"w1" and b.stats["pushes"]["weights/latest.pt"] == 1
+
+
+def test_push_timeout_scales_with_size():
+    assert push_timeout(0) == 60.0
+    assert 150 < push_timeout(20_501_387) < 170  # ls の fp16 の重み。通常は 10 秒で送れる
 
 
 def test_serve_stops_worker_and_drains(tmp_path: Path):

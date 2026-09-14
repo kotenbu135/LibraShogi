@@ -34,6 +34,14 @@ from libra_league.workers import MAX_FILE_BYTES, GamesFileError, verify_games_fi
 NAME = re.compile(r"^[A-Za-z0-9_]{1,32}-\d{1,16}-\d{1,9}\.npz$")  # write_games_file の名前
 KEEP_REJECTED = 20
 KEY = Path.home() / ".ssh" / "id_ed25519_vast"
+# 送信の打ち切り: 60 秒 + 200 kB/s で送れる時間。インドのホストへ 20 MB の重みは約 10 秒（2 MB/s）で送れたが、
+# TCP の接続が詰まると scp が進まないまま残り、600 秒の打ち切りまで回収も止まった（measurements.md 2026-09-14）
+PUSH_MIN_BPS = 200_000
+ERRORS = (RuntimeError, OSError, subprocess.SubprocessError, tarfile.TarError)
+
+
+def push_timeout(nbytes: int) -> float:
+    return 60.0 + nbytes / PUSH_MIN_BPS
 
 
 class Transport(Protocol):
@@ -109,8 +117,8 @@ class SSHTransport:
     def push(self, src: Path, rel: str) -> None:
         dst = f"{self.root}/{rel}"
         self.ssh(f"mkdir -p {shlex.quote(os.path.dirname(dst))}")
-        subprocess.run(["scp", *self._opts("-P"), str(src), f"root@{self.host}:{dst}.tmp"], check=True, timeout=600,
-                       capture_output=True)
+        subprocess.run(["scp", *self._opts("-P"), str(src), f"root@{self.host}:{dst}.tmp"], check=True,
+                       timeout=push_timeout(src.stat().st_size), capture_output=True)
         self.ssh(f"mv -f {shlex.quote(dst + '.tmp')} {shlex.quote(dst)}")
 
     def stop_worker(self, timeout: float) -> None:
@@ -198,9 +206,15 @@ class Bridge:
             old.unlink(missing_ok=True)
 
     def cycle(self) -> int:
-        self.push_if_changed(self.weights, "weights/latest.pt")
-        if self.openings is not None:
-            self.push_if_changed(self.openings, "openings.json")
+        """送信に失敗しても回収は続ける（送れなかったものは次の周回で送り直す。ワーカーはその間古い重みで打つ）。
+        ホストが落ちていれば回収も失敗するので、serve の打ち切りはそちらで働く。"""
+        pushes = [(self.weights, "weights/latest.pt")] + ([(self.openings, "openings.json")] if self.openings is not None else [])
+        for src, rel in pushes:
+            try:
+                self.push_if_changed(src, rel)
+            except ERRORS as e:
+                self.stats["errors"] += 1
+                self.log(f"bridge: push {rel} failed: {type(e).__name__}: {str(e)[:300]}")
         return self.pull()
 
     def write_status(self) -> None:
@@ -222,7 +236,7 @@ def serve(bridge: Bridge, *, interval: float, deadline: float, stop: Callable[[]
             if n:
                 bridge.log(f"bridge: placed {n} games (total {bridge.stats['games']}, verify {bridge.stats['verify_ms_per_game']} ms/game)")
             first_error = None
-        except (RuntimeError, OSError, subprocess.SubprocessError, tarfile.TarError) as e:
+        except ERRORS as e:
             bridge.stats["errors"] += 1
             first_error = first_error or t0
             bridge.log(f"bridge: error: {type(e).__name__}: {str(e)[:300]}")
@@ -238,7 +252,7 @@ def serve(bridge: Bridge, *, interval: float, deadline: float, stop: Callable[[]
             bridge.t.stop_worker(drain_timeout)
             while bridge.cycle():
                 pass
-        except (RuntimeError, OSError, subprocess.SubprocessError, tarfile.TarError) as e:
+        except ERRORS as e:
             bridge.log(f"bridge: drain failed: {type(e).__name__}: {str(e)[:300]}")
     bridge.write_status()
     bridge.log(f"bridge: exit: {json.dumps(bridge.stats, ensure_ascii=False)}")
