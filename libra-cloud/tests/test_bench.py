@@ -47,6 +47,10 @@ def test_pick_offers_filters_and_sorts():
             _offer(22, 0.14)]
     assert [o["id"] for o in pick_offers(fast, max_dph=0.5, min_cpu_ghz=4.4)] == [20]
     assert [o["id"] for o in pick_offers(fast, max_dph=0.5)] == [22, 21, 20]
+    # 信頼度の下限は短いベンチなら下げられる（途中で落ちてもインスタンスは消す）
+    shaky = [_offer(30, 0.245, reliability2=0.9426), _offer(31, 0.30, reliability2=0.99)]
+    assert [o["id"] for o in pick_offers(shaky, max_dph=0.5)] == [31]
+    assert [o["id"] for o in pick_offers(shaky, max_dph=0.5, min_rel=0.94)] == [30, 31]
 
 
 def test_games_per_day_uses_window_after_warmup():

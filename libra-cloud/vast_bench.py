@@ -152,6 +152,7 @@ def main() -> int:
     ap.add_argument("--min-credit", type=float, default=2.0)
     ap.add_argument("--min-cores", type=int, default=8, help="CPU コア数の下限（ワーカーは 12 スレッド。CPU 律速を避けて比べるときは 16 以上）")
     ap.add_argument("--min-cpu-ghz", type=float, default=0.0, help="CPU の最大周波数の下限（探索の反映は 1 スレッドの速さで決まる。例: 4.4）")
+    ap.add_argument("--min-rel", type=float, default=0.98, help="信頼度の下限（短いベンチで良い CPU のホストを選ぶときに下げる）")
     ap.add_argument("--dry-run", action="store_true", help="オファーを選ぶだけで借りない")
     ap.add_argument("--defer-ab", action="store_true", help="同じホストで search.defer_root_proof を off → on で続けて回す（各 --minutes 分）")
     ap.add_argument("--instance", type=int, default=0, help="借りてあるインスタンスを使う（新しく借りない。終わったら消す）")
@@ -167,10 +168,11 @@ def main() -> int:
         log(f"credit below ${a.min_credit:.2f}; not renting")
         return 2
     min_cuda = image_cuda(a.image)
-    q = (f"gpu_name={a.gpu.replace(' ', '_')} num_gpus=1 rentable=true verified=true reliability>0.98 inet_down>=200 "
+    q = (f"gpu_name={a.gpu.replace(' ', '_')} num_gpus=1 rentable=true verified=true reliability>{a.min_rel} inet_down>=200 "
          f"cuda_max_good>={min_cuda} disk_space>={a.disk}")
     offers = v.search_offers(query=q, type="on-demand", order="dph_total", limit=100, storage=a.disk) or []
-    cands = pick_offers(offers, max_dph=a.max_dph, min_cores=a.min_cores, min_cpu_ghz=a.min_cpu_ghz, min_cuda=min_cuda)
+    cands = pick_offers(offers, max_dph=a.max_dph, min_cores=a.min_cores, min_cpu_ghz=a.min_cpu_ghz, min_cuda=min_cuda,
+                        min_rel=a.min_rel)
     log(f"{len(offers)} offers, {len(cands)} usable; cheapest: "
         + ", ".join(f"#{o['id']} ${o['dph_total']:.3f}/h cpu {o.get('cpu_cores_effective')} {str(o.get('cpu_name'))[:28]} "
                     f"{o.get('cpu_ghz')} GHz {o.get('geolocation', '')}" for o in cands[:3]))
