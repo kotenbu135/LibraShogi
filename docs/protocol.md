@@ -60,7 +60,7 @@ usiok
 
 - `DNN_Provider`: 推論の実行プロバイダ。`auto` は CUDA → DirectML → CPU の順で使えるものを選ぶ（libra-engine/README.md）。
   Windows の配布物は DirectML 版の `onnxruntime.dll` を同梱し、NVIDIA の GPU では CUDA 版の DLL に差し替えると約 4 倍速い（docs/measurements.md 2026-09-14 09:25）。
-  CUDA 版の案内は desktop が出す（ユーザーの決定）。GUI が判定に使えるよう、`isready` でモデルを開いたときに
+  CUDA 版の案内は desktop が出す（ユーザーの決定、tenbin-shogi-desktop#2）。GUI が判定に使えるよう、`isready` でモデルを開いたときに
   `info string model <ファイル名> onnxruntime <版> provider cuda|dml|cpu` を `readyok` の前に出す（実際に使っている実行プロバイダ）。
   先に試した実行プロバイダが失敗して次へ進んだときは、続けて `info string provider fallback <ep>: <理由>` を 1 行出す
   （例: CUDA 版の DLL に差し替えて cuDNN が無いと `provider cpu` の後に `provider fallback cuda: … cudnn64_9.dll …`）。
