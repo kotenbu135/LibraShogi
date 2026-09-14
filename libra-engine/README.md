@@ -43,7 +43,8 @@ Windows 版は `libra.exe` の隣の DLL で実行プロバイダが決まる（
 - **CUDA（NVIDIA の GPU 向け、DirectML の約 4 倍速い）**: `onnxruntime-win-x64-gpu_cuda12-1.30.0.zip` の `lib/` の
   `onnxruntime.dll`・`onnxruntime_providers_cuda.dll`・`onnxruntime_providers_shared.dll` で置き換え
   （`tools/fetch_onnxruntime.sh win-cuda`）、CUDA 12（cudart・cuBLAS・cuFFT）と cuDNN 9 の DLL を隣か PATH に置く。
-  NVIDIA のライブラリは同梱しない。案内は desktop が出す（docs/protocol.md §3）。
+  NVIDIA のライブラリは同梱しない。案内は desktop が出す（docs/protocol.md §3）。cuDNN などが足りないと
+  最初の推論で失敗するので、そのときは CPU に進み `info string provider fallback cuda: <理由>` を出す。
 - **CPU だけ**: `onnxruntime-win-x64-1.30.0.zip`（`tools/fetch_onnxruntime.sh win`）。
 
 実測は docs/measurements.md 2026-09-14 09:25（RTX 5070 Ti で 64 葉のノード/秒が CUDA 約 9,500、DirectML 約 2,300、CPU 約 370）。

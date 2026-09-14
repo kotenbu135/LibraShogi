@@ -62,6 +62,9 @@ usiok
   Windows の配布物は DirectML 版の `onnxruntime.dll` を同梱し、NVIDIA の GPU では CUDA 版の DLL に差し替えると約 4 倍速い（docs/measurements.md 2026-09-14 09:25）。
   CUDA 版の案内は desktop が出す（ユーザーの決定）。GUI が判定に使えるよう、`isready` でモデルを開いたときに
   `info string model <ファイル名> onnxruntime <版> provider cuda|dml|cpu` を `readyok` の前に出す（実際に使っている実行プロバイダ）。
+  先に試した実行プロバイダが失敗して次へ進んだときは、続けて `info string provider fallback <ep>: <理由>` を 1 行出す
+  （例: CUDA 版の DLL に差し替えて cuDNN が無いと `provider cpu` の後に `provider fallback cuda: … cudnn64_9.dll …`）。
+  使えない実行プロバイダ（DLL に含まれないもの）を飛ばしただけのときは出さない。
 - `Declare_Win`: 本将棋で宣言法の条件を満たしたとき `bestmove win` を出す。GUI は `win` を投了として扱う（§4）ので既定は false。ハーネスは true にして起動する。
 - `Mate_Nodes`: 各手の根で行う df-pn 詰み探索の節点数。
 - C++ 版エンジン `libra` / `libra.exe`（`libra-engine/`、ONNX Runtime）と Python 版 `bin/libra-usi-py`（`libra_league/usi_engine.py`）がこの申告を実装している。`bin/libra-usi` は C++ 版を起動する（未ビルドなら Python 版）。desktop には
