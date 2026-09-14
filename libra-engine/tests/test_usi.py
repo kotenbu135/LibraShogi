@@ -137,7 +137,7 @@ def test_batched_leaves_keep_node_budget(engine):
         bm, _ = engine.go("position fuseki moves K*5i K*5a", "movetime 300", timeout=30)
         assert bm not in ("resign", "win")
     finally:
-        engine.send("setoption name DNN_Batch_Size value 1")
+        engine.send("setoption name DNN_Batch_Size value 64")
 
 
 def test_scale_table_places_kings(engine, tmp_path):

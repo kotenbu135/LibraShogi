@@ -39,7 +39,7 @@ Engine::Engine() {
       {"MultiPV", "1"},
       {"Threads", "4"},
       {"DNN_Model", env_or("LIBRA_MODEL", exe_dir() + "/libra.onnx")},
-      {"DNN_Batch_Size", "1"},
+      {"DNN_Batch_Size", "64"},
       {"DNN_Provider", env_or("LIBRA_PROVIDER", "auto")},
       {"Sims_Fuseki", "400"},
       {"Sims_Normal", "800"},
@@ -68,7 +68,7 @@ void Engine::declare_options() const {
   out("option name MultiPV type spin default 1 min 1 max 300");
   out("option name Threads type spin default 4 min 1 max 64");
   out("option name DNN_Model type string default " + opts_.at("DNN_Model"));
-  out("option name DNN_Batch_Size type spin default 1 min 1 max 1024");
+  out("option name DNN_Batch_Size type spin default 64 min 1 max 1024");
   out("option name DNN_Provider type combo default " + opts_.at("DNN_Provider") + " var auto var cuda var dml var cpu");
   out("option name Sims_Fuseki type spin default 400 min 1 max 1000000");
   out("option name Sims_Normal type spin default 800 min 1 max 1000000");

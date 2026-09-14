@@ -33,6 +33,13 @@ cmake --build build-win                  # → build-win/libra-engine/libra.exe 
 （Linux GPU 版に同梱）と cuDNN 9 / CUDA 12 のライブラリが必要（WSL では `bin/libra-usi` が PyTorch 同梱のものを
 `LD_LIBRARY_PATH` に足す）。Windows 版の配布物は CPU 版 `onnxruntime.dll`。DirectML 版の同梱は別途判断。
 
+## 複数葉の同時評価（`DNN_Batch_Size`）
+
+探索木は 1 本のまま、読む先の局面（葉）を最大 `DNN_Batch_Size` 個選んで 1 回の推論にまとめる。評価待ちの枝には
+仮の負け（virtual loss）を置いて同じ葉を選ばないようにし、根の逐次半減も評価待ちを訪問として数える。
+`go nodes N` は評価待ちも含めて N を超えないように選ぶので、報告する `nodes` は 1 葉ずつのときと同じ意味。
+既定は 64（RTX 5070 Ti で 1,600 ノードの思考が 1 葉ずつの約 20 倍速く、64 より大きくしてもほぼ伸びない。docs/measurements.md）。1 にすると従来どおり 1 葉ずつ評価し、探索も従来と同じになる。自己対局（`librasearch.SelfPlay` の collect / apply）には効かない。
+
 ## 環境変数
 
 - `LIBRA_MODEL`: `DNN_Model` の既定値
