@@ -33,6 +33,13 @@ cmake --build build-win                  # → build-win/libra-engine/libra.exe 
 （Linux GPU 版に同梱）と cuDNN 9 / CUDA 12 のライブラリが必要（WSL では `bin/libra-usi` が PyTorch 同梱のものを
 `LD_LIBRARY_PATH` に足す）。Windows 版の配布物は CPU 版 `onnxruntime.dll`。DirectML 版の同梱は別途判断。
 
+Windows で GPU を使うには `libra.exe` の隣の DLL を差し替える（`libra.exe` は同じもの）:
+- DirectML: NuGet の `Microsoft.ML.OnnxRuntime.DirectML`（1.24.4 で更新が止まっている）の `onnxruntime.dll` と
+  `Microsoft.AI.DirectML` の `DirectML.dll`。DirectML EP はメモリパターンと並列実行を切って開く。
+- CUDA: `onnxruntime-win-x64-gpu_cuda12-*.zip` の DLL に加え、CUDA 12（cudart・cuBLAS・cuFFT）と cuDNN 9 の DLL を隣か PATH に置く。
+
+見出し（1.30）より古い版の `onnxruntime.dll` でも動くよう、API は 1.16 の版まで下げて取る（使う関数はすべて 1.16 までにある）。
+
 ## 複数葉の同時評価（`DNN_Batch_Size`）
 
 探索木は 1 本のまま、読む先の局面（葉）を最大 `DNN_Batch_Size` 個選んで 1 回の推論にまとめる。評価待ちの枝には

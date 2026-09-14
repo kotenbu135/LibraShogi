@@ -64,6 +64,10 @@ std::string OrtInfer::version() const { return p_->base ? p_->base->GetVersionSt
 
 using GetApiBaseFn = const OrtApiBase*(ORT_API_CALL*)(void);
 
+// DirectML 版の ONNX Runtime は 1.24 で更新が止まっているので、見出しより古い版の DLL でも動くよう API 版を下げて取る。
+// 使う関数はすべて 1.16 までに入ったもの。OrtApi は末尾に足すだけなので、古い版の表でも前の方は同じ並び
+static const int ORT_API_MIN = 16;
+
 static void* open_lib(const std::string& path) {
 #ifdef _WIN32
   return (void*)LoadLibraryA(path.c_str());
@@ -106,7 +110,7 @@ bool OrtInfer::load(const std::string& lib_path, std::string* err) {
     return false;
   }
   p_->base = f();
-  p_->api = p_->base->GetApi(ORT_API_VERSION);
+  for (int v = ORT_API_VERSION; v >= ORT_API_MIN && !p_->api; --v) p_->api = p_->base->GetApi(v);
   if (!p_->api) {
     if (err) *err = std::string("ONNX Runtime ") + p_->base->GetVersionString() + " is older than the API this build needs (" + std::to_string(ORT_API_VERSION) + ")";
     return false;
@@ -176,8 +180,17 @@ bool OrtInfer::open(const std::string& model_path, int threads, const std::strin
         } else appended = false;
       }
     } else if (ep == "dml") {
+      // DirectML EP はメモリパターンの最適化と並列実行を使えない（ONNX Runtime の DirectML EP の説明）。
+      // 追加には OrtDmlApi の先頭の関数 SessionOptionsAppendExecutionProvider_DML(options, device_id) を使う
+      struct DmlApiHead {
+        OrtStatus* (ORT_API_CALL* append)(OrtSessionOptions* options, int device_id);
+      };
+      const void* dml = nullptr;
       if (!has_provider(I.api, "DmlExecutionProvider")) appended = false;
-      else appended = I.ok(I.api->SessionOptionsAppendExecutionProvider(so, "DML", nullptr, nullptr, 0), &e);
+      else if (!I.ok(I.api->DisableMemPattern(so), &e) || !I.ok(I.api->SetSessionExecutionMode(so, ORT_SEQUENTIAL), &e) ||
+               !I.ok(I.api->GetExecutionProviderApi("DML", ORT_API_MIN, &dml), &e) || !dml)
+        appended = false;
+      else appended = I.ok(static_cast<const DmlApiHead*>(dml)->append(so, 0), &e);
     } else if (ep != "cpu") {
       appended = false;
       e = "unknown provider " + ep;
