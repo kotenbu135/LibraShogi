@@ -34,6 +34,9 @@ struct SearchConfig {
   int proof_min_ply = 36;        // 証明探索を始める手数
   bool external = false;         // 外部駆動（USI エンジン用）: 局面は set_position で与え、手は指さず結果を返す
   bool defer_root_proof = false; // 根の証明探索を proof() の段に回す（根の評価を先に出す。棋譜は変わらない。external では無視）
+  // 対局ごとに直近の手の探索で評価した局面のネットの出力を持ち、特徴量が同じ葉は評価に出さずに collect の中で展開する
+  // （棋譜は変わらない。ネットの重みを替えたら clear_eval_cache を呼ぶ。手番ごとに別のネットで評価する使い方では切る。external では無視）
+  bool eval_cache = false;
   std::vector<int> king_pairs;   // 自己対局の玉配置を限定する（kb0, kw0, kb1, kw1, ...）。空なら 36×36 から一様
   std::vector<std::vector<std::uint32_t>> openings;  // 開始局面の手順（玉 2 手を含む）。搾取者が見つけた布石を本体の分布に混ぜる
   float openings_prob = 0.0f;    // 新規対局が openings から始まる確率
@@ -76,6 +79,7 @@ struct GameRecord {
 
 struct SelfPlayStats {
   std::uint64_t games = 0, moves = 0, sims = 0, evals = 0;
+  std::uint64_t cache_hits = 0;  // 評価に出さずにキャッシュから展開した葉（eval_cache）
   std::uint64_t mate_found = 0, proof_found = 0, proof_nodes = 0, proof_calls = 0;  // 証明探索の統計
   std::uint64_t results[3] = {0, 0, 0};  // 先手勝ち・引き分け・後手勝ち
   std::uint64_t ruling41 = 0, no_legal = 0, sennichite = 0, perpetual = 0, max_ply = 0, timeout = 0;
@@ -99,6 +103,13 @@ class SelfPlay {
   SelfPlayStats stats() const { return stats_; }
   void set_active(int n);  // 同時進行数を絞る（throttle）。n 以降の対局は止めたまま保持する
   void set_openings(std::vector<std::vector<std::uint32_t>> openings, float prob);  // 対局の合間（collect/apply の外）に呼ぶ
+  // eval_cache: ネットの重みを替えたら呼ぶ（持っている評価を捨てる）。collect/apply の外で呼ぶ
+  void clear_eval_cache() { ++eval_gen_; }
+  void set_eval_cache(bool on) {
+    cfg_.eval_cache = on;
+    ++eval_gen_;
+  }
+  bool eval_cache() const { return cfg_.eval_cache; }
   int active() const { return active_; }
   // 各対局のルート（いま考えている手番）の色を書く（0 先手、1 後手）。評価対局で「どちらのネットで読むか」を決めるのに使う
   void root_turns(std::int8_t* out) const;
@@ -124,10 +135,13 @@ class SelfPlay {
   int active_;
   int threads_;
   std::mt19937_64 rng_;
+  std::uint64_t eval_gen_ = 1;  // clear_eval_cache のたびに進める。対局のキャッシュの世代と違えば捨てる
   // 対局ごとの処理はその対局のデータだけを触る（並列に呼べる）。統計と終局記録は対局側に貯め、あとで集める
   void step_game(Game& g);  // 次の葉まで進める（終局・着手・新規対局を含む）
   int descend(Game& g);     // ルートから 1 回選ぶ（selfplay.cpp の戻り値の説明）
   void apply_game(Game& g, const float* logits, const float* wdl);
+  // 葉の鍵（h, aux）がキャッシュにあれば展開する。0 = 無い、1 = 展開した（次の葉へ進める）、2 = 本将棋の根を展開して証明探索の結果を待つ
+  int use_cached(Game& g, std::uint64_t h, std::uint32_t aux);
   void finish_move(Game& g);
   void play_forced(Game& g, Move m, float value);
   void start_game(Game& g);

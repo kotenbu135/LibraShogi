@@ -127,8 +127,10 @@ def _quiet_inductor() -> None:
 class SelfPlayLoop:
     def __init__(self, search_cfg: dict, n_games: int, threads: int, seed: int, device: torch.device, infer_dtype: str = "float16",
                  compile: str = "none"):
-        # 根の証明探索は round() で GPU が評価している間に解く（CPU の apply から外す。棋譜は変わらない）。設定の false で切れる
-        self.engine = librasearch.SelfPlay({"defer_root_proof": True, **search_cfg}, n_games, seed, threads)
+        # 根の証明探索は round() で GPU が評価している間に解く（CPU の apply から外す。棋譜は変わらない）。設定の false で切れる。
+        # 対局ごとのネットの出力のキャッシュ（eval_cache）: 直近 3 手の探索で評価した局面を評価に出さない（棋譜は変わらない）。
+        # 重みを替えるたびに捨て（set_model）、手番ごとに別のネットで評価する搾取者モードでは切る（set_opponent）。[search] eval_cache = false で切れる
+        self.engine = librasearch.SelfPlay({"defer_root_proof": True, "eval_cache": True, **search_cfg}, n_games, seed, threads)
         self.n_games = n_games
         self.device = device
         self.dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[infer_dtype]
@@ -156,9 +158,14 @@ class SelfPlayLoop:
     def set_model(self, model: LibraNet) -> None:
         """学習中のモデルの重みを推論用の写しに移す（写しは 1 回だけ作る）。"""
         self.model = self._install(self.model, model)
+        self.engine.clear_eval_cache()
 
     def set_opponent(self, model: LibraNet | None) -> None:
         self.opponent = None if model is None else self._install(self.opponent, model)
+        if model is not None:
+            # 枠ごとに手番でネットが替わるので、前の手の探索（相手の手番のネット）の評価を使えない
+            self.engine.set_eval_cache(False)
+        self.engine.clear_eval_cache()
 
     def release(self) -> None:
         for net in (self.model, self.opponent):

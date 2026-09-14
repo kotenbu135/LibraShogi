@@ -102,3 +102,56 @@ def test_deferred_root_proof_keeps_records():
             assert abs(len(g) - len(r)) <= 1, (threads, call_proof, slot)
         assert len(got_list) >= n_ref - len(ref)
         assert st["mate_found"] > 0 and st["proof_found"] > 0  # 本将棋の詰み探索と布石の証明探索の両方の経路を通る
+
+
+def play_cached(threads, call_proof, clear_every=0, n_games=40, rounds=2000):
+    sp = librasearch.SelfPlay({**CFG, "defer_root_proof": True, "eval_cache": True}, n_games, seed=7, threads=threads)
+    assert sp.eval_cache_enabled()
+    sq = np.zeros((n_games, 81, ls.SQ_FEATS), np.float32)
+    glob = np.zeros((n_games, ls.GLOB_FEATS), np.float32)
+    done = []
+    for r in range(rounds):
+        sp.collect(sq, glob)
+        logits, wdl = fake_net(sq, glob)
+        if call_proof:
+            sp.proof()
+        sp.apply(logits, wdl)
+        done += sp.take_finished()
+        if clear_every and r % clear_every == clear_every - 1:
+            sp.clear_eval_cache()  # 重みを替えたときと同じ
+    return done, sp.stats()
+
+
+def test_eval_cache_keeps_records_and_saves_evals():
+    """対局ごとのネットの出力のキャッシュ（eval_cache）: 特徴量が同じ葉を評価に出さずに展開しても各枠の棋譜は変わらない
+    （疑似ネットは特徴量だけで決まるので、キャッシュの値は評価し直した値と同じ）。重みの入れ替え（clear_eval_cache）を挟んでも同じ。
+    当たった分だけ 1 ラウンドで先へ進む。"""
+    ref_list, ref_st = play(1)
+    ref = by_slot(ref_list)
+    for threads, call_proof, clear_every in ((1, True, 0), (8, True, 0), (8, False, 37)):
+        got_list, st = play_cached(threads, call_proof, clear_every)
+        got = by_slot(got_list)
+        compared = 0
+        for slot in set(ref) | set(got):
+            g, r = got.get(slot, []), ref.get(slot, [])
+            k = min(len(g), len(r))
+            assert g[:k] == r[:k], (threads, call_proof, clear_every, slot)
+            compared += k
+        assert compared >= len(ref_list) - len(ref), (threads, compared)
+        assert st["cache_hits"] > 0.05 * (st["evals"] + st["cache_hits"]), st
+        assert st["moves"] > ref_st["moves"] and len(got_list) >= len(ref_list), (st["moves"], ref_st["moves"])
+        assert st["mate_found"] > 0 and st["proof_found"] > 0
+
+
+def test_eval_cache_is_off_by_default_and_can_be_switched_off():
+    sp = librasearch.SelfPlay(CFG, 4, seed=1, threads=1)
+    assert not sp.eval_cache_enabled()
+    sp = librasearch.SelfPlay({**CFG, "eval_cache": True}, 4, seed=1, threads=1)
+    sp.set_eval_cache(False)
+    assert not sp.eval_cache_enabled()
+    sq = np.zeros((4, 81, ls.SQ_FEATS), np.float32)
+    glob = np.zeros((4, ls.GLOB_FEATS), np.float32)
+    for _ in range(300):
+        sp.collect(sq, glob)
+        sp.apply(*fake_net(sq, glob))
+    assert sp.stats()["cache_hits"] == 0

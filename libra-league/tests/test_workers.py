@@ -351,6 +351,25 @@ def test_selfplay_round_timing():
     assert tm["rounds"] == 5 and all(tm[k] > 0 for k in ("collect", "eval", "apply")) and tm["proof"] >= 0
 
 
+def test_selfplay_loop_eval_cache_on_for_self_play_and_off_for_exploiter():
+    """自己対局のループはネットの出力のキャッシュを使い（重みを替えるたびに捨てる）、搾取者モード（手番でネットが替わる）では切る。"""
+    from libra_league.selfplay import SelfPlayLoop
+
+    torch.manual_seed(0)
+    cfg = load_config(None)
+    cfg["search"].update({"full_sims": 8, "fast_sims": 8, "proof_nodes": 0, "mate_nodes_root": 0, "max_moves_per_game": 30})
+    loop = SelfPlayLoop(cfg["search"], 4, 1, 3, torch.device("cpu"), "float32")
+    assert loop.engine.eval_cache_enabled()
+    loop.set_model(LibraNet(NetConfig.from_dict(NET)))
+    for _ in range(200):
+        loop.round()
+    assert loop.stats()["cache_hits"] > 0
+    loop.set_opponent(LibraNet(NetConfig.from_dict(NET)))
+    assert not loop.engine.eval_cache_enabled()
+    off = SelfPlayLoop({**cfg["search"], "eval_cache": False}, 4, 1, 3, torch.device("cpu"), "float32")
+    assert not off.engine.eval_cache_enabled()
+
+
 def test_runner_ingests_games_from_worker_process(tmp_path: Path):
     """学習側（run --no-supervise）とワーカーを別プロセスで回し、ワーカーの局が学習側の窓に入り、停止で両方抜けること。"""
     cfg = _tiny_cfg(tmp_path)

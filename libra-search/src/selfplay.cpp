@@ -47,6 +47,22 @@ float edge_q_vl(const Node& parent, const Edge& e) {
   return (e.wsum - float(e.vloss)) / float(e.visits + e.vloss);
 }
 
+constexpr int kCacheMoves = 3;  // eval_cache: 直近何手の探索の評価を持つか（当たりはほぼ 2 手前まで。measurements.md 2026-09-14）
+constexpr int kCacheHops = 64;  // eval_cache: 1 対局が 1 回の collect で当たりをたどる上限
+
+// eval_cache の鍵。ネットの入力（write_features）は、局面キー（盤・持ち駒・手番）と、段階・布石の手数・本将棋の手数・
+// 繰り返しの回数・モード（aux にまとめる）だけで決まる（手数の上限は対局を通して同じ）。特徴量を書かずに引けるよう、
+// この組を鍵にする。h は表の番号で、当たりは局面キーと aux の一致で決める
+std::uint64_t eval_key(const Position& p, std::uint32_t& aux) {
+  const bool fuseki = p.phase() == PHASE_FUSEKI;
+  const std::uint32_t t = std::uint32_t(fuseki ? p.ply() : p.normal_ply()) & 0xFFFF;
+  const std::uint32_t rep = fuseki ? 0 : std::uint32_t(std::min(p.repetition_count(), 255));
+  aux = t | (rep << 16) | (std::uint32_t(fuseki) << 24) | (std::uint32_t(p.mode()) << 25);
+  std::uint64_t h = p.key() ^ (std::uint64_t(aux) * 0x9E3779B97F4A7C15ull);
+  h ^= h >> 31;
+  return h | 1;  // 0 は「数えていない」の印
+}
+
 Node make_node(std::uint64_t key) {
   Node n;
   n.key = key;
@@ -103,6 +119,18 @@ struct SelfPlay::Game {
     std::vector<Move> moves;
   };
   std::vector<Pending> batch;
+  // ネットの出力のキャッシュ（cfg.eval_cache）: 特徴量のハッシュ → 展開した辺と値。直近 kCacheMoves 手の探索で評価したもの
+  struct CachedEval {
+    std::uint64_t key = 0;  // 局面キー
+    std::uint32_t aux = 0;  // 段階・手数・繰り返しの回数・モード（eval_key）
+    int move_no = 0;        // 評価したときの moves_made
+    float net_value = 0;
+    std::vector<Edge> edges;  // 事前確率まで入れた辺（訪問数・子は空）
+  };
+  std::unordered_map<std::uint64_t, CachedEval> eval_cache;
+  std::uint64_t eval_cache_gen = 0;
+  std::uint64_t leaf_hash = 0;  // collect で評価に出した葉の鍵（0 = 数えていない）
+  std::uint32_t leaf_aux = 0;
 
   float root_q() const {
     const Node& r = nodes[0];
@@ -130,6 +158,8 @@ void SelfPlay::set_openings(std::vector<std::vector<std::uint32_t>> openings, fl
 void SelfPlay::set_active(int n) { active_ = std::max(1, std::min(n, int(games_.size()))); }
 
 void SelfPlay::start_game(Game& g) {
+  g.eval_cache.clear();
+  g.leaf_hash = 0;
   g.pos.reset(MODE_TENBIN);
   g.pos.set_max_ply(cfg_.max_ply, cfg_.count_from_41);
   if (cfg_.external) {
@@ -395,6 +425,10 @@ void SelfPlay::finish_move(Game& g) {
   g.pos.do_move(root.edges[best].move);
   g.moves_made++;
   g.st.moves++;
+  for (auto it = g.eval_cache.begin(); it != g.eval_cache.end();) {
+    if (it->second.move_no + kCacheMoves <= g.moves_made) it = g.eval_cache.erase(it);
+    else ++it;
+  }
   g.st.sims += g.sims;
   g.nodes.clear();
   g.table.clear();
@@ -558,6 +592,16 @@ void SelfPlay::step_game(Game& g) {
     }
     if (!g.root_ready) init_root_search(g, cfg_);
     if (g.sims >= g.budget) {
+      if (g.proof_state == 1) {
+        // eval_cache で根の証明探索の結果より先に読み終えた: 指す前にここで解く（証明できれば読みを捨てて証明手）
+        g.proof_move = root_proof(g, g.proof_value);
+        g.proof_state = 0;
+        if (g.proof_move != MOVE_NONE) {
+          g.nodes.clear();
+          play_forced(g, g.proof_move, g.proof_value);
+          continue;
+        }
+      }
       finish_move(g);
       continue;
     }
@@ -686,6 +730,7 @@ void SelfPlayStats::add(const SelfPlayStats& o) {
   moves += o.moves;
   sims += o.sims;
   evals += o.evals;
+  cache_hits += o.cache_hits;
   mate_found += o.mate_found;
   proof_found += o.proof_found;
   proof_nodes += o.proof_nodes;
@@ -784,21 +829,93 @@ void SelfPlay::gather() {
   }
 }
 
+// 展開した葉（edges と net_value が入った）の値を経路に沿って逆伝播し、作業局面をルートに戻す
+static void finish_leaf(SelfPlay::Game& g, Node& leaf) {
+  leaf.expanded = true;
+  float v = leaf.net_value;
+  leaf.visits++;
+  leaf.wsum += v;
+  for (int k = int(g.path.size()) - 1; k >= 0; --k) {
+    v = -v;
+    Node& pn = g.nodes[g.path[k].first];
+    Edge& pe = pn.edges[g.path[k].second];
+    pe.visits++;
+    pe.wsum += v;
+    pn.visits++;
+    pn.wsum += v;
+  }
+  for (size_t i = 0; i < g.path_moves.size(); ++i) g.sp.undo_move();
+  if (g.leaf != 0) g.sims++;  // ルート自身の評価は数えない
+  g.pending = false;
+}
+
 int SelfPlay::collect(float* sq, float* glob) {
   int n = int(games_.size());
+  const bool cache = cfg_.eval_cache && !cfg_.external;
   parallel_for(n, [&](int i) {
     Game& g = *games_[i];
+    float* rs = sq + size_t(i) * SQ_NB * SQ_FEATS;
+    float* rg = glob + size_t(i) * GLOB_FEATS;
     if (i >= active_ || g.idle) {
       // 止めている対局: 特徴はゼロのまま（apply で無視する）
-      std::fill(sq + size_t(i) * SQ_NB * SQ_FEATS, sq + size_t(i + 1) * SQ_NB * SQ_FEATS, 0.0f);
-      std::fill(glob + size_t(i) * GLOB_FEATS, glob + size_t(i + 1) * GLOB_FEATS, 0.0f);
+      std::fill(rs, rs + SQ_NB * SQ_FEATS, 0.0f);
+      std::fill(rg, rg + GLOB_FEATS, 0.0f);
       return;
     }
-    if (!g.pending) step_game(g);
-    write_features(g.sp, sq + size_t(i) * SQ_NB * SQ_FEATS, glob + size_t(i) * GLOB_FEATS);
+    // eval_cache: 葉がキャッシュにあればその場で展開して次の葉へ進み、無い葉だけ特徴を書いて評価に出す
+    for (int hop = 0;; ++hop) {
+      if (!g.pending) step_game(g);
+      g.leaf_hash = 0;
+      if (cache && !g.idle && g.pending && hop < kCacheHops) {
+        std::uint32_t aux;
+        std::uint64_t h = eval_key(g.sp, aux);
+        int c = use_cached(g, h, aux);
+        if (c == 1) continue;
+        if (c == 2) {  // 根を展開して証明探索の結果を待つ: この回は評価に出す葉が無い（行はゼロ。apply が続きを進める）
+          std::fill(rs, rs + SQ_NB * SQ_FEATS, 0.0f);
+          std::fill(rg, rg + GLOB_FEATS, 0.0f);
+          break;
+        }
+        g.leaf_hash = h;
+        g.leaf_aux = aux;
+      }
+      write_features(g.sp, rs, rg);
+      break;
+    }
   });
   gather();
   return n;
+}
+
+int SelfPlay::use_cached(Game& g, std::uint64_t h, std::uint32_t aux) {
+  if (g.eval_cache_gen != eval_gen_) {  // 重みが替わった
+    g.eval_cache.clear();
+    g.eval_cache_gen = eval_gen_;
+    return 0;
+  }
+  auto it = g.eval_cache.find(h);
+  if (it == g.eval_cache.end() || it->second.key != g.nodes[g.leaf].key || it->second.aux != aux) return 0;
+  g.st.cache_hits++;
+  if (g.proof_state == 1 && g.pos.phase() == PHASE_FUSEKI) {
+    // 布石の根の証明探索は、木の中の証明探索と df-pn の置換表を共有するので、先に木を進めると結果が変わりうる。
+    // 評価に出さないのでここで解く（proof() を呼ばなかった apply と同じ順序）
+    g.proof_move = root_proof(g, g.proof_value);
+    g.proof_state = 0;
+    if (g.proof_move != MOVE_NONE) {
+      g.nodes.clear();
+      g.pending = false;
+      play_forced(g, g.proof_move, g.proof_value);
+      return 1;
+    }
+  }
+  Node& leaf = g.nodes[g.leaf];
+  leaf.edges = it->second.edges;
+  leaf.net_value = it->second.net_value;
+  finish_leaf(g, leaf);
+  // 本将棋の根の詰み探索（proof_state 1）はそのまま proof()（GPU の評価中）に残し、根を展開したところで止まる。
+  // 先に探索を進めると、証明できて読みを捨てたときに対局の乱数（Gumbel ノイズ・全読みの抽選）を余分に使って棋譜が変わるため。
+  // apply が証明できていれば証明手を指し、できていなければ探索を続ける
+  return g.proof_state == 1 ? 2 : 1;
 }
 
 void SelfPlay::apply_game(Game& g, const float* logits, const float* wdl) {
@@ -821,30 +938,28 @@ void SelfPlay::apply_game(Game& g, const float* logits, const float* wdl) {
   }
   for (Edge& e : leaf.edges) e.prior = std::max(e.prior / z, 1e-8f);
   leaf.net_value = wdl_value(wdl);
-  leaf.expanded = true;
-  float v = leaf.net_value;
-  leaf.visits++;
-  leaf.wsum += v;
-  for (int k = int(g.path.size()) - 1; k >= 0; --k) {
-    v = -v;
-    Node& pn = g.nodes[g.path[k].first];
-    Edge& pe = pn.edges[g.path[k].second];
-    pe.visits++;
-    pe.wsum += v;
-    pn.visits++;
-    pn.wsum += v;
+  if (g.leaf_hash != 0 && cfg_.eval_cache && !cfg_.external) {
+    if (g.eval_cache_gen != eval_gen_) {
+      g.eval_cache.clear();
+      g.eval_cache_gen = eval_gen_;
+    }
+    Game::CachedEval& c = g.eval_cache[g.leaf_hash];
+    c.key = leaf.key;
+    c.aux = g.leaf_aux;
+    c.move_no = g.moves_made;
+    c.net_value = leaf.net_value;
+    c.edges = leaf.edges;
   }
-  for (size_t i = 0; i < g.path_moves.size(); ++i) sp.undo_move();
-  if (g.leaf != 0) g.sims++;  // ルート自身の評価は数えない
+  g.leaf_hash = 0;
+  finish_leaf(g, leaf);
   g.st.evals++;
-  g.pending = false;
 }
 
 void SelfPlay::apply(const float* logits, const float* wdl) {
   int n = std::min(active_, int(games_.size()));
   parallel_for(n, [&](int i) {
     Game& g = *games_[i];
-    if (g.idle || !g.pending) return;
+    if (g.idle || (!g.pending && g.proof_state == 0)) return;
     if (g.proof_state == 1) {  // proof() が呼ばれなかった: ここで解く
       g.proof_move = root_proof(g, g.proof_value);
       g.proof_state = 2;
@@ -859,6 +974,10 @@ void SelfPlay::apply(const float* logits, const float* wdl) {
         step_game(g);
         return;
       }
+    }
+    if (!g.pending) {  // eval_cache で根を展開して証明探索の結果を待っていた（この回の行は使わない）
+      step_game(g);
+      return;
     }
     apply_game(g, logits + size_t(i) * POLICY_SIZE, wdl + size_t(i) * 3);
     step_game(g);  // 次の葉まで進める（終局・着手を含む）

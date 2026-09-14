@@ -47,6 +47,7 @@ SearchConfig config_from_dict(const py::dict& d) {
   geti("proof_min_ply", c.proof_min_ply);
   getb("external", c.external);
   getb("defer_root_proof", c.defer_root_proof);
+  getb("eval_cache", c.eval_cache);
   return c;
 }
 
@@ -171,6 +172,9 @@ PYBIND11_MODULE(_search, m) {
            })
       .def("set_active", &SelfPlay::set_active)
       .def("set_openings", &SelfPlay::set_openings, py::arg("openings"), py::arg("prob"))
+      .def("clear_eval_cache", &SelfPlay::clear_eval_cache)
+      .def("set_eval_cache", &SelfPlay::set_eval_cache, py::arg("on"))
+      .def("eval_cache_enabled", &SelfPlay::eval_cache)
       .def("set_position", [](SelfPlay& s, int slot, const std::string& line, int sims, bool full, const std::string& mode) { return s.set_position(slot, line, sims, full, mode == "fuseki" ? MODE_FUSEKI : MODE_TENBIN); }, py::arg("slot"), py::arg("usi_line"), py::arg("sims"), py::arg("full") = true, py::arg("mode") = "tenbin")
       .def("collect_batch",
            [](SelfPlay& s, int slot, py::array_t<float, py::array::c_style> sq, py::array_t<float, py::array::c_style> glob) {
@@ -233,6 +237,7 @@ PYBIND11_MODULE(_search, m) {
         d["moves"] = st.moves;
         d["sims"] = st.sims;
         d["evals"] = st.evals;
+        d["cache_hits"] = st.cache_hits;
         d["sente_wins"] = st.results[0];
         d["draws"] = st.results[1];
         d["gote_wins"] = st.results[2];
