@@ -280,7 +280,7 @@ static void init_root_search(SelfPlay::Game& g, const SearchConfig& cfg) {
   g.gumbel.assign(root.edges.size(), 0.0f);
   std::vector<int> order(root.edges.size());
   for (size_t i = 0; i < root.edges.size(); ++i) {
-    g.gumbel[i] = gumbel_noise(g.rng);
+    if (cfg.gumbel_noise) g.gumbel[i] = gumbel_noise(g.rng);
     order[i] = int(i);
   }
   std::sort(order.begin(), order.end(), [&](int a, int b) {

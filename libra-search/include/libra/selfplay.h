@@ -37,7 +37,10 @@ struct SearchConfig {
   // 対局ごとに直近の手の探索で評価した局面のネットの出力を持ち、特徴量が同じ葉は評価に出さずに collect の中で展開する
   // （棋譜は変わらない。ネットの重みを替えたら clear_eval_cache を呼ぶ。手番ごとに別のネットで評価する使い方では切る。external では無視）
   bool eval_cache = false;
-  std::vector<int> king_pairs;   // 自己対局の玉配置を限定する（kb0, kw0, kb1, kw1, ...）。空なら 36×36 から一様
+  // 根の Gumbel ノイズ。false なら候補の絞り込みと最終選択を log π + σ(q̂) だけで行う（手が乱数に依らない。評価・計測用。
+  // 自己対局は true のまま。玉配置と布石は乱数で選ぶ）
+  bool gumbel_noise = true;
+  std::vector<int> king_pairs;  // 自己対局の玉配置を限定する（kb0, kw0, kb1, kw1, ...）。空なら 36×36 から一様
   std::vector<std::vector<std::uint32_t>> openings;  // 開始局面の手順（玉 2 手を含む）。搾取者が見つけた布石を本体の分布に混ぜる
   float openings_prob = 0.0f;    // 新規対局が openings から始まる確率
   bool prune_gote_rank4 = false; // 後手玉を一〜三段目に限る（四段目は桂打ちで先手の裁定勝ち。libra-scale の剪定と同じ）

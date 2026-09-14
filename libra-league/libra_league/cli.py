@@ -44,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     p_ev.add_argument("--concurrent", type=int, default=128)
     p_ev.add_argument("--threads", type=int, default=8)
     p_ev.add_argument("--seed", type=int, default=0)
+    p_ev.add_argument("--no-noise", action="store_true", help="根の Gumbel ノイズを切る（手を乱数で選ばない。エンジンとしての強さに近い条件）")
     p_ev.add_argument("--out", default=None, help="結果 JSON の出力先（既定: <run>/eval/<時刻>.json）")
     p_m = sub.add_parser("match", help="計測: Libra（USI）と外部エンジンを無人対局させ棋譜を JSONL に残す")
     p_m.add_argument("--games", type=int, default=20)
@@ -147,6 +148,8 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_config(sd.config_toml if sd.config_toml.exists() else None)
         scfg = dict(cfg["search"])
         scfg["full_sims"] = a.sims
+        if a.no_noise:
+            scfg["gumbel_noise"] = False
         out = Path(a.out) if a.out else sd.root / "eval" / (time.strftime("%Y%m%d-%H%M%S") + ".json")
         res = main_eval(Path(a.a), Path(a.b), scfg, a.games, a.concurrent, a.threads, a.seed, out)
         print(json.dumps({k: v for k, v in res.items() if not k.startswith("calibration")}, ensure_ascii=False))

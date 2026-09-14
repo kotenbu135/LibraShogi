@@ -143,6 +143,28 @@ def test_eval_cache_keeps_records_and_saves_evals():
         assert st["mate_found"] > 0 and st["proof_found"] > 0
 
 
+def test_gumbel_noise_off_makes_moves_independent_of_seed():
+    """gumbel_noise = false（評価・計測用）: 玉配置を 1 つに固定し全読みにすると、seed が違っても同じ手順になる。
+    既定（ノイズあり）では seed で手順が変わる。"""
+    cfg = {**CFG, "full_prob": 1.0, "king_pairs": [[4 * 9 + 8, 4 * 9 + 0]]}  # 5i・5a
+
+    def moves(seed, noise):
+        sp = librasearch.SelfPlay({**cfg, "gumbel_noise": noise}, 4, seed=seed, threads=2)
+        sq = np.zeros((4, 81, ls.SQ_FEATS), np.float32)
+        glob = np.zeros((4, ls.GLOB_FEATS), np.float32)
+        done = []
+        while len(done) < 4:
+            sp.collect(sq, glob)
+            sp.apply(*fake_net(sq, glob))
+            done += sp.take_finished()
+        return [list(g["moves"]) for g in done[:4]]
+
+    off = moves(1, False)
+    assert all(m == off[0] for m in off) and moves(2, False)[0] == off[0]
+    on1, on2 = moves(1, True), moves(2, True)
+    assert on1 != on2 and any(m != on1[0] for m in on1 + on2)
+
+
 def test_eval_cache_is_off_by_default_and_can_be_switched_off():
     sp = librasearch.SelfPlay(CFG, 4, seed=1, threads=1)
     assert not sp.eval_cache_enabled()

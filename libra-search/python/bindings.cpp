@@ -48,6 +48,7 @@ SearchConfig config_from_dict(const py::dict& d) {
   getb("external", c.external);
   getb("defer_root_proof", c.defer_root_proof);
   getb("eval_cache", c.eval_cache);
+  getb("gumbel_noise", c.gumbel_noise);
   return c;
 }
 

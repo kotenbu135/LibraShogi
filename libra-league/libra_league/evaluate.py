@@ -127,6 +127,7 @@ def play_match(model_a: LibraNet, model_b: LibraNet, search_cfg: dict, n_games: 
         "calibration_a": calibration(games, a_moved),
         "calibration_b": calibration(games, lambda g, j: not a_moved(g, j)),
         "sims": cfg.get("full_sims"),
+        "gumbel_noise": bool(cfg.get("gumbel_noise", True)),
         "seconds": round(time.time() - t0, 1),
     }
 
