@@ -42,6 +42,7 @@ struct OrtInfer::Impl {
   OrtSession* session = nullptr;
   OrtMemoryInfo* mi = nullptr;
   std::string provider = "none";
+  std::string fallback;
   ~Impl() {
     if (!api) return;
     if (session) api->ReleaseSession(session);
@@ -60,6 +61,7 @@ OrtInfer::OrtInfer() : p_(new Impl) {}
 OrtInfer::~OrtInfer() = default;
 bool OrtInfer::is_open() const { return p_->session != nullptr; }
 std::string OrtInfer::provider() const { return p_->provider; }
+std::string OrtInfer::fallback() const { return p_->fallback; }
 std::string OrtInfer::version() const { return p_->base ? p_->base->GetVersionString() : ""; }
 
 using GetApiBaseFn = const OrtApiBase*(ORT_API_CALL*)(void);
@@ -147,6 +149,7 @@ bool OrtInfer::open(const std::string& model_path, int threads, const std::strin
   if (!I.env && !I.ok(I.api->CreateEnv(ORT_LOGGING_LEVEL_ERROR, "libra", &I.env), err)) return false;
   if (!I.mi && !I.ok(I.api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &I.mi), err)) return false;
 
+  I.fallback.clear();
   std::vector<std::string> order;
   if (provider == "auto") order = {"cuda", "dml", "cpu"};
   else if (provider == "cpu") order = {"cpu"};
@@ -209,10 +212,19 @@ bool OrtInfer::open(const std::string& model_path, int threads, const std::strin
     }
     I.session = s;
     I.provider = ep;
-    // 暖機（CUDA は最初の Run が遅い）
+    // 暖機（CUDA は最初の Run が遅い）。CUDA は cuDNN の DLL が無くてもセッションは作れて、最初の Run で失敗する。
+    // そのときは次の実行プロバイダへ進む（CUDA 版の DLL に差し替えて cuDNN を置き忘れても CPU で動く）
     std::vector<float> sq(libra::SQ_NB * libra::SQ_FEATS, 0.f), gl(libra::GLOB_FEATS, 0.f), lg(libra::POLICY_SIZE), w(3);
-    if (!run(1, sq.data(), gl.data(), lg.data(), w.data(), err)) return false;
-    return true;
+    if (run(1, sq.data(), gl.data(), lg.data(), w.data(), &e)) {
+      for (char& c : last_err)
+        if (c == '\n' || c == '\r') c = ' ';
+      I.fallback = last_err;
+      return true;
+    }
+    I.api->ReleaseSession(I.session);
+    I.session = nullptr;
+    I.provider = "none";
+    last_err = ep + ": " + e;
   }
   if (err) *err = "no usable execution provider (" + last_err + ")";
   return false;

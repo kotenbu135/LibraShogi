@@ -17,6 +17,7 @@ class OrtInfer {
   bool open(const std::string& model_path, int threads, const std::string& provider, std::string* err);
   bool is_open() const;
   std::string provider() const;   // 実際に使っている EP の名前
+  std::string fallback() const;   // 先に試して失敗した EP とその理由（無ければ空。1 行）
   std::string version() const;    // ONNX Runtime のバージョン文字列
   // n 局面を評価する。sq: n×81×SQ_FEATS、glob: n×GLOB_FEATS → logits: n×POLICY_SIZE、wdl: n×3（softmax 済み）
   bool run(int n, const float* sq, const float* glob, float* logits, float* wdl, std::string* err);

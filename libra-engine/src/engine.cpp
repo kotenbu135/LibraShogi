@@ -104,6 +104,7 @@ bool Engine::ready(std::string* err) {
     loaded_model_ = model;
     auto k = model.find_last_of("/\\");
     out("info string model " + (k == std::string::npos ? model : model.substr(k + 1)) + " onnxruntime " + infer_.version() + " provider " + infer_.provider());
+    if (!infer_.fallback().empty()) out("info string provider fallback " + infer_.fallback());
   }
   int threads = std::max(1, geti("Threads")), mate = std::max(0, geti("Mate_Nodes"));
   if (!eng_ || eng_threads_ != threads || eng_mate_ != mate) {
