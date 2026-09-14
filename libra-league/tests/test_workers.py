@@ -20,16 +20,18 @@ from libra_league.config import dump_toml, load_config
 from libra_league.replay import ReplayBuffer
 from libra_league.runner import train_steps
 from libra_league.state import StateDir, read_json
-from libra_league.workers import (GamesFileError, Inbox, Worker, load_weights, publish_weights, read_games_file, worker_seed,
-                                  write_games_file)
+from libra_league.workers import (GamesFileError, Inbox, Worker, load_weights, publish_weights, read_games_file, verify_game,
+                                  verify_games_file, worker_seed, write_games_file)
 from libra_net.model import LibraNet, NetConfig
 
 NET = {"d_model": 32, "n_layers": 1, "n_heads": 4, "d_ff": 64, "dropout": 0.0}
 
 
-def _games(n: int, seed: int) -> list[dict]:
-    cfg = {"full_sims": 8, "fast_sims": 4, "full_prob": 0.5, "max_ply": 320}
+def _games(n: int, seed: int, cfg: dict | None = None, openings: tuple[list, float] | None = None) -> list[dict]:
+    cfg = cfg or {"full_sims": 8, "fast_sims": 4, "full_prob": 0.5, "max_ply": 320}
     sp = librasearch.SelfPlay(cfg, 8, seed=seed, threads=2)
+    if openings is not None:
+        sp.set_openings(*openings)
     sq = np.zeros((8, 81, ls.SQ_FEATS), np.float32)
     glob = np.zeros((8, ls.GLOB_FEATS), np.float32)
     rng = np.random.default_rng(seed)
@@ -128,6 +130,81 @@ def test_games_file_rejects_bad_input(tmp_path: Path):
         z.writestr("moves.npy", b"\0" * (4 << 20))
     with pytest.raises(GamesFileError):
         read_games_file(big, max_bytes=1 << 20)
+
+
+def _search(**kw) -> dict:
+    s = {"max_ply": 320, "count_from_41": True, "max_moves_per_game": 400}
+    s.update(kw)
+    return s
+
+
+def test_verify_game_accepts_selfplay_records(tmp_path: Path):
+    """自己対局が作る局は、終局した局・手数の上限で打ち切った局・布石から始めた局のどれも再生の検査を通る。"""
+    games = _games(20, 11)
+    for g in games:
+        verify_game(g, _search())
+    cut = _games(12, 12, {"full_sims": 8, "fast_sims": 4, "full_prob": 0.5, "max_ply": 320, "max_moves_per_game": 30})
+    assert any(g["reason"] == "timeout" for g in cut)
+    for g in cut:
+        verify_game(g, _search(max_moves_per_game=30))
+    ops = [[ls.move_from_usi("K*" + ls.sq_to_usi(g["kb"])), ls.move_from_usi("K*" + ls.sq_to_usi(g["kw"]))]
+           + [int(x) for x in g["moves"][:6]] for g in games[:4]]
+    opened = _games(12, 14, openings=(ops, 1.0))
+    assert any([int(x) for x in g["moves"][:6]] == op[2:] for g in opened for op in ops)
+    for g in opened:
+        verify_game(g, _search())
+    # ファイルに書いて読み戻しても通る
+    meta, got = verify_games_file(write_games_file(tmp_path, "w1", 1, "ls", games), _search())
+    assert len(got) == 20
+
+
+def test_verify_game_rejects_tampered_records(tmp_path: Path):
+    games = _games(8, 15)
+    g0 = next(g for g in games if g["result"] != 0 and len(g["moves"]) > 10 and int(g["policy_off"][-1]) > 0)
+    search = _search()
+
+    def edited(edit) -> dict:
+        g = {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in g0.items()}
+        edit(g)
+        return g
+
+    def after_end(g):
+        g["moves"] = np.append(g["moves"], g["moves"][-1])
+        g["full"] = np.append(g["full"], np.uint8(0))
+        g["root_q"] = np.append(g["root_q"], np.float32(0))
+        g["policy_off"] = np.append(g["policy_off"], g["policy_off"][-1])
+
+    # 方策の添字を、その局面で合法でない手の添字に変える
+    j = next(i for i in range(len(g0["moves"])) if g0["policy_off"][i + 1] > g0["policy_off"][i])
+    p = ls.Position()
+    p.do_move("K*" + ls.sq_to_usi(g0["kb"]))
+    p.do_move("K*" + ls.sq_to_usi(g0["kw"]))
+    for m in g0["moves"][:j]:
+        p.do_move_code(int(m))
+    legal = {p.move_index(ls.move_to_usi(c)) for c in p.legal_move_codes()}
+    not_legal = next(i for i in range(ls.POLICY_SIZE) if i not in legal)
+    cases = {
+        "illegal_move": (lambda g: g["moves"].__setitem__(3, ls.move_from_usi("K*5e")), "move 3: illegal"),
+        "after_end": (after_end, "after the end"),
+        "result": (lambda g: g.__setitem__("result", -g["result"]), "outcome"),
+        "reason": (lambda g: g.__setitem__("reason", "sennichite"), "outcome"),
+        "plies": (lambda g: g.__setitem__("plies", g["plies"] + 2), "plies"),
+        "sfen41": (lambda g: g.__setitem__("sfen41", games[-1]["sfen41"] + " "), "sfen41"),
+        "king": (lambda g: g.__setitem__("kb", g["kw"]), "king placement"),
+        "policy_index": (lambda g: g["policy_idx"].__setitem__(int(g["policy_off"][j]), not_legal), "policy index"),
+    }
+    for name, (edit, msg) in cases.items():
+        with pytest.raises(GamesFileError, match=msg):
+            verify_game(edited(edit), search)
+    # 打ち切りの局は、打ち切りの手数に届いていなければ弾く
+    cut = next(g for g in _games(12, 12, {"full_sims": 8, "fast_sims": 4, "full_prob": 0.5, "max_ply": 320, "max_moves_per_game": 30})
+               if g["reason"] == "timeout")
+    with pytest.raises(GamesFileError, match="unfinished"):
+        verify_game(cut, search)
+    # 1 局でも合わなければファイルごと弾く（どの局かを理由に書く）
+    bad = write_games_file(tmp_path, "w1", 1, "ls", [games[0], edited(lambda g: g.__setitem__("plies", g["plies"] + 2))])
+    with pytest.raises(GamesFileError, match="game 1: plies"):
+        verify_games_file(bad, search)
 
 
 def test_weights_publish_and_load(tmp_path: Path):

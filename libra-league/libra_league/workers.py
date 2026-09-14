@@ -6,7 +6,8 @@
 学習側は inbox を取り込んで手元の自己対局と同じようにリプレイに足す。チャンクの採番と棋譜 JSONL は学習側だけが書く。
 
 対局ファイルは pickle を使わない（別マシンのワーカーは信用しない。np.load は allow_pickle=False）。
-ここで検査するのは型・形・値域・整合性まで。手の合法性の再生や、方策・価値の改ざんの検出はしない。
+read_games_file が検査するのは型・形・値域・整合性まで。verify_games_file はさらに手を再生して合法性・終局の判定・方策の添字を確かめる
+（別マシンのワーカーの局に使う。libra-cloud のブリッジ）。探索の出力（方策の確率・価値）の改ざんは検出できない。
 """
 from __future__ import annotations
 
@@ -143,6 +144,62 @@ def read_games_file(path: Path, max_bytes: int = MAX_FILE_BYTES) -> tuple[dict, 
             "policy_idx": pi[po:po + k].copy(), "policy_p": pp[po:po + k].copy(), "policy_off": off.copy(),
         })
         mo, po, oo = mo + n, po + k, oo + n + 1
+    return meta, games
+
+
+# ---- 手の再生による検査（別マシンのワーカーの局。libra-cloud のブリッジが学習側の inbox に置く前に呼ぶ） ----
+_RESULT = {"sente": 1, "gote": -1, "draw": 0}
+
+
+def verify_game(g: dict, search: dict) -> None:
+    """read_games_file が返した 1 局を玉の配置から再生し、記録の骨格が自己対局の規則と合うかを確かめる。合わなければ GamesFileError。
+
+    確かめるもの: 玉の配置と全手の合法性、終局より後に手が無いこと、方策の添字がその局面の合法手であること、
+    終局の判定（result・reason・plies）、sfen41（本将棋に入った最初の局面。入らずに終わった局は最終局面）。
+    手数の上限（max_moves_per_game）で打ち切った局は、再生した局面は終局していないが reason が timeout で手番側の負け
+    （selfplay.cpp の安全弁）。root_q・v41・policy_p は探索の出力で、再生からは確かめられない（値域は read_games_file が見る）。"""
+    p = ls.Position()
+    p.set_max_ply(int(search["max_ply"]), bool(search["count_from_41"]))
+    for key in ("kb", "kw"):
+        u = "K*" + ls.sq_to_usi(g[key])
+        _check(p.is_legal(u), f"{key}: illegal king placement {u}")
+        p.do_move(u)
+    moves, off, pidx = g["moves"], g["policy_off"], g["policy_idx"]
+    sfen41 = None
+    for j in range(len(moves)):
+        _check(not p.is_over(), f"move {j}: after the end")
+        codes = p.legal_move_codes()
+        m = int(moves[j])
+        _check(m in codes, f"move {j}: illegal")
+        if sfen41 is None and p.phase == "normal":
+            sfen41 = p.sfen()
+        o0, o1 = int(off[j]), int(off[j + 1])
+        if o1 > o0:
+            legal = {p.move_index(ls.move_to_usi(c)) for c in codes}
+            _check(all(int(i) in legal for i in pidx[o0:o1]), f"move {j}: policy index is not a legal move")
+        p.do_move_code(m)
+    if sfen41 is None:
+        sfen41 = p.sfen()
+    res, reason = p.outcome()
+    if res == "ongoing":
+        _check(len(moves) >= int(search["max_moves_per_game"]) and g["reason"] == "timeout"
+               and g["result"] == (-1 if p.turn == "sente" else 1), f"unfinished game ({len(moves)} moves, {g['reason']})")
+    else:
+        _check(g["reason"] == reason and g["result"] == _RESULT.get(res), f"outcome {res}/{reason} != {g['result']}/{g['reason']}")
+    _check(g["plies"] == p.ply, f"plies {g['plies']} != {p.ply}")
+    _check(g["sfen41"] == sfen41, "sfen41")
+
+
+def verify_games_file(path: Path, search: dict, max_bytes: int = MAX_FILE_BYTES) -> tuple[dict, list[dict]]:
+    """read_games_file に加えて全局を verify_game で確かめる。1 局でも合わなければファイルごと GamesFileError。"""
+    meta, games = read_games_file(path, max_bytes)
+    for i, g in enumerate(games):
+        try:
+            verify_game(g, search)
+        except GamesFileError as e:
+            raise GamesFileError(f"game {i}: {e}") from None
+        except (ValueError, RuntimeError, IndexError) as e:  # librashogi が不正な値で投げる
+            raise GamesFileError(f"game {i}: {type(e).__name__}: {str(e)[:200]}") from None
     return meta, games
 
 

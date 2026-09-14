@@ -22,4 +22,24 @@ PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-clo
 ~/.venvs/vastai/bin/python libra-cloud/vast_bench.py --gpu "RTX 3090" --max-dph 0.25 --minutes 20 --bundle $S/bench/bundle.tar.gz --out $S/vast-3090
 ```
 
+## 本番の run にワーカーを足す（vast_worker.py）
+
+| ファイル | 内容 |
+|---|---|
+| `libra_cloud/bridge.py` | 手元で回す同期ループ。学習側の `weights/latest.pt` と布石が変わったらホストへ送り、ホストの `inbox/*.npz` を取ってきて手を再生して検査（`libra_league.workers.verify_games_file`）してから学習側の `inbox/` に置く。不正なファイルは `<out>/bridge/rejected/` |
+| `bench/host_worker.sh` | ホストでワーカーを `--detached` で常駐させる（pid は `/root/out/worker.pid`） |
+| `vast_worker.py` | GPU を借り、セットアップ、ワーカーの起動、ブリッジを `--hours` 時間回す。終わり・失敗・Ctrl+C でワーカーを止めて残りを取り、必ずインスタンスを消す |
+
+学習側の run は `[workers] enabled = true` で起動しておく（`inbox/` が無い間、ブリッジは取ってこない）。途中で止めるときは `<out>/bridge/STOP` を置く。
+
+```bash
+S=<scratchpad>
+PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-cloud \
+  .venv/bin/python -m libra_cloud.prepare --worker --ckpt ~/libra-run/ls/checkpoints/latest.pt --config ~/libra-run/ls/config.toml --out $S/worker
+~/.venvs/vastai/bin/python libra-cloud/vast_worker.py --gpu "RTX 5070 Ti" --max-dph 0.28 --min-rel 0.94 --hours 3 \
+  --run-dir ~/libra-run/ls --bundle $S/worker/bundle.tar.gz --out $S/vast-worker
+```
+
+検査で確かめるのは記録の骨格（玉の配置と全手の合法性、終局の判定と手数、sfen41、方策の添字が合法手であること）まで。探索の出力（方策の確率・価値）の改ざんは検出できない。
+
 束は git の HEAD から作るので、libra-league や libra-cloud を変えたらコミットしてから作り直す。局/日は起動 300 秒後以降に書かれた対局ファイルの間隔で出す（512 局を同時に始めるので、最初の終局はまとまって遅れる）。借りた時間と見積もり費用は `result.json`。終わったら `show_instances` が空であることを確かめる。

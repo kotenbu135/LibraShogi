@@ -5,6 +5,7 @@
       .venv/bin/python -m libra_cloud.prepare --ckpt ~/libra-run/ls/checkpoints/latest.pt --config ~/libra-run/ls/config.toml --out <dir>
 
 チェックポイントは読むだけ（稼働中の run は latest.pt を原子的に置き換えるので、読み途中で壊れない）。
+--worker を付けると常駐ワーカー用（vast_worker.py）: 布石を使う run では、ブリッジが送る先を布石のパスにする。
 """
 from __future__ import annotations
 
@@ -17,9 +18,11 @@ from pathlib import Path
 
 # ワーカーに要るもの（C++ のシミュレータと探索、ネット、ランナー、ベンチの道具）。エンジンと ONNX Runtime は要らない
 BUNDLE_PATHS = ("CMakeLists.txt", "libra-sim", "libra-search", "libra-net", "libra-league", "libra-cloud")
+HOST_RUN_ROOT = "/root/libra/run"  # 束を展開するホストの場所（host_setup.sh / host_worker.sh と揃える）
 
 
-def write_run_dir(ckpt: Path, config: Path, out: Path, n_games: int = 512, threads: int = 12) -> Path:
+def write_run_dir(ckpt: Path, config: Path, out: Path, n_games: int = 512, threads: int = 12, worker: bool = False) -> Path:
+    """worker が真なら常駐ワーカー用: 布石を使う run では、ブリッジが送る先（ホストの /root/libra/run/<run_id>/openings.json）を指す。"""
     import torch
 
     from libra_league.config import dump_toml, load_config
@@ -39,7 +42,10 @@ def write_run_dir(ckpt: Path, config: Path, out: Path, n_games: int = 512, threa
     (run / "weights").mkdir(parents=True, exist_ok=True)
     (run / "inbox").mkdir(exist_ok=True)
     publish_weights(run / "weights" / "latest.pt", m, int(sd.get("step", 0)), net, cfg["run_id"])
-    (run / "config.toml").write_text(dump_toml(bench_config(cfg, n_games, threads)), encoding="utf-8")
+    host_cfg = bench_config(cfg, n_games, threads)
+    if worker and cfg["selfplay"].get("openings"):
+        host_cfg["selfplay"]["openings"] = f"{HOST_RUN_ROOT}/{cfg['run_id']}/openings.json"
+    (run / "config.toml").write_text(dump_toml(host_cfg), encoding="utf-8")
     return run
 
 
@@ -62,10 +68,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--n-games", type=int, default=512)
     ap.add_argument("--threads", type=int, default=12)
+    ap.add_argument("--worker", action="store_true", help="常駐ワーカー用（布石をブリッジが送る先から読む）")
     a = ap.parse_args(argv)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    run = write_run_dir(Path(a.ckpt).expanduser(), Path(a.config).expanduser(), out, a.n_games, a.threads)
+    run = write_run_dir(Path(a.ckpt).expanduser(), Path(a.config).expanduser(), out, a.n_games, a.threads, a.worker)
     tar = make_bundle(Path(__file__).resolve().parents[2], out)
     print(f"run dir {run}\nbundle {tar} ({tar.stat().st_size / 2**20:.1f} MiB)")
     return 0
