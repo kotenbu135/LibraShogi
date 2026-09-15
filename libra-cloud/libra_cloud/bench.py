@@ -28,6 +28,28 @@ def pick_offers(offers: list[dict], *, max_dph: float, price_key: str = "dph_tot
     return sorted(ok, key=lambda o: (o[price_key], -(o.get("cpu_cores_effective") or 0)))
 
 
+def annotate_price(offers: list[dict], rent: str, bid_margin: float) -> list[dict]:
+    """オファーの写しに入札額（bid）と実効単価（dph_eff）を付ける。rent が "bid" なら最低入札（min_bid）の bid_margin 増しで入札し、
+    実効単価は dph_total − min_bid + bid（dph_total は最低入札にストレージ代などを足した値）。on-demand と min_bid の無いオファーは dph_total。
+    選別（pick_offers）と表示は price_key="dph_eff" で行う。"""
+    out = []
+    for o in offers:
+        mb = o.get("min_bid")
+        if rent == "bid" and mb is not None:
+            bid = round(float(mb) * (1 + bid_margin), 4)
+            out.append({**o, "bid": bid, "dph_eff": round(float(o["dph_total"]) - float(mb) + bid, 4)})
+        else:
+            out.append({**o, "bid": None, "dph_eff": float(o["dph_total"])})
+    return out
+
+
+def worker_threads(offer: dict, cap: int = 12) -> int:
+    """ワーカーの自己対局のスレッド数。ホストの nproc は割り当てより多く見える（16 コア割り当てで 64）ので、オファーの実効コア数を使い、
+    12 で頭打ちにする（12 を超えても apply は速くならない、measurements.md 2026-09-14 05:47）。コア数が分からなければ 12。"""
+    cores = offer.get("cpu_cores_effective")
+    return cap if not cores else max(1, min(cap, int(cores)))
+
+
 # 管理コンソールの入力欄で緩められる条件（offer_rejects の key）
 ADJUSTABLE = ("max_dph", "min_cores", "min_cpu_ghz", "min_rel", "max_inet_cost")
 

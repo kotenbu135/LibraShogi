@@ -150,6 +150,40 @@ def test_offers_report_explains_why_each_offer_was_rejected():
     assert rep["usable"] == 1 and rep["top"][0]["id"] == 50306639 and rep["all"][-1]["ok"] and "条件に合う 1 件" in rep["text"]
 
 
+def test_offers_report_for_bids_uses_effective_price():
+    from libra_cloud.bench import annotate_price
+
+    def o(i, dph, min_bid, cpu):
+        return {"id": i, "dph_total": dph, "min_bid": min_bid, "is_bid": True, "num_gpus": 1, "cpu_cores_effective": 24.0, "cpu_ghz": 5.4,
+                "cpu_name": cpu, "inet_down": 600.0, "reliability2": 0.99, "cuda_max_good": 13.2, "inet_up_cost": 0.004, "inet_down_cost": 0.004,
+                "geolocation": "Japan, JP"}
+
+    offers = annotate_price([o(1, 0.2944, 0.2667, "Intel Core i7-14700F"), o(2, 0.1817, 0.1733, "AMD Ryzen 9 7900X 12-Core Processor")], "bid", 0.1)
+    cond = {"max_dph": 0.30, "min_cores": 16, "min_cpu_ghz": 0.0, "min_rel": 0.90, "max_inet_cost": 0.02, "min_cuda": 12.9, "price_key": "dph_eff"}
+    rep = vast_cli.offers_report("RTX 5070 Ti", offers, cond, disk=30)
+    assert rep["usable"] == 1 and rep["top"][0]["id"] == 2 and rep["top"][0]["dph"] == round(0.1817 - 0.1733 + 0.1733 * 1.1, 3)
+    assert rep["top"][0]["bid"] == round(0.1733 * 1.1, 4) and rep["hints"][0]["key"] == "max_dph" and rep["hints"][0]["need"] == 0.33
+    assert "入札" in rep["text"]
+
+
+def test_launch_argv_passes_rent_type_and_bid_margin(tmp_path: Path):
+    import argparse
+
+    a = argparse.Namespace(gpu="RTX 5070 Ti", max_dph=0.28, hours=3.0, min_rel=0.94, min_cpu_ghz=4.4, min_cores=16, max_inet_cost=0.02,
+                           n_games=512, rent="bid", bid_margin=0.1)
+    cmd = vast_cli.launch_argv(a, tmp_path / "ls", tmp_path / "s")[2]
+    assert "--rent bid" in cmd and "--bid-margin 0.1" in cmd
+
+
+def test_status_cost_uses_effective_bid_price(tmp_path: Path):
+    d = Sessions(tmp_path / "cloud").create("ls")
+    now = 1_000_000.0
+    _write(d / "session.json", {"run": "ls", "gpu": "RTX 5070 Ti", "max_dph": 0.28, "hours": 3.0, "pid": None, "rent": "bid"})
+    _write(d / "launcher.log", "credit $9\ncreate #1\n")
+    _write(d / "instance.json", {"instance": 5, "offer": {"dph_total": 0.25, "dph_eff": 0.2, "bid": 0.19}, "t_rent": now - 7200})
+    assert session_status(d, now=now)["est_cost_usd"] == 0.4
+
+
 def _write(p: Path, obj) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(obj if isinstance(obj, str) else json.dumps(obj), encoding="utf-8")

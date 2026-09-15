@@ -123,7 +123,8 @@ def session_status(d: Path, tail: int = 10, now: float | None = None) -> dict:
     elif inst and inst.get("t_rent") and not inst.get("destroyed"):
         h = (now - float(inst["t_rent"])) / 3600
         out["rented_h"] = round(h, 3)
-        out["est_cost_usd"] = round(h * float((inst.get("offer") or {}).get("dph_total") or 0), 3)
+        off = inst.get("offer") or {}
+        out["est_cost_usd"] = round(h * float(off.get("dph_eff") or off.get("dph_total") or 0), 3)  # 入札は実効単価
     if inst and inst.get("t_bridge") and not ended and s.get("hours") is not None:
         out["remaining_h"] = round(max(0.0, float(s["hours"]) - (now - float(inst["t_bridge"])) / 3600), 2)
     return out
@@ -209,7 +210,8 @@ def history(root: Path, run_root: Path, now: float | None = None) -> dict:
         rows.append({"name": d.name, "run": run, "started": s.get("started"), "alive": s["alive"], "phase": s["phase"],
                      "stopped_by_user": bool(s.get("stop_requested")), "hours": s.get("hours"), "max_dph": s.get("max_dph"),
                      "gpu": offer.get("gpu_name") or s.get("gpu"), "cpu": str(offer.get("cpu_name") or "").strip() or None,
-                     "where": offer.get("geolocation"), "reliability": offer.get("reliability2"), "dph": offer.get("dph_total"),
+                     "where": offer.get("geolocation"), "reliability": offer.get("reliability2"),
+                     "dph": offer.get("dph_eff") or offer.get("dph_total"), "rent": s.get("rent") or "on-demand", "bid": offer.get("bid"),
                      "instance": inst.get("instance"), "t_ready_s": res.get("t_ready_s"),
                      "rented_h": st["rented_h"], "est_cost_usd": st["est_cost_usd"], "bridge_h": bridge_h,
                      "games": games, "stale_games": stale, "net_games": net, "files": b.get("files"),
@@ -273,7 +275,7 @@ def launch_argv(a: argparse.Namespace, run_dir: Path, d: Path) -> list[str]:
     work = [str(VAST_PY), "-u", str(REPO / "libra-cloud" / "vast_worker.py"), "--gpu", a.gpu, "--max-dph", str(a.max_dph),
             "--hours", str(a.hours), "--run-dir", str(run_dir), "--bundle", str(d / "worker" / "bundle.tar.gz"), "--out", str(d),
             "--min-rel", str(a.min_rel), "--min-cpu-ghz", str(a.min_cpu_ghz), "--min-cores", str(a.min_cores),
-            "--max-inet-cost", str(a.max_inet_cost), "--n-games", str(a.n_games)]
+            "--max-inet-cost", str(a.max_inet_cost), "--n-games", str(a.n_games), "--rent", a.rent, "--bid-margin", str(a.bid_margin)]
     return ["bash", "-c", f"{shlex.join(prep)} && exec {shlex.join(work)}"]
 
 
@@ -304,8 +306,9 @@ def cmd_start(a: argparse.Namespace) -> int:
                              start_new_session=True, cwd=str(REPO), env=dict(os.environ, PYTHONPATH=PROJECT_PATH))
     write_json(d / "session.json", {"run": a.run, "gpu": a.gpu, "max_dph": a.max_dph, "hours": a.hours, "min_rel": a.min_rel,
                                     "min_cpu_ghz": a.min_cpu_ghz, "min_cores": a.min_cores, "max_inet_cost": a.max_inet_cost, "n_games": a.n_games,
-                                    "started": time.time(), "pid": p.pid})
-    print(f"起動しました: {d.name}（pid {p.pid}。{a.gpu} を最大 ${a.max_dph:.2f}/h で {a.hours:g} 時間。準備に 5〜15 分）")
+                                    "rent": a.rent, "bid_margin": a.bid_margin, "started": time.time(), "pid": p.pid})
+    how = "入札" if a.rent == "bid" else "on-demand"
+    print(f"起動しました: {d.name}（pid {p.pid}。{a.gpu} を{how}で最大 ${a.max_dph:.2f}/h、{a.hours:g} 時間。準備に 5〜15 分）")
     return 0
 
 
@@ -412,16 +415,17 @@ def offers_report(gpu: str, offers: list[dict], cond: dict, disk: float) -> dict
 
     cands = pick_offers(offers, **cond)
     rank = {id(o): i + 1 for i, o in enumerate(cands)}
+    price_key = cond.get("price_key", "dph_total")
 
     def row(o: dict) -> dict:
-        return {"id": o.get("id"), "dph": round(float(o.get("dph_total") or 0), 3), "cpu": _short_cpu(o.get("cpu_name")),
+        return {"id": o.get("id"), "dph": round(float(o.get(price_key) or 0), 3), "bid": o.get("bid"), "cpu": _short_cpu(o.get("cpu_name")),
                 "cores": o.get("cpu_cores_effective"), "ghz": round(float(o.get("cpu_ghz") or 0), 2),
                 "reliability": round(float(o.get("reliability2") or o.get("reliability") or 0), 3),
                 "inet_cost": round(max(o.get("inet_up_cost") or 0, o.get("inet_down_cost") or 0), 4), "where": o.get("geolocation")}
 
     rows = []
     counts: dict[str, int] = {}
-    for o in sorted(offers, key=lambda o: (float(o.get("dph_total") or 0), -(o.get("cpu_cores_effective") or 0))):
+    for o in sorted(offers, key=lambda o: (float(o.get(price_key) or 0), -(o.get("cpu_cores_effective") or 0))):
         reasons = offer_rejects(o, **cond)
         for r in reasons:
             counts[r["key"]] = counts.get(r["key"], 0) + 1
@@ -433,6 +437,8 @@ def offers_report(gpu: str, offers: list[dict], cond: dict, disk: float) -> dict
                       "note": COND_NOTES.get(h["key"], ""), "offer": row(h["offer"])})
 
     lines = [f"{gpu}: 検索 {len(offers)} 件、条件に合う {len(cands)} 件" + ("（起動すると ○1 から順に借りる）" if cands else ""),
+             ("借り方: 入札（割り込みあり。$/h は最低入札に上乗せした入札額での実効単価）" if price_key == "dph_eff" and any(o.get("bid") for o in offers)
+              else "借り方: on-demand"),
              f"条件: 上限 ${cond['max_dph']:.2f}/h、コア {cond['min_cores']} 以上、CPU {cond['min_cpu_ghz']:.1f} GHz 以上、"
              f"信頼度 {cond['min_rel']:.2f} 以上、転送料 ${cond['max_inet_cost']:.3f}/GB 以下",
              f"（検索の時点で 1 GPU・verified・下り 200 Mbps 以上・CUDA {cond['min_cuda']:g} 以上・ディスク {disk:g} GB 以上に絞っている）"]
@@ -462,14 +468,15 @@ def cmd_offers(a: argparse.Namespace) -> int:
     sys.path.insert(0, str(REPO / "libra-cloud"))
     from vastai.sdk import VastAI
 
-    from libra_cloud.bench import offer_query
+    from libra_cloud.bench import annotate_price, offer_query
     from vast_bench import IMAGE, image_cuda
 
     min_cuda = image_cuda(IMAGE)
     v = VastAI(raw=True, quiet=True)
-    offers = v.search_offers(query=offer_query(a.gpu, a.min_rel, min_cuda, 30), type="on-demand", order="dph_total", limit=100, storage=30) or []
+    offers = v.search_offers(query=offer_query(a.gpu, a.min_rel, min_cuda, 30), type=a.rent, order="dph_total", limit=100, storage=30) or []
+    offers = annotate_price(offers, a.rent, a.bid_margin)
     cond = {"max_dph": a.max_dph, "min_cores": a.min_cores, "min_cpu_ghz": a.min_cpu_ghz, "min_rel": a.min_rel,
-            "max_inet_cost": a.max_inet_cost, "min_cuda": min_cuda}
+            "max_inet_cost": a.max_inet_cost, "min_cuda": min_cuda, "price_key": "dph_eff"}
     rep = offers_report(a.gpu, offers, cond, disk=30)
     print(json.dumps(rep, ensure_ascii=False) if a.json else rep["text"])
     return 0
@@ -517,6 +524,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="CPU の最大周波数の下限。遅い CPU のホストでは探索が律速して GPU が遊ぶ（measurements.md 2026-09-14）")
         p.add_argument("--min-cores", type=int, default=16, help="実効コア数の下限（自己対局のスレッドはホストの CPU 数、12 まで）")
         p.add_argument("--max-inet-cost", type=float, default=MAX_INET_COST, help="転送料（$/GB、上り・下りの高い方）の上限")
+        p.add_argument("--rent", choices=("bid", "on-demand"), default="bid",
+                       help="借り方。bid は入札（割り込みあり、同じホストで on-demand より 16〜32%% 安い。2026-09-15 のユーザーの決定で既定）")
+        p.add_argument("--bid-margin", type=float, default=0.1, help="入札額 = 最低入札 × (1 + この値)。上限 $/h は実効単価で判定する")
         p.add_argument("--json", action="store_true")
     p_s.add_argument("--hours", type=float, default=3.0)
     p_s.add_argument("--n-games", type=int, default=512)

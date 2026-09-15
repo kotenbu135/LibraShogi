@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from libra_cloud.bench import MAX_INET_COST, offer_query, offer_rejects, pick_offers  # noqa: E402
+from libra_cloud.bench import MAX_INET_COST, annotate_price, offer_query, offer_rejects, pick_offers, worker_threads  # noqa: E402
 from vast_bench import IMAGE, KEY, ONSTART, image_cuda, log, try_create, wait_ssh  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
@@ -56,6 +56,8 @@ def main() -> int:
     ap.add_argument("--min-cpu-ghz", type=float, default=0.0)
     ap.add_argument("--min-rel", type=float, default=0.98)
     ap.add_argument("--max-inet-cost", type=float, default=MAX_INET_COST, help="転送料（$/GB）の上限")
+    ap.add_argument("--rent", choices=("bid", "on-demand"), default="on-demand", help="借り方（bid は割り込みあり。bin/libra-vast の既定は bid）")
+    ap.add_argument("--bid-margin", type=float, default=0.1, help="入札額 = 最低入札 × (1 + この値)")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     from vastai.sdk import VastAI
@@ -72,12 +74,15 @@ def main() -> int:
         log(f"credit below ${a.min_credit:.2f}; not renting")
         return 2
     min_cuda = image_cuda(a.image)
-    offers = v.search_offers(query=offer_query(a.gpu, a.min_rel, min_cuda, a.disk), type="on-demand", order="dph_total", limit=100,
+    offers = v.search_offers(query=offer_query(a.gpu, a.min_rel, min_cuda, a.disk), type=a.rent, order="dph_total", limit=100,
                              storage=a.disk) or []
-    cond = dict(max_dph=a.max_dph, min_cores=a.min_cores, min_cpu_ghz=a.min_cpu_ghz, min_cuda=min_cuda, min_rel=a.min_rel, max_inet_cost=a.max_inet_cost)
+    offers = annotate_price(offers, a.rent, a.bid_margin)
+    cond = dict(max_dph=a.max_dph, min_cores=a.min_cores, min_cpu_ghz=a.min_cpu_ghz, min_cuda=min_cuda, min_rel=a.min_rel, max_inet_cost=a.max_inet_cost,
+                price_key="dph_eff")
     cands = pick_offers(offers, **cond)
-    log(f"{len(offers)} offers, {len(cands)} usable; cheapest: "
-        + ", ".join(f"#{o['id']} ${o['dph_total']:.3f}/h cpu {o.get('cpu_cores_effective')} {str(o.get('cpu_name'))[:28]} "
+    log(f"{len(offers)} offers ({a.rent}), {len(cands)} usable; cheapest: "
+        + ", ".join(f"#{o['id']} ${o['dph_eff']:.3f}/h{' bid $' + format(o['bid'], '.4f') if o.get('bid') else ''} "
+                    f"cpu {o.get('cpu_cores_effective')} {str(o.get('cpu_name'))[:28]} "
                     f"{o.get('geolocation', '')}" for o in cands[:3]))
     if offers and not cands:  # 借りられなかった理由を launcher.log に残す（管理コンソールの「候補を見る」と同じ判定）
         counts: dict[str, int] = {}
@@ -112,13 +117,16 @@ def main() -> int:
     rc = 0
     try:
         for offer in cands[:3]:
+            bid = {"price": offer["bid"]} if offer.get("bid") else {}  # 入札（SDK の price は入札額。bid_price と同じ）
             iid, why = try_create(v, offer["id"], image=a.image, disk=a.disk, label=LABEL, ssh=True, direct=True,
-                                  cancel_unavail=True, onstart_cmd=ONSTART)
-            log(f"create #{offer['id']} ${offer['dph_total']:.3f}/h -> instance {iid} {why}")
+                                  cancel_unavail=True, onstart_cmd=ONSTART, **bid)
+            log(f"create #{offer['id']} ${offer['dph_eff']:.3f}/h{' bid $' + format(offer['bid'], '.4f') if offer.get('bid') else ''} -> instance {iid} {why}")
             if not iid:
                 continue
-            result["offer"] = {k: offer.get(k) for k in ("id", "dph_total", "gpu_name", "cpu_name", "cpu_cores_effective", "reliability2",
-                                                        "geolocation", "cuda_max_good", "inet_up_cost", "inet_down_cost")}
+            result["offer"] = {k: offer.get(k) for k in ("id", "dph_total", "dph_eff", "bid", "min_bid", "is_bid", "gpu_name", "cpu_name",
+                                                        "cpu_cores_effective", "cpu_ghz", "reliability2", "geolocation", "cuda_max_good",
+                                                        "inet_up_cost", "inet_down_cost")}
+            result["rent"] = a.rent
             result["instance"] = iid
             t_rent = time.time()
             write_json(out / "instance.json", {"instance": iid, "offer": result["offer"], "t_rent": t_rent})
@@ -143,8 +151,10 @@ def main() -> int:
                  log_path=out / "setup.log")
         result["t_setup_s"] = round(time.time() - t0)
         log(f"setup done in {result['t_setup_s']} s; starting worker {a.id}")
-        host.ssh(f"T={a.threads}; [ $T -gt 0 ] || T=$(( $(nproc) < 12 ? $(nproc) : 12 )); "
-                 f"bash /root/libra/libra-cloud/bench/host_worker.sh $T {a.n_games} {a.id} {run_id}", timeout=120, log_path=out / "setup.log")
+        threads = a.threads if a.threads > 0 else worker_threads(result["offer"])  # nproc は割り当てより多く見えるのでオファーの実効コア数
+        result["threads"] = threads
+        log(f"worker threads {threads} (cores {result['offer'].get('cpu_cores_effective')})")
+        host.ssh(f"bash /root/libra/libra-cloud/bench/host_worker.sh {threads} {a.n_games} {a.id} {run_id}", timeout=120, log_path=out / "setup.log")
         if stopping:
             raise KeyboardInterrupt
         env = dict(os.environ, PYTHONPATH=PYTHONPATH)
@@ -184,7 +194,7 @@ def main() -> int:
         hours = (time.time() - t_rent) / 3600
         if "offer" in result:
             result["rented_h"] = round(hours, 3)
-            result["est_cost_usd"] = round(hours * float(result["offer"]["dph_total"]), 3)
+            result["est_cost_usd"] = round(hours * float(result["offer"].get("dph_eff") or result["offer"]["dph_total"]), 3)
         bj = out / "bridge" / "bridge.json"
         if bj.exists():
             result["bridge"] = json.loads(bj.read_text(encoding="utf-8"))

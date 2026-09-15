@@ -917,6 +917,13 @@ $cmbGpu.DropDownStyle = "DropDownList"; $cmbGpu.Width = 100
 $cmbGpu.SelectedIndex = 0
 $cmbGpu.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
 $vbar.Controls.Add($cmbGpu)
+$vbar.Controls.Add((New-Label "借り方" 4))
+$cmbRent = New-Object System.Windows.Forms.ComboBox
+$cmbRent.DropDownStyle = "DropDownList"; $cmbRent.Width = 90
+[void]$cmbRent.Items.AddRange(@("入札", "on-demand"))
+$cmbRent.SelectedIndex = 0
+$cmbRent.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
+$vbar.Controls.Add($cmbRent)
 $vbar.Controls.Add((New-Label '上限 $/h' 4)); $numDph = New-Num 0.05 2.00 0.28 0.01 2; $vbar.Controls.Add($numDph)
 $vbar.Controls.Add((New-Label "時間" 4)); $numHours = New-Num 0.5 24 3 0.5 1; $vbar.Controls.Add($numHours)
 $vbar.Controls.Add((New-Label "信頼度の下限" 4)); $numRel = New-Num 0.90 0.99 0.94 0.01 2; $vbar.Controls.Add($numRel)
@@ -1390,7 +1397,8 @@ function Start-Run([string]$run) {
 
 # ---- クラウドの操作と表示 ----
 function Get-VastArgs {
-    return @("--gpu", ([string]$cmbGpu.SelectedItem -replace " ", "_"), "--max-dph", ("{0:0.00}" -f [double]$numDph.Value),
+    return @("--gpu", ([string]$cmbGpu.SelectedItem -replace " ", "_"), "--rent", $(if ([string]$cmbRent.SelectedItem -eq "入札") { "bid" } else { "on-demand" }),
+             "--max-dph", ("{0:0.00}" -f [double]$numDph.Value),
              "--min-rel", ("{0:0.00}" -f [double]$numRel.Value), "--min-cpu-ghz", ("{0:0.0}" -f [double]$numGhz.Value),
              "--min-cores", ("{0:0}" -f [double]$numCores.Value), "--max-inet-cost", ("{0:0.000}" -f [double]$numInet.Value))
 }
@@ -1400,7 +1408,8 @@ function Start-Vast {
     $gpu = [string]$cmbGpu.SelectedItem
     $dph = [double]$numDph.Value; $hours = [double]$numHours.Value
     $credit = if ($null -ne $o -and $null -ne $o.account -and $null -ne $o.account.credit) { '${0:N2}' -f [double]$o.account.credit } else { "不明" }
-    $msg = ('{0} を最大 ${1:N2}/h で {2} 時間借りて、ls に自己対局の局を足します。' -f $gpu, $dph, $hours) + "`r`n" +
+    $rentNote = if ([string]$cmbRent.SelectedItem -eq "入札") { "入札（割り込みあり。止められたら残りの時間で自動で借り直す）" } else { "on-demand" }
+    $msg = ('{0} を{3}で最大 ${1:N2}/h（実効単価）、{2} 時間借りて、ls に自己対局の局を足します。' -f $gpu, $dph, $hours, $rentNote) + "`r`n" +
            ('費用は最大 ${0:N2} 程度（準備の 5〜15 分を含む）。残高 {1}。' -f ($dph * ($hours + 0.25)), $credit) + "`r`n" +
            (Get-VastPast $gpu $hours) + "`r`n" +
            "時間が来たら残りの局を取ってインスタンスを消します。途中で止めるときは「停止」。よろしいですか？"

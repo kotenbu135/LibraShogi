@@ -10,7 +10,7 @@ import torch
 
 import librasearch
 import librashogi as ls
-from libra_cloud.bench import bench_config, games_per_day, near_misses, offer_rejects, pick_offers, scan_inbox
+from libra_cloud.bench import annotate_price, bench_config, games_per_day, near_misses, offer_rejects, pick_offers, scan_inbox, worker_threads
 from libra_cloud.prepare import BUNDLE_PATHS, make_bundle, write_run_dir
 from libra_league.config import load_config
 from libra_league.workers import load_weights, write_games_file
@@ -83,6 +83,25 @@ def test_near_misses_lists_the_cheapest_offer_each_single_relaxation_would_admit
     ]
     got = [(h["key"], h["need"], h["offer"]["id"]) for h in near_misses(offers, **cond)]
     assert got == [("min_cores", 6, 1), ("max_inet_cost", 0.027, 4), ("max_dph", 1.36, 5)]
+
+
+def test_annotate_price_bids_above_min_bid_and_ranks_by_effective_price():
+    """入札（割り込みあり）: 最低入札に margin を足して入札し、実効単価（dph_total − 最低入札 + 入札。差はストレージ代など）で上限と順を決める。"""
+    offers = [_offer(1, 0.2944, min_bid=0.2667, is_bid=True), _offer(2, 0.19, min_bid=0.17, is_bid=True), _offer(3, 0.18, min_bid=None)]
+    a = annotate_price(offers, "bid", 0.1)
+    assert a[0]["bid"] == round(0.2667 * 1.1, 4) and a[0]["dph_eff"] == round(0.2944 - 0.2667 + 0.2667 * 1.1, 4)
+    assert a[1]["dph_eff"] == round(0.19 - 0.17 + 0.187, 4) and a[2]["bid"] is None and a[2]["dph_eff"] == 0.18
+    assert "bid" not in offers[0]  # 元のオファーは変えない
+    assert [o["id"] for o in pick_offers(a, max_dph=0.30, price_key="dph_eff")] == [3, 2]  # 1 は実効 $0.321 で上限超え
+    od = annotate_price(offers, "on-demand", 0.1)
+    assert [(o["bid"], o["dph_eff"]) for o in od] == [(None, 0.2944), (None, 0.19), (None, 0.18)]
+
+
+def test_worker_threads_follow_allocated_cores():
+    """nproc はホスト全体（割り当て 16 コアで 64）を返すので、スレッドはオファーの実効コア数から決める（12 で頭打ち）。"""
+    assert worker_threads({"cpu_cores_effective": 16.0}) == 12
+    assert worker_threads({"cpu_cores_effective": 6.0}) == 6
+    assert worker_threads({"cpu_cores_effective": 0.5}) == 1 and worker_threads({}) == 12
 
 
 def test_games_per_day_uses_window_after_warmup():
