@@ -27,7 +27,7 @@ PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-clo
 ふだんは管理コンソールの **クラウド** タブから「起動」「停止」する（docs/runbook.md の自己対局ワーカーの節）。同じことをコマンドで行うとき:
 
 ```bash
-bin/libra-vast offers --gpu RTX_5070_Ti --max-dph 0.28          # 条件に合うオファー（借りない）
+bin/libra-vast offers --gpu RTX_5070_Ti --max-dph 0.28          # 全件に落ちた条件と 1 つ緩めれば通る値を付ける（借りない。--min-cores・--max-inet-cost も指定可）
 bin/libra-vast start --run ls --gpu RTX_5070_Ti --max-dph 0.28 --hours 3   # すぐ返る。準備に 5〜15 分
 bin/libra-vast status --account                                  # 段階・借りた時間・費用・回収局数・残高・インスタンス
 bin/libra-vast history                                           # 過去のセッションごとの費用・有効局（捨てた局を除く）・100 万局あたりの費用、月ごとの合計

@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from libra_cloud.bench import offer_query, pick_offers  # noqa: E402
+from libra_cloud.bench import MAX_INET_COST, offer_query, offer_rejects, pick_offers  # noqa: E402
 from vast_bench import IMAGE, KEY, ONSTART, image_cuda, log, try_create, wait_ssh  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
@@ -55,6 +55,7 @@ def main() -> int:
     ap.add_argument("--min-cores", type=int, default=16)
     ap.add_argument("--min-cpu-ghz", type=float, default=0.0)
     ap.add_argument("--min-rel", type=float, default=0.98)
+    ap.add_argument("--max-inet-cost", type=float, default=MAX_INET_COST, help="転送料（$/GB）の上限")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     from vastai.sdk import VastAI
@@ -73,10 +74,17 @@ def main() -> int:
     min_cuda = image_cuda(a.image)
     offers = v.search_offers(query=offer_query(a.gpu, a.min_rel, min_cuda, a.disk), type="on-demand", order="dph_total", limit=100,
                              storage=a.disk) or []
-    cands = pick_offers(offers, max_dph=a.max_dph, min_cores=a.min_cores, min_cpu_ghz=a.min_cpu_ghz, min_cuda=min_cuda, min_rel=a.min_rel)
+    cond = dict(max_dph=a.max_dph, min_cores=a.min_cores, min_cpu_ghz=a.min_cpu_ghz, min_cuda=min_cuda, min_rel=a.min_rel, max_inet_cost=a.max_inet_cost)
+    cands = pick_offers(offers, **cond)
     log(f"{len(offers)} offers, {len(cands)} usable; cheapest: "
         + ", ".join(f"#{o['id']} ${o['dph_total']:.3f}/h cpu {o.get('cpu_cores_effective')} {str(o.get('cpu_name'))[:28]} "
                     f"{o.get('geolocation', '')}" for o in cands[:3]))
+    if offers and not cands:  # 借りられなかった理由を launcher.log に残す（管理コンソールの「候補を見る」と同じ判定）
+        counts: dict[str, int] = {}
+        for o in offers:
+            for r in offer_rejects(o, **cond):
+                counts[r["key"]] = counts.get(r["key"], 0) + 1
+        log("rejected by: " + ", ".join(f"{k} {n}" for k, n in counts.items()))
     if a.dry_run or not cands:
         return 0 if cands else 3
     pub = KEY.with_suffix(".pub").read_text().strip()

@@ -5,7 +5,7 @@
     bin/libra-vast status [--json] [--account]
     bin/libra-vast history [--json]
     bin/libra-vast stop
-    bin/libra-vast offers --gpu "RTX 5070 Ti" --max-dph 0.28
+    bin/libra-vast offers --gpu "RTX 5070 Ti" --max-dph 0.28 [--min-cores 16 --max-inet-cost 0.02]   # 全件に落ちた理由を付ける
     bin/libra-vast cleanup --yes
 
 1 回の起動を「セッション」と呼び、~/libra-run/cloud/<run>-<時刻>/ に置く（session.json、launcher.log、束 worker/、
@@ -28,6 +28,8 @@ import sys
 import time
 import tomllib
 from pathlib import Path
+
+from libra_cloud.bench import MAX_INET_COST
 
 REPO = Path(__file__).resolve().parents[2]
 PROJECT_PY = REPO / ".venv" / "bin" / "python"
@@ -233,7 +235,8 @@ def launch_argv(a: argparse.Namespace, run_dir: Path, d: Path) -> list[str]:
             "--config", str(run_dir / "config.toml"), "--out", str(d / "worker"), "--n-games", str(a.n_games)]
     work = [str(VAST_PY), "-u", str(REPO / "libra-cloud" / "vast_worker.py"), "--gpu", a.gpu, "--max-dph", str(a.max_dph),
             "--hours", str(a.hours), "--run-dir", str(run_dir), "--bundle", str(d / "worker" / "bundle.tar.gz"), "--out", str(d),
-            "--min-rel", str(a.min_rel), "--min-cpu-ghz", str(a.min_cpu_ghz), "--min-cores", str(a.min_cores), "--n-games", str(a.n_games)]
+            "--min-rel", str(a.min_rel), "--min-cpu-ghz", str(a.min_cpu_ghz), "--min-cores", str(a.min_cores),
+            "--max-inet-cost", str(a.max_inet_cost), "--n-games", str(a.n_games)]
     return ["bash", "-c", f"{shlex.join(prep)} && exec {shlex.join(work)}"]
 
 
@@ -263,7 +266,7 @@ def cmd_start(a: argparse.Namespace) -> int:
         p = subprocess.Popen(launch_argv(a, run_dir, d), stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                              start_new_session=True, cwd=str(REPO), env=dict(os.environ, PYTHONPATH=PROJECT_PATH))
     write_json(d / "session.json", {"run": a.run, "gpu": a.gpu, "max_dph": a.max_dph, "hours": a.hours, "min_rel": a.min_rel,
-                                    "min_cpu_ghz": a.min_cpu_ghz, "min_cores": a.min_cores, "n_games": a.n_games,
+                                    "min_cpu_ghz": a.min_cpu_ghz, "min_cores": a.min_cores, "max_inet_cost": a.max_inet_cost, "n_games": a.n_games,
                                     "started": time.time(), "pid": p.pid})
     print(f"起動しました: {d.name}（pid {p.pid}。{a.gpu} を最大 ${a.max_dph:.2f}/h で {a.hours:g} 時間。準備に 5〜15 分）")
     return 0
@@ -336,25 +339,102 @@ def cmd_status(a: argparse.Namespace) -> int:
     return 0
 
 
+# offer_rejects の key の表示名（管理コンソールの入力欄の名前に合わせる）と、緩めるときの注意
+COND_LABELS = {"max_dph": "上限 $/h", "min_cores": "コア数の下限", "min_cpu_ghz": "CPU GHz の下限", "min_rel": "信頼度の下限",
+               "max_inet_cost": "転送料の上限", "min_down": "下り回線", "min_cuda": "CUDA", "num_gpus": "GPU 枚数", "price": "価格"}
+COND_FORMATS = {"max_dph": "{:.2f}", "min_cores": "{:d}", "min_cpu_ghz": "{:.1f}", "min_rel": "{:.2f}", "max_inet_cost": "{:.3f}"}
+COND_NOTES = {"min_cores": "コアが少ないと自己対局のスレッドが減って局/日が落ちる",
+              "min_cpu_ghz": "遅い CPU では探索が律速して GPU が遊ぶ",
+              "min_rel": "途中で落ちやすい（落ちてもインスタンスは消す）",
+              "max_inet_cost": "重みと局の転送で 1 日に数 GB〜数十 GB 流れる"}
+
+
+def _width(s: str) -> int:
+    import unicodedata
+
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in s)
+
+
+def _pad(s: str, w: int) -> str:
+    return s + " " * max(0, w - _width(s))
+
+
+def _rjust(s: str, w: int) -> str:
+    return " " * max(0, w - _width(s)) + s
+
+
+def _short_cpu(name) -> str:
+    """表の幅に収めるため、CPU 名から型番に要らない語を落とす（"AMD EPYC 7B13 64-Core Processor" → "AMD EPYC 7B13"）。"""
+    return re.sub(r"\s+", " ", re.sub(r"®|\(R\)|\(TM\)|\bCPU\b|\d+-Core|\bProcessor\b|with Radeon.*$|@.*$", "", str(name or ""))).strip()
+
+
+def offers_report(gpu: str, offers: list[dict], cond: dict, disk: float) -> dict:
+    """検索したオファー全件に落ちた理由を付け、条件を 1 つ緩めれば通るものを添える（offers コマンドと管理コンソールの「候補を見る」）。
+    cond: max_dph・min_cores・min_cpu_ghz・min_rel・max_inet_cost・min_cuda（vast_worker.py の pick_offers と同じ値）。"""
+    from libra_cloud.bench import near_misses, offer_rejects, pick_offers
+
+    cands = pick_offers(offers, **cond)
+    rank = {id(o): i + 1 for i, o in enumerate(cands)}
+
+    def row(o: dict) -> dict:
+        return {"id": o.get("id"), "dph": round(float(o.get("dph_total") or 0), 3), "cpu": _short_cpu(o.get("cpu_name")),
+                "cores": o.get("cpu_cores_effective"), "ghz": round(float(o.get("cpu_ghz") or 0), 2),
+                "reliability": round(float(o.get("reliability2") or o.get("reliability") or 0), 3),
+                "inet_cost": round(max(o.get("inet_up_cost") or 0, o.get("inet_down_cost") or 0), 4), "where": o.get("geolocation")}
+
+    rows = []
+    counts: dict[str, int] = {}
+    for o in sorted(offers, key=lambda o: (float(o.get("dph_total") or 0), -(o.get("cpu_cores_effective") or 0))):
+        reasons = offer_rejects(o, **cond)
+        for r in reasons:
+            counts[r["key"]] = counts.get(r["key"], 0) + 1
+        rows.append({**row(o), "ok": not reasons, "rank": rank.get(id(o)), "reasons": reasons})
+    hints = []
+    for h in near_misses(offers, **cond):
+        need_text = COND_FORMATS[h["key"]].format(h["need"])
+        hints.append({"key": h["key"], "need": h["need"], "label": COND_LABELS[h["key"]], "need_text": need_text,
+                      "note": COND_NOTES.get(h["key"], ""), "offer": row(h["offer"])})
+
+    lines = [f"{gpu}: 検索 {len(offers)} 件、条件に合う {len(cands)} 件" + ("（起動すると ○1 から順に借りる）" if cands else ""),
+             f"条件: 上限 ${cond['max_dph']:.2f}/h、コア {cond['min_cores']} 以上、CPU {cond['min_cpu_ghz']:.1f} GHz 以上、"
+             f"信頼度 {cond['min_rel']:.2f} 以上、転送料 ${cond['max_inet_cost']:.3f}/GB 以下",
+             f"（検索の時点で 1 GPU・verified・下り 200 Mbps 以上・CUDA {cond['min_cuda']:g} 以上・ディスク {disk:g} GB 以上に絞っている）"]
+    if counts:
+        lines.append("落ちた理由: " + "、".join(f"{COND_LABELS.get(k, k)} {n} 件" for k, n in sorted(counts.items(), key=lambda kv: -kv[1])))
+    if rows:
+        lines += ["", f"{_pad('判定', 5)}{'$/h':>6} {_rjust('コア', 4)} {'GHz':>5} {_rjust('信頼度', 6)} {_rjust('転送料', 6)}  {_pad('CPU', 30)} {_pad('場所', 18)} 理由"]
+        for r in rows:
+            mark = f"○{r['rank']}" if r["ok"] else "×"
+            cores = "-" if r["cores"] is None else f"{r['cores']:g}"
+            lines.append(f"{_pad(mark, 5)}{r['dph']:>6.3f} {cores:>4} {r['ghz']:>5.2f} {r['reliability']:>6.3f} "
+                         f"{r['inet_cost']:>6.3f}  {_pad(r['cpu'][:30], 30)} {_pad(str(r['where'] or '-')[:18], 18)} "
+                         + "、".join(x["text"] for x in r["reasons"]))
+    if hints:
+        lines += ["", "1 つ緩めれば借りられる:"]
+        for h in hints:
+            f = h["offer"]
+            lines.append(f"  {h['label']} を {h['need_text']} にすると ${f['dph']:.3f}/h {f['cpu'][:30]}（{f['cores']:g} コア、{f['ghz']:.2f} GHz、"
+                         f"信頼度 {f['reliability']:.3f}、{f['where']}）" + (f"  ※{h['note']}" if h["note"] else ""))
+    elif not cands and offers:
+        lines += ["", "1 つ緩めるだけで借りられるオファーはありません。GPU を変えるか、時間をおいて見直してください。"]
+    return {"gpu": gpu, "cond": cond, "offers": len(offers), "usable": len(cands), "top": [r for r in rows if r["ok"]][:8],
+            "all": rows, "reject_counts": counts, "hints": hints, "text": "\n".join(lines)}
+
+
 def cmd_offers(a: argparse.Namespace) -> int:
     sys.path.insert(0, str(REPO / "libra-cloud"))
     from vastai.sdk import VastAI
 
-    from libra_cloud.bench import offer_query, pick_offers
+    from libra_cloud.bench import offer_query
     from vast_bench import IMAGE, image_cuda
 
     min_cuda = image_cuda(IMAGE)
     v = VastAI(raw=True, quiet=True)
     offers = v.search_offers(query=offer_query(a.gpu, a.min_rel, min_cuda, 30), type="on-demand", order="dph_total", limit=100, storage=30) or []
-    cands = pick_offers(offers, max_dph=a.max_dph, min_cores=a.min_cores, min_cpu_ghz=a.min_cpu_ghz, min_cuda=min_cuda, min_rel=a.min_rel)
-    rows = [{"id": o["id"], "dph": round(float(o["dph_total"]), 3), "cpu": str(o.get("cpu_name") or "").strip(), "cores": o.get("cpu_cores_effective"),
-             "reliability": round(float(o.get("reliability2") or 0), 3), "where": o.get("geolocation")} for o in cands[:8]]
-    if a.json:
-        print(json.dumps({"gpu": a.gpu, "offers": len(offers), "usable": len(cands), "top": rows}, ensure_ascii=False))
-    else:
-        print(f"{a.gpu}: 検索 {len(offers)} 件、条件に合う {len(cands)} 件")
-        for r in rows:
-            print(f"  ${r['dph']:.3f}/h  {r['cpu'][:34]}  {r['cores']} コア  信頼度 {r['reliability']}  {r['where']}")
+    cond = {"max_dph": a.max_dph, "min_cores": a.min_cores, "min_cpu_ghz": a.min_cpu_ghz, "min_rel": a.min_rel,
+            "max_inet_cost": a.max_inet_cost, "min_cuda": min_cuda}
+    rep = offers_report(a.gpu, offers, cond, disk=30)
+    print(json.dumps(rep, ensure_ascii=False) if a.json else rep["text"])
     return 0
 
 
@@ -392,13 +472,14 @@ def main(argv: list[str] | None = None) -> int:
     p_s.add_argument("--run", default="ls")
     p_s.add_argument("--run-root", default="~/libra-run")
     p_s.add_argument("--force", action="store_true", help="[workers] enabled でなくても起動する")
-    for p in (p_s, sub.add_parser("offers", help="条件に合うオファーを安い順に出す（借りない）")):
+    for p in (p_s, sub.add_parser("offers", help="検索したオファーを安い順に、落ちた理由と 1 つ緩めれば通る条件を付けて出す（借りない）")):
         p.add_argument("--gpu", default="RTX 5070 Ti")
         p.add_argument("--max-dph", type=float, default=0.28, help="1 時間あたりの上限（$、ストレージ込み）")
         p.add_argument("--min-rel", type=float, default=0.94)
         p.add_argument("--min-cpu-ghz", type=float, default=4.4,
                        help="CPU の最大周波数の下限。遅い CPU のホストでは探索が律速して GPU が遊ぶ（measurements.md 2026-09-14）")
-        p.add_argument("--min-cores", type=int, default=16)
+        p.add_argument("--min-cores", type=int, default=16, help="実効コア数の下限（自己対局のスレッドはホストの CPU 数、12 まで）")
+        p.add_argument("--max-inet-cost", type=float, default=MAX_INET_COST, help="転送料（$/GB、上り・下りの高い方）の上限")
         p.add_argument("--json", action="store_true")
     p_s.add_argument("--hours", type=float, default=3.0)
     p_s.add_argument("--n-games", type=int, default=512)

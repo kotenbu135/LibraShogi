@@ -921,6 +921,10 @@ $vbar.Controls.Add((New-Label '上限 $/h' 4)); $numDph = New-Num 0.05 2.00 0.28
 $vbar.Controls.Add((New-Label "時間" 4)); $numHours = New-Num 0.5 24 3 0.5 1; $vbar.Controls.Add($numHours)
 $vbar.Controls.Add((New-Label "信頼度の下限" 4)); $numRel = New-Num 0.90 0.99 0.94 0.01 2; $vbar.Controls.Add($numRel)
 $vbar.Controls.Add((New-Label "CPU GHz の下限" 4)); $numGhz = New-Num 0 9 4.4 0.1 1; $vbar.Controls.Add($numGhz)
+$vbar.Controls.Add((New-Label "コア数の下限" 4)); $numCores = New-Num 1 128 16 1 0 52; $vbar.Controls.Add($numCores)
+$vbar.Controls.Add((New-Label '転送料の上限 $/GB' 4)); $numInet = New-Num 0 0.2 0.02 0.005 3; $vbar.Controls.Add($numInet)
+# 「候補を見る」の「1 つ緩めれば借りられる」の key（libra_cloud.bench.offer_rejects）と入力欄の対応
+$script:VastNums = @{ max_dph = $numDph; min_rel = $numRel; min_cpu_ghz = $numGhz; min_cores = $numCores; max_inet_cost = $numInet }
 $bVastStart = New-Button "起動" { Start-Vast } 56
 $bVastStop = New-Button "停止" { Stop-Vast } 56
 $bVastOffers = New-Button "候補を見る" { Show-VastOffers } 90
@@ -929,7 +933,9 @@ $bVastCleanup = New-Button "後始末" { Cleanup-Vast } 70
 foreach ($b in @($bVastStart, $bVastStop, $bVastOffers, $bVastAccount, $bVastCleanup)) { $vbar.Controls.Add($b) }
 $script:Tip.SetToolTip($bVastStart, "GPU を借りて自己対局ワーカーを起動し、ls に局を足す（準備に 5〜15 分。時間が来たら残りの局を取ってインスタンスを消す）")
 $script:Tip.SetToolTip($bVastStop, "ワーカーを止めて残りの局を取り、インスタンスを消す")
-$script:Tip.SetToolTip($bVastOffers, "条件に合うオファーを安い順に出す（借りない）")
+$script:Tip.SetToolTip($bVastOffers, "検索したオファーを安い順に、落ちた条件と「1 つ緩めれば借りられる」値を付けて出す（借りない）")
+$script:Tip.SetToolTip($numCores, "ホストの実効コア数の下限（自己対局のスレッドは 12 まで。少ないと局/日が落ちる）")
+$script:Tip.SetToolTip($numInet, "転送料（上り・下りの高い方）の上限。重みと局の転送で 1 日に数 GB〜数十 GB 流れる")
 $script:Tip.SetToolTip($bVastCleanup, "libra- で始まるラベルのインスタンスをすべて消す（起動の途中で落ちて残ったとき）")
 $script:Tip.SetToolTip($numGhz, "CPU が遅いホストでは探索が律速して GPU が遊ぶ（5070 Ti で Xeon 2.4 GHz 35 万局/日、Ryzen 4.5 GHz 48 万局/日）")
 $vroot.Controls.Add($vbar, 0, 0)
@@ -1384,7 +1390,8 @@ function Start-Run([string]$run) {
 # ---- クラウドの操作と表示 ----
 function Get-VastArgs {
     return @("--gpu", ([string]$cmbGpu.SelectedItem -replace " ", "_"), "--max-dph", ("{0:0.00}" -f [double]$numDph.Value),
-             "--min-rel", ("{0:0.00}" -f [double]$numRel.Value), "--min-cpu-ghz", ("{0:0.0}" -f [double]$numGhz.Value))
+             "--min-rel", ("{0:0.00}" -f [double]$numRel.Value), "--min-cpu-ghz", ("{0:0.0}" -f [double]$numGhz.Value),
+             "--min-cores", ("{0:0}" -f [double]$numCores.Value), "--max-inet-cost", ("{0:0.000}" -f [double]$numInet.Value))
 }
 function Start-Vast {
     $o = $script:Vast
@@ -1416,12 +1423,55 @@ function Stop-Vast {
     $script:NextVast = [datetime]::Now.AddSeconds(3)
 }
 function Show-VastOffers {
-    try {
-        $r = Invoke-Vast (@("offers") + (Get-VastArgs))
-        [void][System.Windows.Forms.MessageBox]::Show($form, $r.text, ("候補（{0}）" -f [string]$cmbGpu.SelectedItem), "OK", "Information")
-    } catch {
-        Set-Note "vast" ("候補の取得に失敗: " + $_.Exception.Message) $true 300
+    # 検索した全件と落ちた理由を等幅の表で出す。「1 つ緩めれば借りられる」のボタンで入力欄の値を変えて検索し直し、
+    # 「この条件で起動」で起動の確認へ進む（判定は libra-vast offers --json。起動も同じ Get-VastArgs を使うので結果が食い違わない）
+    $action = "search"
+    while ($action -eq "search") {
+        $action = ""
+        $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+        try {
+            $r = Invoke-Vast (@("offers", "--json") + (Get-VastArgs))
+            $line = @($r.text -split "`n" | Where-Object { $_.TrimStart().StartsWith("{") }) | Select-Object -Last 1
+            if ($r.code -ne 0 -or -not $line) { throw $r.text }
+            $o = $line | ConvertFrom-Json
+        } catch {
+            Set-Note "vast" ("候補の取得に失敗: " + $_.Exception.Message) $true 300
+            return
+        } finally {
+            $form.Cursor = [System.Windows.Forms.Cursors]::Default
+        }
+        $dlg = New-Object System.Windows.Forms.Form
+        $dlg.Text = "候補（{0}）  検索 {1} 件、条件に合う {2} 件" -f [string]$cmbGpu.SelectedItem, [int]$o.offers, [int]$o.usable
+        $dlg.StartPosition = "CenterParent"; $dlg.Width = 1180; $dlg.Height = 560; $dlg.MinimizeBox = $false
+        $txt = New-Object System.Windows.Forms.TextBox
+        $txt.Multiline = $true; $txt.ReadOnly = $true; $txt.ScrollBars = "Both"; $txt.WordWrap = $false; $txt.Dock = "Fill"
+        $txt.Font = New-Object System.Drawing.Font("Consolas", 9.5); $txt.BackColor = [System.Drawing.Color]::White
+        $txt.Text = ([string]$o.text) -replace "`r?`n", "`r`n"
+        $btns = New-Object System.Windows.Forms.FlowLayoutPanel
+        $btns.Dock = "Bottom"; $btns.AutoSize = $true; $btns.WrapContents = $true; $btns.Padding = New-Object System.Windows.Forms.Padding(4)
+        foreach ($h in @($o.hints)) {
+            $num = $script:VastNums[[string]$h.key]
+            if ($null -eq $num) { continue }
+            $b = New-Button ("{0} を {1} に" -f $h.label, $h.need_text) { $this.Tag.num.Value = $this.Tag.value; $this.FindForm().Tag = "search"; $this.FindForm().Close() }
+            $b.AutoSize = $true
+            $b.Tag = @{ num = $num; value = [decimal][double]$h.need }
+            if ([decimal][double]$h.need -lt $num.Minimum -or [decimal][double]$h.need -gt $num.Maximum) { $b.Enabled = $false }
+            $script:Tip.SetToolTip($b, ('入力欄の値を変えて検索し直す（${0:N3}/h {1}）{2}' -f [double]$h.offer.dph, $h.offer.cpu, $(if ($h.note) { "。" + $h.note } else { "" })))
+            $btns.Controls.Add($b)
+        }
+        $bAgain = New-Button "検索し直す" { $this.FindForm().Tag = "search"; $this.FindForm().Close() } 90
+        $bGo = New-Button "この条件で起動…" { $this.FindForm().Tag = "start"; $this.FindForm().Close() } 120
+        $bGo.Enabled = ([int]$o.usable -gt 0 -and -not ($null -ne $script:Vast -and $null -ne $script:Vast.session -and $script:Vast.session.alive))
+        $bClose = New-Button "閉じる" { $this.FindForm().Close() } 70
+        foreach ($b in @($bAgain, $bGo, $bClose)) { $btns.Controls.Add($b) }
+        $dlg.Controls.Add($txt)
+        $dlg.Controls.Add($btns)
+        $dlg.CancelButton = $bClose
+        [void]$dlg.ShowDialog($form)
+        $action = [string]$dlg.Tag
+        $dlg.Dispose()
     }
+    if ($action -eq "start") { Start-Vast }
 }
 function Cleanup-Vast {
     $o = $script:Vast

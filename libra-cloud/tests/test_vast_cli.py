@@ -123,6 +123,33 @@ def test_status_reports_cost_remaining_and_result(tmp_path: Path, capsys):
     assert vast_cli.main(["--root", str(tmp_path / "empty"), "status"]) == 0 and "まだありません" in capsys.readouterr().out
 
 
+def test_offers_report_explains_why_each_offer_was_rejected():
+    """「検索 6 件、条件に合う 0 件」だけでは直しようがないので、全件に理由を付け、1 つ緩めれば通る条件を出す（2026-09-15 の実際の検索結果）。"""
+    def o(i, dph, cores, ghz, cpu, inet, rel=0.99, where="Texas, US"):
+        return {"id": i, "dph_total": dph, "num_gpus": 1, "cpu_cores_effective": cores, "cpu_ghz": ghz, "cpu_name": cpu + " ",
+                "inet_down": 600.0, "reliability2": rel, "cuda_max_good": 13.2, "inet_up_cost": inet, "inet_down_cost": inet, "geolocation": where}
+
+    offers = [o(49263616, 0.12166, 6.0, 3.5, "Xeon® E5-2687W v4", 0.0039, where="South Korea, KR"),
+              o(38692155, 0.12166, 4.0, 3.2, "Xeon® E5-2630 v3", 0.0039, where="South Korea, KR"),
+              o(42372176, 0.21111, 8.0, 5.2716, "AMD Ryzen 7 9800X3D 8-Core Processor", 0.0390625, rel=0.9778, where="Kansas, US"),
+              o(49877056, 0.54444, 64.0, 3.5413679, "AMD EPYC 7B13 64-Core Processor", 0.0260416),
+              o(49702284, 0.54444, 64.0, 3.5413679, "AMD EPYC 7B13 64-Core Processor", 0.0260416, rel=0.9845),
+              o(50306639, 1.35555, 32.0, 5.4627109, "AMD Ryzen 9 7945HX with Radeon Graphics", 0.0065, where="Wisconsin, US")]
+    cond = {"max_dph": 1.30, "min_cores": 16, "min_cpu_ghz": 0.0, "min_rel": 0.90, "max_inet_cost": 0.02, "min_cuda": 12.9}
+    rep = vast_cli.offers_report("RTX 5070 Ti", offers, cond, disk=30)
+    assert rep["offers"] == 6 and rep["usable"] == 0 and rep["top"] == []
+    assert [len(r["reasons"]) for r in rep["all"]] == [1, 1, 2, 1, 1, 1]
+    assert rep["reject_counts"] == {"min_cores": 3, "max_inet_cost": 3, "max_dph": 1}
+    assert [(h["key"], h["need"], h["offer"]["id"]) for h in rep["hints"]] == [("min_cores", 6, 49263616), ("max_inet_cost", 0.027, 49877056),
+                                                                              ("max_dph", 1.36, 50306639)]
+    text = rep["text"]
+    assert "検索 6 件、条件に合う 0 件" in text and "コア数の下限 3 件" in text and "転送料の上限 3 件" in text
+    assert "上限 $/h を 1.36 にすると" in text and "Ryzen 9 7945HX" in text and "コア 6 < 16" in text
+    # 緩めると通って、借りる順（安い順）の先頭に来る
+    rep = vast_cli.offers_report("RTX 5070 Ti", offers, {**cond, "max_dph": 1.36}, disk=30)
+    assert rep["usable"] == 1 and rep["top"][0]["id"] == 50306639 and rep["all"][-1]["ok"] and "条件に合う 1 件" in rep["text"]
+
+
 def _write(p: Path, obj) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(obj if isinstance(obj, str) else json.dumps(obj), encoding="utf-8")

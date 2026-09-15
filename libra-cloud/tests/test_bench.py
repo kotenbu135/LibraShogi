@@ -10,7 +10,7 @@ import torch
 
 import librasearch
 import librashogi as ls
-from libra_cloud.bench import bench_config, games_per_day, pick_offers, scan_inbox
+from libra_cloud.bench import bench_config, games_per_day, near_misses, offer_rejects, pick_offers, scan_inbox
 from libra_cloud.prepare import BUNDLE_PATHS, make_bundle, write_run_dir
 from libra_league.config import load_config
 from libra_league.workers import load_weights, write_games_file
@@ -51,6 +51,38 @@ def test_pick_offers_filters_and_sorts():
     shaky = [_offer(30, 0.245, reliability2=0.9426), _offer(31, 0.30, reliability2=0.99)]
     assert [o["id"] for o in pick_offers(shaky, max_dph=0.5)] == [31]
     assert [o["id"] for o in pick_offers(shaky, max_dph=0.5, min_rel=0.94)] == [30, 31]
+
+
+def test_offer_rejects_names_every_failed_condition_and_the_value_that_would_pass():
+    """管理コンソールの「候補を見る」: 落ちたオファーにどの条件で落ちたかと、その条件をいくつにすれば通るかを付ける。"""
+    cond = dict(max_dph=1.30, min_cores=16, min_cpu_ghz=0.0, min_rel=0.90, min_cuda=12.9)
+    assert offer_rejects(_offer(1, 0.2, cuda_max_good=13.0), **cond) == []
+    r = offer_rejects(_offer(2, 0.2111, cpu_cores_effective=8.0, inet_up_cost=0.0390625, inet_down_cost=0.0390625), **cond)
+    assert [(x["key"], x["need"]) for x in r] == [("min_cores", 8), ("max_inet_cost", 0.04)]
+    assert "8 < 16" in r[0]["text"]
+    r = offer_rejects(_offer(3, 1.3555555, cpu_ghz=3.5413679, reliability2=0.9778005, cuda_max_good=12.4, num_gpus=2, inet_down=50.0),
+                      **{**cond, "min_cpu_ghz": 4.4, "min_rel": 0.98})
+    assert [(x["key"], x["need"]) for x in r] == [("max_dph", 1.36), ("num_gpus", None), ("min_cpu_ghz", 3.5), ("min_down", None),
+                                                  ("min_rel", 0.97), ("min_cuda", None)]
+    assert offer_rejects(_offer(4, 0.2, cuda_max_good=13.0), **cond, price_key="min_bid")[0]["key"] == "price"
+    # 通るのに要る値を入れれば本当に通る
+    o = _offer(5, 1.3555555, cpu_cores_effective=6.0, cpu_ghz=3.5413679, reliability2=0.9778005, inet_up_cost=0.0260416, cuda_max_good=13.0)
+    need = {x["key"]: x["need"] for x in offer_rejects(o, **{**cond, "min_cpu_ghz": 4.4, "min_rel": 0.98})}
+    assert offer_rejects(o, **{**cond, **need}) == []
+
+
+def test_near_misses_lists_the_cheapest_offer_each_single_relaxation_would_admit():
+    cond = dict(max_dph=1.30, min_cores=16, min_cpu_ghz=0.0, min_rel=0.90, min_cuda=12.9)
+    offers = [
+        _offer(1, 0.1216, cpu_cores_effective=6.0, cuda_max_good=13.0),                                          # コアだけ
+        _offer(2, 0.1216, cpu_cores_effective=4.0, cuda_max_good=13.0),                                          # コアだけ（より少ない）
+        _offer(3, 0.2111, cpu_cores_effective=8.0, inet_up_cost=0.039, cuda_max_good=13.0),                      # 2 つ
+        _offer(4, 0.5444, cpu_cores_effective=64.0, inet_up_cost=0.0260416, cuda_max_good=13.0),                 # 転送料だけ
+        _offer(5, 1.3555555, cpu_cores_effective=32.0, cuda_max_good=13.0),                                      # 値段だけ
+        _offer(6, 0.30, cpu_cores_effective=16.0, cuda_max_good=12.4),                                           # 緩められない条件
+    ]
+    got = [(h["key"], h["need"], h["offer"]["id"]) for h in near_misses(offers, **cond)]
+    assert got == [("min_cores", 6, 1), ("max_inet_cost", 0.027, 4), ("max_dph", 1.36, 5)]
 
 
 def test_games_per_day_uses_window_after_warmup():

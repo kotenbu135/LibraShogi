@@ -23,17 +23,73 @@ def pick_offers(offers: list[dict], *, max_dph: float, price_key: str = "dph_tot
 
     min_cpu_ghz: CPU の最大周波数（vast.ai の cpu_ghz）の下限。自己対局の探索の反映（apply）は 1 スレッドの速さで決まり、
     2016 年ごろのサーバー CPU（2.4 GHz 前後）では GPU が半分遊んだ（measurements.md 2026-09-14）。"""
-    def ok(o: dict) -> bool:
-        price = o.get(price_key)
-        return (price is not None and price <= max_dph and o.get("num_gpus") == 1
-                and (o.get("cpu_cores_effective") or 0) >= min_cores
-                and float(o.get("cpu_ghz") or 0) >= min_cpu_ghz
-                and (o.get("inet_down") or 0) >= min_down
-                and (o.get("reliability2") or o.get("reliability") or 0) >= min_rel
-                and float(o.get("cuda_max_good") or 0) >= min_cuda
-                and max(o.get("inet_up_cost") or 0, o.get("inet_down_cost") or 0) <= max_inet_cost)
+    ok = [o for o in offers if not offer_rejects(o, max_dph=max_dph, price_key=price_key, min_cores=min_cores, min_down=min_down, min_rel=min_rel,
+                                                 min_cuda=min_cuda, max_inet_cost=max_inet_cost, min_cpu_ghz=min_cpu_ghz)]
+    return sorted(ok, key=lambda o: (o[price_key], -(o.get("cpu_cores_effective") or 0)))
 
-    return sorted((o for o in offers if ok(o)), key=lambda o: (o[price_key], -(o.get("cpu_cores_effective") or 0)))
+
+# 管理コンソールの入力欄で緩められる条件（offer_rejects の key）
+ADJUSTABLE = ("max_dph", "min_cores", "min_cpu_ghz", "min_rel", "max_inet_cost")
+
+
+def _ceil(x: float, digits: int) -> float:
+    return math.ceil(round(x * 10 ** digits, 6)) / 10 ** digits
+
+
+def _floor(x: float, digits: int) -> float:
+    return math.floor(round(x * 10 ** digits, 6)) / 10 ** digits
+
+
+def offer_rejects(o: dict, *, max_dph: float, price_key: str = "dph_total", min_cores: int = 8, min_down: float = 200.0,
+                  min_rel: float = 0.98, min_cuda: float = 12.8, max_inet_cost: float = MAX_INET_COST, min_cpu_ghz: float = 0.0) -> list[dict]:
+    """pick_offers の条件のうちオファーが満たさないものを返す（満たせば空）。各要素は {key, text, need}。
+    need はその条件の値をいくつにすれば通るか（ADJUSTABLE の条件だけ。表示の桁に丸めて、丸めても通る側に寄せる）。"""
+    out: list[dict] = []
+
+    def add(key: str, text: str, need=None) -> None:
+        out.append({"key": key, "text": text, "need": need})
+
+    price = o.get(price_key)
+    if price is None:
+        add("price", f"{price_key} の欄なし")
+    elif price > max_dph:
+        add("max_dph", f"${price:.3f}/h > 上限 ${max_dph:.2f}", _ceil(price, 2))
+    if o.get("num_gpus") != 1:
+        add("num_gpus", f"GPU {o.get('num_gpus')} 枚")
+    cores = o.get("cpu_cores_effective") or 0
+    if cores < min_cores:
+        add("min_cores", f"コア {cores:g} < {min_cores}", int(cores))
+    ghz = float(o.get("cpu_ghz") or 0)
+    if ghz < min_cpu_ghz:
+        add("min_cpu_ghz", f"CPU {ghz:.2f} GHz < {min_cpu_ghz:.1f}", _floor(ghz, 1))
+    down = o.get("inet_down") or 0
+    if down < min_down:
+        add("min_down", f"下り {down:.0f} Mbps < {min_down:.0f}")
+    rel = o.get("reliability2") or o.get("reliability") or 0
+    if rel < min_rel:
+        add("min_rel", f"信頼度 {rel:.3f} < {min_rel:.2f}", _floor(rel, 2))
+    cuda = float(o.get("cuda_max_good") or 0)
+    if cuda < min_cuda:
+        add("min_cuda", f"CUDA {cuda:g} < {min_cuda:g}")
+    inet = max(o.get("inet_up_cost") or 0, o.get("inet_down_cost") or 0)
+    if inet > max_inet_cost:
+        add("max_inet_cost", f"転送料 ${inet:.3f}/GB > 上限 ${max_inet_cost:.3f}", _ceil(inet, 3))
+    return out
+
+
+def near_misses(offers: list[dict], **cond) -> list[dict]:
+    """条件を 1 つだけ緩めれば通るオファーを、緩める条件ごとに借りる順で先頭のもの 1 件ずつ返す（そのオファーの値段の順）。
+    各要素は {key, need, text, offer}。"""
+    best: dict[str, tuple] = {}
+    price_key = cond.get("price_key", "dph_total")
+    for o in offers:
+        r = offer_rejects(o, **cond)
+        if len(r) != 1 or r[0]["key"] not in ADJUSTABLE:
+            continue
+        rank = (o[price_key], -(o.get("cpu_cores_effective") or 0))
+        if r[0]["key"] not in best or rank < best[r[0]["key"]][0]:
+            best[r[0]["key"]] = (rank, {**r[0], "offer": o})
+    return [h for _, h in sorted(best.values(), key=lambda x: x[0])]
 
 
 def offer_query(gpu: str, min_rel: float, min_cuda: float, disk: float) -> str:
