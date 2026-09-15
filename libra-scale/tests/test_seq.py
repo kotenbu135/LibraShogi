@@ -110,11 +110,21 @@ def test_alerts_symmetric_gote_lean():
     fired: list[str] = []
     assert R.check_alerts(states, groups, rule, fired) == []
     s = states["5i 5a"]
-    s.update(n=2450, sente=1127, gote=1323, next_look=2450)  # 先手の得点 0.46
+    s.update(n=2400, sente=1104, gote=1296, next_look=2450)  # 先手の得点 0.46、まだ止まっていない
+    alerts = R.check_alerts(states, groups, rule, fired)
+    assert ("5i 5a", "早期") in {(a["target"], a["level"]) for a in alerts}
+    s.update(n=2450, sente=1127, gote=1323)
     assert R.update(s, rule, True) == "eps"
     alerts = R.check_alerts(states, groups, rule, fired)
     got = {(a["target"], a["level"]) for a in alerts}
-    assert ("5i 5a", "確定") in got and ("5i 5a", "早期") in got
+    assert ("5i 5a", "確定") in got
+    # 止まった組は、後から届いた局で傾いても早期のアラートを出さない
+    s2 = states["5h 5b"]
+    s2.update(n=2450, sente=1225, gote=1225, next_look=2450)
+    assert R.update(s2, rule, True) == "eps"
+    s2.update(n=2800, sente=1225, gote=1575)
+    assert not [a for a in R.check_alerts(states, groups, rule, fired) if a["target"] == "5h 5b"]
+    alerts = alerts + [a for a in R.check_alerts(states, groups, rule, []) if a["target"].startswith("group")]
     assert {"group:five", "group:line", "group:point", "group:all"} <= {a["target"] for a in alerts}
     assert all(a["winrate"] < 0.5 and "後手" in a["message"] for a in alerts)
     assert R.check_alerts(states, groups, rule, fired) == []  # 同じアラートは 1 回だけ

@@ -198,7 +198,8 @@ def check_alerts(states: dict[str, dict], groups: dict[str, list[str]], rule: Ru
         if st["stop"] in ("eps", "cap") and st["stop_w"] + Z * st["stop_se"] < 0.5:
             emit(f"{k}:final", "確定", k, label, st["stop_n"], st["stop_w"], st["stop_se"], Z)
         m, se = stats(st)
-        if st["n"] >= rule.min_games and m + Z_EARLY * se < 0.5:
+        # 止まった組は確定の判定だけにする（止まった後に届いた局で早期だけが出ると、確定と食い違って見える）
+        if st["stop"] is None and st["n"] >= rule.min_games and m + Z_EARLY * se < 0.5:
             emit(f"{k}:early", "早期", k, label, st["n"], m, se, Z_EARLY)
     for g, ks in {**groups, "all": sym}.items():
         ks = [k for k in ks if k in states]
