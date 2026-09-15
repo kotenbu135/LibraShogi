@@ -2,10 +2,13 @@
 # Libra 管理コンソール（Windows 用 GUI）。
 # WSL 内の bin/libra を wsl.exe 経由で呼び、本体 ls と搾取者 lx の進捗・速度・強さの推移を表示し、
 # 起動 / 停止 / 自己評価・対外対局の前倒しを行う（一時停止・再開は 2026-09-14 に廃止。docs/decisions.md）。
+# 縦長のウィンドウが前提（2026-09-15）。上のタブで ls / lx / クラウド / クラウド履歴 を切り替え、タブの見出しに稼働状態を出す。
 # クラウド タブ: bin/libra-vast で vast.ai の自己対局ワーカーを起動 / 停止し、段階・回収局数・費用・残高を表示する。
+# クラウド履歴 タブ: bin/libra-vast history で過去のセッションごとの費用・有効局・100 万局あたりの費用と今月の合計を表示する。
 # 起動: libra-console.bat（powershell -ExecutionPolicy Bypass -File libra-console.ps1）
 # 自動テスト: -Screenshot C:\path\shot.png で 1 回更新して画面を PNG に保存し終了する（要約を stdout に出す）。
-#             -Tab <タブ名> で保存時に表示するグラフを選ぶ。
+#             -Tab <名前>[,<名前>] で保存時に表示するタブを選ぶ（上のタブ: ls, lx, クラウド, クラウド履歴。グラフ: 局/日, Elo, 対外対局, 学習, 終局内訳, 手数, ログ）。
+#             -Size 600x1200 でウィンドウの大きさを指定する（-Screenshot のときは前回の位置と大きさを復元しない）。
 #             -Do "lx:stop" のようにボタンと同じ操作だけを GUI なしで実行して結果を出す（起動は含まない）。
 #             -Do "vast:status" で bin/libra-vast を呼ぶ（例: vast:offers --gpu RTX_5070_Ti）。
 #             -UpdateDesktopModel で desktop（天秤将棋GUI）に登録した libra.exe のモデルを最新の latest.onnx に置き換えて終了する。
@@ -15,14 +18,17 @@ param(
     [string[]]$Runs = @("ls", "lx"),
     [int]$IntervalSec = 15,
     [int]$HistorySec = 300,
-    [int]$LogLines = 8,
+    [int]$LogLines = 40,          # グラフの「ログ」タブに出す log.txt の末尾の行数
     [string]$Screenshot = "",
     [string]$Tab = "",
+    [string]$Size = "",
     [string]$Do = "",
     [string]$RunRoot = "/home/sakis/libra-run",
     [string]$ModelRun = "ls",
     [string]$LibraVast = "/home/sakis/LibraShogi/bin/libra-vast",
     [int]$VastAccountSec = 300,
+    [double]$UsdJpy = 150,        # クラウド履歴の月の費用を円に直す目安
+    [int]$BudgetJpy = 10000,      # 追加の計算費用の月の上限（docs/decisions.md 2026-09-13 のユーザーの決定）
     [string]$DesktopExe = "C:\Users\sakis\AppData\Local\天秤将棋GUI\tenbin-shogi-gui.exe",
     [string]$DesktopEngineDir = (Join-Path $env:APPDATA "com.fusekishogi.tenbin\engines\libra\engine"),
     [switch]$UpdateDesktopModel
@@ -37,7 +43,8 @@ trap {
     exit 1
 }
 
-$script:RunTitles = @{ ls = "ls  本体 L-S"; lx = "lx  搾取者" }
+$script:TabTitles = @{ ls = "ls 本体"; lx = "lx 搾取者"; cloud = "クラウド"; history = "クラウド履歴" }
+$script:TabState = @{}  # 上のタブの Tag -> @{text; color}（見出しの右に出す稼働状態）
 $script:TaskNames = @{ ls = "LibraShogi run"; lx = "LibraShogi run lx" }
 $script:Colors = @{ ls = [System.Drawing.Color]::FromArgb(31, 119, 180); lx = [System.Drawing.Color]::FromArgb(255, 127, 14) }
 $script:Palette = @([System.Drawing.Color]::FromArgb(31, 119, 180), [System.Drawing.Color]::FromArgb(255, 127, 14), [System.Drawing.Color]::FromArgb(44, 160, 44), [System.Drawing.Color]::FromArgb(148, 103, 189), [System.Drawing.Color]::FromArgb(214, 39, 40))
@@ -61,6 +68,13 @@ $script:NextVast = [datetime]::MinValue
 $script:NextVastAccount = [datetime]::MinValue
 $script:VastError = ""
 $script:VastLeak = $false     # セッションが動いていないのにインスタンスが残っている
+$script:VastSessionKey = ""   # 直近のセッションの dir と alive。変わったら履歴を取り直す
+$script:VastHist = $null      # 直近の libra-vast history --json
+$script:VastHistPending = $null
+$script:NextVastHist = [datetime]::MinValue
+$script:VastHistAt = [datetime]::MinValue
+$script:VastHistError = ""
+$script:LayoutFile = Join-Path $script:HistDir "console-layout.json"
 $script:Tip = New-Object System.Windows.Forms.ToolTip
 $script:Tip.AutoPopDelay = 12000
 
@@ -179,6 +193,35 @@ function Complete-VastFetch {
         $script:VastError = "libra-vast status の読み取りに失敗: " + $_.Exception.Message
     }
 }
+function Start-VastHistFetch {
+    if ($null -ne $script:VastHistPending) { return }
+    $p = New-VastProcess @("history", "--json")
+    [void]$p.Start()
+    $script:VastHistPending = @{ proc = $p; out = $p.StandardOutput.ReadToEndAsync(); err = $p.StandardError.ReadToEndAsync(); started = [datetime]::Now }
+}
+function Complete-VastHistFetch {
+    $f = $script:VastHistPending
+    if ($null -eq $f) { return }
+    if (-not $f.proc.HasExited -or -not $f.out.IsCompleted) {
+        if (([datetime]::Now - $f.started).TotalSeconds -gt 60) {
+            try { $f.proc.Kill() } catch {}
+            $script:VastHistError = "libra-vast history がタイムアウト（60 秒）"
+            $script:VastHistPending = $null
+        }
+        return
+    }
+    $script:VastHistPending = $null
+    $text = $f.out.Result.Trim()
+    try {
+        if (-not $text) { throw ("出力なし: " + $f.err.Result.Trim()) }
+        $script:VastHist = $text | ConvertFrom-Json
+        $script:VastHistAt = [datetime]::Now
+        $script:VastHistError = ""
+        Update-HistPanel
+    } catch {
+        $script:VastHistError = "libra-vast history の読み取りに失敗: " + $_.Exception.Message
+    }
+}
 function Start-Fetch([string]$run, [bool]$withHistory) {
     if ($script:Pending.ContainsKey($run)) { return }
     $cmd = @("status", "--json", "--tail", "$LogLines")
@@ -286,16 +329,18 @@ $form = New-Object System.Windows.Forms.Form
 $form.Text = "Libra 管理コンソール"
 $form.Font = New-Object System.Drawing.Font("Yu Gothic UI", 9)
 $form.StartPosition = "CenterScreen"
-$form.Size = New-Object System.Drawing.Size(1040, 1000)
-$form.MinimumSize = New-Object System.Drawing.Size(860, 800)
+# 縦長が前提（画面の作業領域より高くしない）。前回の位置と大きさは Restore-Layout が戻す
+$wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+$form.Size = New-Object System.Drawing.Size(640, [Math]::Min(1280, [Math]::Max(760, $wa.Height)))
+$form.MinimumSize = New-Object System.Drawing.Size(540, 900)   # これより低いと run のタブでグラフの場所が無くなる
+if ($Size -match '^(\d+)x(\d+)$') { $form.Size = New-Object System.Drawing.Size([int]$Matches[1], [int]$Matches[2]) }
 
 $root = New-Object System.Windows.Forms.TableLayoutPanel
 $root.Dock = "Fill"
 $root.ColumnCount = 1
-$root.RowCount = 4
+$root.RowCount = 3
 [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("AutoSize")))
 [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("Percent", 100)))
-[void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("Absolute", 240)))
 [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("AutoSize")))
 $form.Controls.Add($root)
 
@@ -318,30 +363,16 @@ function New-Label([string]$text, [int]$left = 12) {
 $bar = New-Object System.Windows.Forms.FlowLayoutPanel
 $bar.Dock = "Fill"; $bar.AutoSize = $true; $bar.WrapContents = $true
 $bar.Padding = New-Object System.Windows.Forms.Padding(4)
-$bar.Controls.Add((New-Button "今すぐ更新" { $script:NextFetch = [datetime]::MinValue; $script:NextHistory = [datetime]::MinValue }))
+$bar.Controls.Add((New-Button "今すぐ更新" { $script:NextFetch = [datetime]::MinValue; $script:NextHistory = [datetime]::MinValue; $script:NextVast = [datetime]::MinValue; $script:NextVastHist = [datetime]::MinValue }))
 $bar.Controls.Add((New-Label "更新間隔(秒)"))
 $numIv = New-Object System.Windows.Forms.NumericUpDown
 $numIv.Minimum = 5; $numIv.Maximum = 600; $numIv.Value = [Math]::Max(5, $IntervalSec); $numIv.Width = 60
 $numIv.Margin = New-Object System.Windows.Forms.Padding(0, 4, 12, 0)
 $bar.Controls.Add($numIv)
 $bar.Controls.Add((New-Button "全部 起動" { foreach ($r in $Runs) { Start-Run $r } }))
-$bar.Controls.Add((New-Button "全部 停止" { if (Confirm-Action "両方の run に STOP を送ります（チェックポイントを書いて終了。再起動前の手順）。よろしいですか？") { Invoke-All @("stop") } }))
-$bar.Controls.Add((New-Label "グラフの期間" 24))
-$cmbRange = New-Object System.Windows.Forms.ComboBox
-$cmbRange.DropDownStyle = "DropDownList"; $cmbRange.Width = 90
-[void]$cmbRange.Items.AddRange(@("6 時間", "24 時間", "7 日", "全部"))
-$cmbRange.SelectedIndex = 1
-$cmbRange.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
-$cmbRange.Add_SelectedIndexChanged({ $tabs.Invalidate($true) })
-$bar.Controls.Add($cmbRange)
-$bar.Controls.Add((New-Label "学習・統計の run" 8))
-$cmbRun = New-Object System.Windows.Forms.ComboBox
-$cmbRun.DropDownStyle = "DropDownList"; $cmbRun.Width = 60
-[void]$cmbRun.Items.AddRange($Runs)
-$cmbRun.SelectedIndex = 0
-$cmbRun.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
-$cmbRun.Add_SelectedIndexChanged({ $tabs.Invalidate($true) })
-$bar.Controls.Add($cmbRun)
+$bStopAll = New-Button "全部 停止" { if (Confirm-Action "両方の run に STOP を送ります（チェックポイントを書いて終了。再起動前の手順）。よろしいですか？") { Invoke-All @("stop") } }
+$bar.Controls.Add($bStopAll)
+$bar.SetFlowBreak($bStopAll, $true)
 $bar.Controls.Add((New-Button "desktop で対局" { Play-Desktop } 110))
 $lblModel = New-Label "" 4
 $lblModel.ForeColor = [System.Drawing.Color]::DimGray
@@ -413,14 +444,65 @@ function Play-Desktop {
     }
 }
 
-# run ごとのパネル
-$runsPanel = New-Object System.Windows.Forms.TableLayoutPanel
-$runsPanel.Dock = "Fill"
-$runsPanel.ColumnCount = $Runs.Length
-$runsPanel.RowCount = 1
-$pct = [single](100.0 / $Runs.Length)
-foreach ($r in $Runs) { [void]$runsPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle("Percent", $pct))) }
-$root.Controls.Add($runsPanel, 0, 1)
+# 上のタブ（ls / lx / クラウド / クラウド履歴）。見出しの右に稼働状態を色付きで描く（タブの裏の run が止まっても見えるように）
+$runTabs = New-Object System.Windows.Forms.TabControl
+$runTabs.Dock = "Fill"
+$runTabs.Multiline = $true
+$runTabs.DrawMode = "OwnerDrawFixed"
+$runTabs.Padding = New-Object System.Drawing.Point(10, 5)
+$runTabs.Add_DrawItem({
+    param($s, $e)
+    $page = $s.TabPages[$e.Index]
+    $key = [string]$page.Tag
+    $bg = if ($e.Index -eq $s.SelectedIndex) { [System.Drawing.Color]::White } else { [System.Drawing.SystemColors]::Control }
+    $e.Graphics.FillRectangle((New-Object System.Drawing.SolidBrush($bg)), $e.Bounds)
+    $flags = [System.Windows.Forms.TextFormatFlags]::NoPadding -bor [System.Windows.Forms.TextFormatFlags]::VerticalCenter -bor [System.Windows.Forms.TextFormatFlags]::SingleLine
+    $title = $script:TabTitles[$key]
+    $x = $e.Bounds.X + 6
+    $tw = [System.Windows.Forms.TextRenderer]::MeasureText($e.Graphics, $title, $s.Font, $e.Bounds.Size, $flags).Width
+    [System.Windows.Forms.TextRenderer]::DrawText($e.Graphics, $title, $s.Font, (New-Object System.Drawing.Rectangle($x, $e.Bounds.Y, ($tw + 2), $e.Bounds.Height)), [System.Drawing.Color]::Black, $flags)
+    $st = $script:TabState[$key]
+    if ($null -ne $st -and $st.text) {
+        $x2 = $x + $tw + 6
+        [System.Windows.Forms.TextRenderer]::DrawText($e.Graphics, $st.text, $s.Font, (New-Object System.Drawing.Rectangle($x2, $e.Bounds.Y, [Math]::Max(1, $e.Bounds.Right - $x2), $e.Bounds.Height)), $st.color, $flags)
+    }
+})
+function Set-TabState([string]$key, [string]$text, $color) {
+    $old = $script:TabState[$key]
+    if ($null -ne $old -and $old.text -eq $text -and $old.color -eq $color) { return }
+    $script:TabState[$key] = @{ text = $text; color = $color }
+    foreach ($pg in $runTabs.TabPages) {
+        if ([string]$pg.Tag -ne $key) { continue }
+        # 見出しの幅は Text から決まるので、描く文字列（題名＋状態）と同じ長さの Text にする
+        $t = $script:TabTitles[$key] + $(if ($text) { "  " + $text } else { "" })
+        if ($pg.Text -ne $t) { $pg.Text = $t }
+    }
+    $runTabs.Invalidate()
+}
+function New-TopPage([string]$key) {
+    if (-not $script:TabTitles.ContainsKey($key)) { $script:TabTitles[$key] = $key }
+    $p = New-Object System.Windows.Forms.TabPage
+    $p.Text = $script:TabTitles[$key]; $p.Tag = $key
+    $p.BackColor = [System.Drawing.Color]::White
+    [void]$runTabs.TabPages.Add($p)
+    return $p
+}
+function Selected-Run {
+    # 学習・終局内訳・手数のグラフの run。クラウドのタブを見ている間は直前に選んでいた run
+    $k = if ($null -ne $runTabs.SelectedTab) { [string]$runTabs.SelectedTab.Tag } else { "" }
+    if ($Runs -contains $k) { $script:LastRun = $k }
+    if (-not $script:LastRun) { $script:LastRun = $Runs[0] }
+    return $script:LastRun
+}
+function Fit-Labels([int]$width, [int]$keyW, $labels) {
+    # 値の欄の長い文字列は折り返す（縦長のウィンドウで右にはみ出さないように）
+    $w = [Math]::Max(120, $width - $keyW - 20)
+    foreach ($l in $labels) { if ($l.MaximumSize.Width -ne $w) { $l.MaximumSize = New-Object System.Drawing.Size($w, 0) } }
+}
+function Set-RowVisible($u, [string]$key, [bool]$on) {
+    foreach ($c in $u.rows[$key]) { $c.Visible = $on }
+}
+$root.Controls.Add($runTabs, 0, 1)
 
 $script:Keys = @(
     @("process", "状態"), @("updated", "status 更新"), @("step", "step / 世代"), @("games_total", "総局数"),
@@ -430,11 +512,10 @@ $script:Keys = @(
     @("elo", "強さ（基準比 Elo）"), @("match", "対外対局 勝率"), @("auto", "自動計測")
 )
 function New-RunPanel([string]$run) {
-    $g = New-Object System.Windows.Forms.GroupBox
-    $title = if ($script:RunTitles.ContainsKey($run)) { $script:RunTitles[$run] } else { $run }
-    $g.Text = $title
+    # 上から 状態の表 / ボタン / グラフ（Move-Charts が選んでいる run の chartSlot に付け替える。log.txt の末尾はグラフの「ログ」タブ）
+    $g = New-Object System.Windows.Forms.Panel
     $g.Dock = "Fill"
-    $g.Padding = New-Object System.Windows.Forms.Padding(6)
+    $g.Padding = New-Object System.Windows.Forms.Padding(6, 4, 6, 2)
     $inner = New-Object System.Windows.Forms.TableLayoutPanel
     $inner.Dock = "Fill"
     $inner.ColumnCount = 1
@@ -451,6 +532,7 @@ function New-RunPanel([string]$run) {
     [void]$grid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle("Absolute", 150)))
     [void]$grid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle("Percent", 100)))
     $vals = @{}
+    $rows = @{}
     $row = 0
     foreach ($k in $script:Keys) {
         $lk = New-Object System.Windows.Forms.Label
@@ -461,6 +543,7 @@ function New-RunPanel([string]$run) {
         $lv.Margin = New-Object System.Windows.Forms.Padding(2, 1, 2, 1)
         $grid.Controls.Add($lk, 0, $row); $grid.Controls.Add($lv, 1, $row)
         $vals[$k[0]] = $lv
+        $rows[$k[0]] = @($lk, $lv)
         $row++
     }
     $inner.Controls.Add($grid, 0, 0)
@@ -479,22 +562,20 @@ function New-RunPanel([string]$run) {
     $btns.Controls.Add($be); $btns.Controls.Add($bm)
     $inner.Controls.Add($btns, 0, 1)
 
-    $log = New-Object System.Windows.Forms.TextBox
-    $log.Multiline = $true; $log.ReadOnly = $true; $log.ScrollBars = "Vertical"; $log.WordWrap = $false
-    $log.Dock = "Fill"
-    $log.Font = New-Object System.Drawing.Font("Consolas", 8.5)
-    $log.BackColor = [System.Drawing.Color]::White
-    $inner.Controls.Add($log, 0, 2)
+    $slot = New-Object System.Windows.Forms.Panel
+    $slot.Dock = "Fill"
+    $slot.Margin = New-Object System.Windows.Forms.Padding(0, 4, 0, 0)
+    $inner.Controls.Add($slot, 0, 2)
+    $inner.Add_Resize({ Fit-Labels $inner.ClientSize.Width 150 $vals.Values }.GetNewClosure())
 
     $tipEval = "次のチェックポイントで archive を作り、基準ネットと 100 局対局する"
     $tipMatch = "次のチェックポイントで外部エンジンとの計測対局を積む"
     $script:Tip.SetToolTip($be, $tipEval)
     $script:Tip.SetToolTip($bm, $tipMatch)
-    $script:Ui[$run] = @{ vals = $vals; log = $log; startButton = $bStart; stopButton = $bStop; autoButtons = @($be, $bm); autoTips = @($tipEval, $tipMatch) }
+    $script:Ui[$run] = @{ vals = $vals; rows = $rows; logText = ""; startButton = $bStart; stopButton = $bStop; autoButtons = @($be, $bm); autoTips = @($tipEval, $tipMatch); chartSlot = $slot }
     return $g
 }
-$col = 0
-foreach ($r in $Runs) { $runsPanel.Controls.Add((New-RunPanel $r), $col, 0); $col++ }
+foreach ($r in $Runs) { $pg = New-TopPage $r; $pg.Controls.Add((New-RunPanel $r)) }
 
 # ---- グラフ ----
 function Get-Range {
@@ -630,7 +711,7 @@ function Build-Series([string]$tab) {
     $series = @()
     $note = ""
     $yfmt = "{0:N0}"; $zero = $true; $title = $tab
-    $sel = [string]$cmbRun.SelectedItem
+    $sel = Selected-Run
     switch ($tab) {
         "局/日" {
             $title = "局/日（5 分平均）の推移"
@@ -742,6 +823,26 @@ function Build-Series([string]$tab) {
     return @{ title = $title; series = $series; yfmt = $yfmt; zero = $zero; note = $note }
 }
 
+# グラフは 1 組だけ作り、選んでいる run のタブの下半分（chartSlot）に Move-Charts が付け替える
+$chartHost = New-Object System.Windows.Forms.TableLayoutPanel
+$chartHost.Dock = "Fill"; $chartHost.ColumnCount = 1; $chartHost.RowCount = 2
+$chartHost.Margin = New-Object System.Windows.Forms.Padding(0)
+[void]$chartHost.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("AutoSize")))
+[void]$chartHost.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("Percent", 100)))
+$cbar = New-Object System.Windows.Forms.FlowLayoutPanel
+$cbar.Dock = "Fill"; $cbar.AutoSize = $true; $cbar.WrapContents = $true
+$cbar.Controls.Add((New-Label "グラフの期間" 2))
+$cmbRange = New-Object System.Windows.Forms.ComboBox
+$cmbRange.DropDownStyle = "DropDownList"; $cmbRange.Width = 90
+[void]$cmbRange.Items.AddRange(@("6 時間", "24 時間", "7 日", "全部"))
+$cmbRange.SelectedIndex = 1
+$cmbRange.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
+$cmbRange.Add_SelectedIndexChanged({ $tabs.Invalidate($true) })
+$cbar.Controls.Add($cmbRange)
+$lblChartNote = New-Label "学習・終局内訳・手数はこのタブの run、ほかは両方" 4
+$lblChartNote.ForeColor = [System.Drawing.Color]::DimGray
+$cbar.Controls.Add($lblChartNote)
+$chartHost.Controls.Add($cbar, 0, 0)
 $tabs = New-Object System.Windows.Forms.TabControl
 $tabs.Dock = "Fill"
 $script:TabNames = @("局/日", "Elo", "対外対局", "学習", "終局内訳", "手数")
@@ -761,6 +862,22 @@ foreach ($name in $script:TabNames) {
     $page.Controls.Add($panel)
     [void]$tabs.TabPages.Add($page)
 }
+# 「ログ」タブ: 選んでいる run の log.txt の末尾（縦長でグラフの場所を取らないように、表の下からここへ移した）
+$logPage = New-Object System.Windows.Forms.TabPage
+$logPage.Text = "ログ"
+$chartLog = New-Object System.Windows.Forms.TextBox
+$chartLog.Multiline = $true; $chartLog.ReadOnly = $true; $chartLog.ScrollBars = "Both"; $chartLog.WordWrap = $false
+$chartLog.Dock = "Fill"; $chartLog.Font = New-Object System.Drawing.Font("Consolas", 8.5); $chartLog.BackColor = [System.Drawing.Color]::White
+$logPage.Controls.Add($chartLog)
+[void]$tabs.TabPages.Add($logPage)
+function Show-RunLog([string]$run) {
+    if ($run -ne (Selected-Run) -or -not $script:Ui.ContainsKey($run)) { return }
+    $t = [string]$script:Ui[$run].logText
+    if ($chartLog.Text -eq $t) { return }
+    $chartLog.Text = $t
+    $chartLog.SelectionStart = $chartLog.Text.Length
+    $chartLog.ScrollToCaret()
+}
 # ---- クラウド タブ（vast.ai の自己対局ワーカー。bin/libra-vast。docs/runbook.md） ----
 function New-Num([decimal]$min, [decimal]$max, [decimal]$val, [decimal]$inc, [int]$dec, [int]$w = 64) {
     $n = New-Object System.Windows.Forms.NumericUpDown
@@ -768,13 +885,12 @@ function New-Num([decimal]$min, [decimal]$max, [decimal]$val, [decimal]$inc, [in
     $n.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
     return $n
 }
-$vpage = New-Object System.Windows.Forms.TabPage
-$vpage.Text = "クラウド"
+# 縦に 操作 / 状態の表 / launcher.log の末尾 を並べる
 $vroot = New-Object System.Windows.Forms.TableLayoutPanel
-$vroot.Dock = "Fill"; $vroot.ColumnCount = 2; $vroot.RowCount = 2
+$vroot.Dock = "Fill"; $vroot.ColumnCount = 1; $vroot.RowCount = 3
 $vroot.BackColor = [System.Drawing.Color]::White
-[void]$vroot.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle("Absolute", 560)))
-[void]$vroot.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle("Percent", 100)))
+$vroot.Padding = New-Object System.Windows.Forms.Padding(6, 4, 6, 2)
+[void]$vroot.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("AutoSize")))
 [void]$vroot.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("AutoSize")))
 [void]$vroot.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("Percent", 100)))
 $vbar = New-Object System.Windows.Forms.FlowLayoutPanel
@@ -802,13 +918,13 @@ $script:Tip.SetToolTip($bVastOffers, "条件に合うオファーを安い順に
 $script:Tip.SetToolTip($bVastCleanup, "libra- で始まるラベルのインスタンスをすべて消す（起動の途中で落ちて残ったとき）")
 $script:Tip.SetToolTip($numGhz, "CPU が遅いホストでは探索が律速して GPU が遊ぶ（5070 Ti で Xeon 2.4 GHz 35 万局/日、Ryzen 4.5 GHz 48 万局/日）")
 $vroot.Controls.Add($vbar, 0, 0)
-$vroot.SetColumnSpan($vbar, 2)
 $script:VastKeys = @(
     @("phase", "状態"), @("session", "セッション"), @("gpu", "GPU / ホスト"), @("time", "借りた時間 / 残り"), @("cost", "費用（見積もり）"),
     @("bridge", "回収（ブリッジ）"), @("learner", "取り込み（ls）"), @("verify", "検査"), @("credit", "残高"), @("instances", "借りているインスタンス")
 )
 $vgrid = New-Object System.Windows.Forms.TableLayoutPanel
-$vgrid.Dock = "Fill"; $vgrid.ColumnCount = 2; $vgrid.AutoScroll = $true
+$vgrid.Dock = "Fill"; $vgrid.ColumnCount = 2; $vgrid.AutoSize = $true
+$vgrid.Margin = New-Object System.Windows.Forms.Padding(0, 6, 0, 6)
 [void]$vgrid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle("Absolute", 150)))
 [void]$vgrid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle("Percent", 100)))
 $script:VastVals = @{}
@@ -818,7 +934,7 @@ foreach ($k in $script:VastKeys) {
     $lk.Text = $k[1]; $lk.AutoSize = $true; $lk.ForeColor = [System.Drawing.Color]::DimGray
     $lk.Margin = New-Object System.Windows.Forms.Padding(2, 1, 2, 1)
     $lv = New-Object System.Windows.Forms.Label
-    $lv.Text = "-"; $lv.AutoSize = $true; $lv.MaximumSize = New-Object System.Drawing.Size(400, 0)
+    $lv.Text = "-"; $lv.AutoSize = $true
     $lv.Margin = New-Object System.Windows.Forms.Padding(2, 1, 2, 1)
     $vgrid.Controls.Add($lk, 0, $vrow); $vgrid.Controls.Add($lv, 1, $vrow)
     $script:VastVals[$k[0]] = $lv
@@ -828,19 +944,231 @@ $vroot.Controls.Add($vgrid, 0, 1)
 $vlog = New-Object System.Windows.Forms.TextBox
 $vlog.Multiline = $true; $vlog.ReadOnly = $true; $vlog.ScrollBars = "Both"; $vlog.WordWrap = $false
 $vlog.Dock = "Fill"; $vlog.Font = New-Object System.Drawing.Font("Consolas", 8.5); $vlog.BackColor = [System.Drawing.Color]::White
-$vroot.Controls.Add($vlog, 1, 1)
+$vroot.Controls.Add($vlog, 0, 2)
+$vroot.Add_Resize({ Fit-Labels $vroot.ClientSize.Width 150 $script:VastVals.Values })
+$vpage = New-TopPage "cloud"
 $vpage.Controls.Add($vroot)
-[void]$tabs.TabPages.Add($vpage)
-$tabs.Add_SelectedIndexChanged({ $tabs.SelectedTab.Controls[0].Invalidate() })
-if ($Tab) { foreach ($pg in $tabs.TabPages) { if ($pg.Text -eq $Tab) { $tabs.SelectedTab = $pg } } }
-$root.Controls.Add($tabs, 0, 2)
+$chartHost.Controls.Add($tabs, 0, 1)
+$tabs.Add_SelectedIndexChanged({ if ($null -ne $tabs.SelectedTab) { $tabs.SelectedTab.Controls[0].Invalidate() } })
+
+# ---- クラウド履歴 タブ（bin/libra-vast history。セッションごとの費用対効果と今月の合計） ----
+function Fmt-Num($v, [string]$f = "N0", [string]$prefix = "") {
+    if ($null -eq $v) { return "-" }
+    return $prefix + ([double]$v).ToString($f)
+}
+$hroot = New-Object System.Windows.Forms.TableLayoutPanel
+$hroot.Dock = "Fill"; $hroot.ColumnCount = 1; $hroot.RowCount = 5
+$hroot.BackColor = [System.Drawing.Color]::White
+$hroot.Padding = New-Object System.Windows.Forms.Padding(6, 4, 6, 2)
+[void]$hroot.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("AutoSize")))
+[void]$hroot.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("AutoSize")))
+[void]$hroot.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("Percent", 35)))
+[void]$hroot.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("Percent", 65)))
+[void]$hroot.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("Absolute", 150)))
+$hbar = New-Object System.Windows.Forms.FlowLayoutPanel
+$hbar.Dock = "Fill"; $hbar.AutoSize = $true; $hbar.WrapContents = $true
+$hbar.Controls.Add((New-Button "更新" { $script:NextVastHist = [datetime]::MinValue } 56))
+$lblHistAt = New-Label "" 8
+$lblHistAt.ForeColor = [System.Drawing.Color]::DimGray
+$hbar.Controls.Add($lblHistAt)
+$hroot.Controls.Add($hbar, 0, 0)
+$lblHistSum = New-Object System.Windows.Forms.Label
+$lblHistSum.AutoSize = $true; $lblHistSum.Text = "（読み込み中）"
+$lblHistSum.Margin = New-Object System.Windows.Forms.Padding(2, 4, 2, 6)
+$hroot.Controls.Add($lblHistSum, 0, 1)
+$hroot.Add_Resize({ Fit-Labels $hroot.ClientSize.Width 0 @($lblHistSum) })
+$lvHist = New-Object System.Windows.Forms.ListView
+$lvHist.View = "Details"; $lvHist.FullRowSelect = $true; $lvHist.GridLines = $true; $lvHist.HideSelection = $false; $lvHist.MultiSelect = $false
+$lvHist.Dock = "Fill"
+foreach ($c in @(@("開始", 76, "Left"), @("GPU", 76, "Left"), @('$/100万局', 72, "Right"), @("有効局", 66, "Right"), @("費用", 50, "Right"),
+                 @("局/日", 68, "Right"), @("借りた h", 58, "Right"), @('$/h', 50, "Right"), @("捨てた", 52, "Right"), @("結果", 170, "Left"), @("CPU・場所", 280, "Left"))) {
+    $ch = New-Object System.Windows.Forms.ColumnHeader
+    $ch.Text = $c[0]; $ch.Width = $c[1]; $ch.TextAlign = $c[2]
+    [void]$lvHist.Columns.Add($ch)
+}
+$hroot.Controls.Add($lvHist, 0, 2)
+$histChart = New-Object System.Windows.Forms.Panel
+$histChart.Dock = "Fill"; $histChart.BackColor = [System.Drawing.Color]::White
+$histChart.Add_Paint({ param($s, $e) Draw-HistChart $e.Graphics $s.ClientSize.Width $s.ClientSize.Height })
+$histChart.Add_Resize({ param($s, $e) $s.Invalidate() })
+$hroot.Controls.Add($histChart, 0, 3)
+$txtHist = New-Object System.Windows.Forms.TextBox
+$txtHist.Multiline = $true; $txtHist.ReadOnly = $true; $txtHist.ScrollBars = "Vertical"; $txtHist.WordWrap = $true
+$txtHist.Dock = "Fill"; $txtHist.BackColor = [System.Drawing.Color]::White
+$hroot.Controls.Add($txtHist, 0, 4)
+$hpage = New-TopPage "history"
+$hpage.Controls.Add($hroot)
+
+$script:HistBars = @()   # 棒ごとの @(上端 y, 下端 y, セッション名)。クリックで一覧の行を選ぶ
+function Draw-HistChart($g, [int]$w, [int]$h) {
+    $g.SmoothingMode = "AntiAlias"
+    $g.Clear([System.Drawing.Color]::White)
+    $font = New-Object System.Drawing.Font("Yu Gothic UI", 8)
+    $black = [System.Drawing.Brushes]::Black; $gray = [System.Drawing.Brushes]::Gray
+    $g.DrawString("各回の 100 万局あたりの費用（有効局で割った値。濃い部分は回収局で割った値、薄い部分は捨てた局のぶん。点線は合計の平均）", $font, $black, 4, 3)
+    $script:HistBars = @()
+    if ($null -eq $script:VastHist) { $g.DrawString("（まだ読めていません）", $font, $gray, 6, 26); return }
+    $rows = @(@($script:VastHist.sessions) | Where-Object { $null -ne $_.usd_per_1m })
+    [array]::Reverse($rows)
+    if ($rows.Count -eq 0) { $g.DrawString("（まだ局を回収した回がありません）", $font, $gray, 6, 26); return }
+    $left = 118; $right = 60; $top = 26; $bottom = 22
+    $avg = $script:VastHist.totals.usd_per_1m
+    $maxv = 0.0
+    foreach ($r in $rows) { $maxv = [Math]::Max($maxv, [double]$r.usd_per_1m) }
+    if ($null -ne $avg) { $maxv = [Math]::Max($maxv, [double]$avg) }
+    $maxv *= 1.05
+    $pw = [Math]::Max(10, $w - $left - $right)
+    $bh = [Math]::Min(28.0, ($h - $top - $bottom) / $rows.Count)
+    $gpus = @($rows | ForEach-Object { [string]$_.gpu } | Sort-Object -Unique)
+    $selName = if ($lvHist.SelectedItems.Count -gt 0) { $lvHist.SelectedItems[0].Tag.name } else { "" }
+    for ($i = 0; $i -lt $rows.Count; $i++) {
+        $r = $rows[$i]
+        $y = $top + $i * $bh
+        $ty0 = [single]($y + ($bh - 13) / 2)
+        $col = $script:Palette[[Array]::IndexOf($gpus, [string]$r.gpu) % $script:Palette.Length]
+        $label = "{0} {1}" -f $(if ($null -ne $r.started) { (From-Unix $r.started).ToString("MM/dd HH:mm") } else { "-" }), (([string]$r.gpu) -replace '^RTX ', '')
+        $g.DrawString($label, $font, $black, 2, $ty0)
+        $th = [single]([Math]::Max(3.0, $bh * 0.62)); $ty = [single]($y + ($bh - $th) / 2)
+        $wNet = [single]($pw * [double]$r.usd_per_1m / $maxv)
+        $wGross = if ($null -ne $r.usd_per_1m_gross) { [single]($pw * [double]$r.usd_per_1m_gross / $maxv) } else { $wNet }
+        $g.FillRectangle((New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(80, $col))), [single]$left, $ty, $wNet, $th)
+        $g.FillRectangle((New-Object System.Drawing.SolidBrush($col)), [single]$left, $ty, $wGross, $th)
+        if ($r.name -eq $selName) { $g.DrawRectangle((New-Object System.Drawing.Pen([System.Drawing.Color]::Black, 1.5)), [single]($left - 2), [single]($ty - 2), [single]($wNet + 4), [single]($th + 4)) }
+        $g.DrawString(('${0:N2}' -f [double]$r.usd_per_1m), $font, $black, [single]($left + $wNet + 4), $ty0)
+        $script:HistBars += , @([double]$y, [double]($y + $bh), [string]$r.name)
+    }
+    if ($null -ne $avg) {
+        $ax = [single]($left + $pw * [double]$avg / $maxv)
+        $yEnd = [single]($top + $rows.Count * $bh)
+        $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::DimGray, 1)
+        $pen.DashStyle = [System.Drawing.Drawing2D.DashStyle]::Dash
+        $g.DrawLine($pen, $ax, [single]($top - 2), $ax, $yEnd)
+        $g.DrawString(('平均 ${0:N2}' -f [double]$avg), $font, $gray, [single]([Math]::Max($left, $ax - 30)), [single]($yEnd + 3))
+    }
+}
+$histChart.Add_MouseClick({
+    param($s, $e)
+    foreach ($b in $script:HistBars) {
+        if ($e.Y -lt $b[0] -or $e.Y -ge $b[1]) { continue }
+        foreach ($it in $lvHist.Items) { $it.Selected = ($it.Tag.name -eq $b[2]) }
+        if ($lvHist.SelectedItems.Count -gt 0) { $lvHist.SelectedItems[0].EnsureVisible() }
+    }
+})
+function Update-HistDetail {
+    if ($lvHist.SelectedItems.Count -eq 0) { $txtHist.Text = ""; $histChart.Invalidate(); return }
+    $r = $lvHist.SelectedItems[0].Tag
+    $lines = @()
+    $lines += "{0}（run {1}）  {2}{3}" -f $r.name, $r.run, $r.phase, $(if ($r.stopped_by_user) { "（ユーザーが停止）" } else { "" })
+    $lines += "予定 {0} 時間・上限 {1}/h" -f (Fmt-Num $r.hours "0.#"), (Fmt-Num $r.max_dph "N2" '$')
+    if ($null -ne $r.instance) {
+        $lines += "インスタンス #{0}: {1}、{2}（{3}、信頼度 {4}）、{5}/h" -f $r.instance, $r.gpu, $r.cpu, $r.where, (Fmt-Num $r.reliability "N3"), (Fmt-Num $r.dph "N3" '$')
+        $lines += "借りた {0} 時間（ssh まで {1} 秒）、ブリッジ {2} 時間、費用 {3}" -f (Fmt-Num $r.rented_h "N2"), (Fmt-Num $r.t_ready_s), (Fmt-Num $r.bridge_h "N2"), (Fmt-Num $r.est_cost_usd "N2" '$')
+        $lines += "回収 {0} 局（{1} ファイル、弾いた {2}、エラー {3}、検査 {4} ms/局）、捨てた {5}、有効 {6}" -f (Fmt-Num $r.games), (Fmt-Num $r.files), (Fmt-Num $r.rejected_files), (Fmt-Num $r.errors), (Fmt-Num $r.verify_ms_per_game "N2"), (Fmt-Num $r.stale_games), (Fmt-Num $r.net_games)
+        $lines += "局/日（ブリッジの時間で換算）{0}、100 万局あたり {1}（回収局で割ると {2}）" -f (Fmt-Num $r.games_per_day), (Fmt-Num $r.usd_per_1m "N2" '$'), (Fmt-Num $r.usd_per_1m_gross "N2" '$')
+    } else { $lines += "インスタンスを借りていません（費用なし）" }
+    $txtHist.Text = $lines -join "`r`n"
+    $histChart.Invalidate()
+}
+$lvHist.Add_SelectedIndexChanged({ Update-HistDetail })
+function Update-HistPanel {
+    $h = $script:VastHist
+    if ($null -eq $h) { return }
+    $t = $h.totals
+    $mon = [datetime]::Now.ToString("yyyy-MM")
+    $m = @($h.months) | Where-Object { $_.month -eq $mon } | Select-Object -First 1
+    $mc = if ($null -ne $m) { [double]$m.est_cost_usd } else { 0.0 }
+    $lblHistAt.Text = "読み込み " + $script:VastHistAt.ToString("HH:mm:ss") + "（5 分ごと、セッションの開始・終了時）"
+    $lblHistSum.Text = ("合計 {0} 回（借りた {1} 回・{2} 時間）費用 {3}、有効 {4} 局（捨てた {5} 局）、100 万局あたり {6}" -f $t.sessions, $t.rented, (Fmt-Num $t.rented_h "N2"),
+                        (Fmt-Num $t.est_cost_usd "N2" '$'), (Fmt-Num $t.net_games), (Fmt-Num $t.stale_games), (Fmt-Num $t.usd_per_1m "N2" '$')) + "`r`n" +
+                       ("今月（{0}）: {1} ≈ {2:N0} 円 / 上限 {3:N0} 円（{4:P1}。1 ドル {5} 円で換算）" -f $mon, (Fmt-Num $mc "N2" '$'), ($mc * $UsdJpy), $BudgetJpy, ($mc * $UsdJpy / [Math]::Max(1, $BudgetJpy)), $UsdJpy) + "`r`n" +
+                       '有効局 = 回収局 − 学習側が古すぎて捨てた局。費用は借りた時間 × $/h の見積もり（転送料を含まない）。局/日はブリッジの時間で換算'
+    Set-TabState "history" ("今月 " + (Fmt-Num $mc "N2" '$')) ([System.Drawing.Color]::DimGray)
+    $selName = if ($lvHist.SelectedItems.Count -gt 0) { $lvHist.SelectedItems[0].Tag.name } else { "" }
+    $rows = @($h.sessions)
+    [array]::Reverse($rows)
+    $lvHist.BeginUpdate()
+    $lvHist.Items.Clear()
+    foreach ($r in $rows) {
+        $it = New-Object System.Windows.Forms.ListViewItem($(if ($null -ne $r.started) { (From-Unix $r.started).ToString("MM/dd HH:mm") } else { "-" }))
+        $cpu = if ($r.cpu) { "{0}（{1}）" -f ($r.cpu -replace '\s+\d+-Core Processor$', ''), $r.where } else { "-" }
+        foreach ($txt in @((([string]$r.gpu) -replace '^RTX ', ''), (Fmt-Num $r.usd_per_1m "N2" '$'), (Fmt-Num $r.net_games), (Fmt-Num $r.est_cost_usd "N2" '$'),
+                           (Fmt-Num $r.games_per_day), (Fmt-Num $r.rented_h "N2"), (Fmt-Num $r.dph "N3" '$'), (Fmt-Num $r.stale_games),
+                           ([string]$r.phase + $(if ($r.stopped_by_user) { "（停止）" } else { "" })), $cpu)) {
+            [void]$it.SubItems.Add([string]$txt)
+        }
+        $it.Tag = $r
+        if ($r.alive) { $it.ForeColor = [System.Drawing.Color]::ForestGreen }
+        elseif ([string]$r.phase -like "異常終了*") { $it.ForeColor = [System.Drawing.Color]::Firebrick }
+        elseif ($null -eq $r.est_cost_usd) { $it.ForeColor = [System.Drawing.Color]::Gray }
+        [void]$lvHist.Items.Add($it)
+        if ($r.name -eq $selName) { $it.Selected = $true }
+    }
+    $lvHist.EndUpdate()
+    if ($lvHist.SelectedItems.Count -eq 0 -and $lvHist.Items.Count -gt 0) { $lvHist.Items[0].Selected = $true }
+    Update-HistDetail
+}
+function Get-VastPast([string]$gpu, [double]$hours) {
+    # 起動の確認に出す見込み（同じ GPU の過去の回の、借りた時間あたりの有効局と 100 万局あたりの費用）
+    if ($null -eq $script:VastHist) { return "過去の実績: 履歴をまだ読めていません。" }
+    $rs = @(@($script:VastHist.sessions) | Where-Object { $_.gpu -eq $gpu -and $null -ne $_.est_cost_usd -and [double]$_.rented_h -gt 0 -and [double]$_.net_games -gt 0 })
+    if ($rs.Count -eq 0) { return "過去の $gpu の実績はありません。" }
+    $g = 0.0; $hh = 0.0; $c = 0.0
+    foreach ($r in $rs) { $g += [double]$r.net_games; $hh += [double]$r.rented_h; $c += [double]$r.est_cost_usd }
+    return ('過去の {0} の実績（{1} 回）: 借りた 1 時間あたり 約 {2:N0} 局、100 万局あたり ${3:N2}。{4} 時間なら 約 {5:N0} 局の見込み。' -f $gpu, $rs.Count, ($g / $hh), ($c / $g * 1e6), $hours, ($g / $hh * $hours))
+}
+
+function Move-Charts {
+    # 表示の前（ハンドルが無い間）は SelectedTab が null なので最初の run に置く
+    $k = if ($null -ne $runTabs.SelectedTab) { [string]$runTabs.SelectedTab.Tag } else { $Runs[0] }
+    if (-not $script:Ui.ContainsKey($k)) { return }
+    $slot = $script:Ui[$k].chartSlot
+    if (-not [object]::ReferenceEquals($chartHost.Parent, $slot)) { $slot.Controls.Add($chartHost) }
+    Show-RunLog $k
+    if ($null -ne $tabs.SelectedTab) { $tabs.SelectedTab.Controls[0].Invalidate() }
+}
+$runTabs.Add_SelectedIndexChanged({
+    Move-Charts
+    if ([string]$runTabs.SelectedTab.Tag -eq "history" -and ([datetime]::Now - $script:VastHistAt).TotalSeconds -gt 60) { $script:NextVastHist = [datetime]::MinValue }
+})
+function Save-Layout {
+    # 次に開いたときに位置・大きさ・選んでいたタブを戻す（%LOCALAPPDATA%\LibraShogi\console-layout.json）
+    try {
+        $b = if ($form.WindowState -eq "Normal") { $form.Bounds } else { $form.RestoreBounds }
+        if (-not (Test-Path $script:HistDir)) { [void](New-Item -ItemType Directory -Path $script:HistDir) }
+        $o = @{ x = $b.X; y = $b.Y; w = $b.Width; h = $b.Height; top = $runTabs.SelectedIndex; chart = $tabs.SelectedIndex; range = $cmbRange.SelectedIndex }
+        ($o | ConvertTo-Json -Compress) | Set-Content -Path $script:LayoutFile -Encoding ASCII
+    } catch {}
+}
+function Restore-Layout {
+    try {
+        if (-not (Test-Path $script:LayoutFile)) { return }
+        $o = Get-Content $script:LayoutFile -Raw | ConvertFrom-Json
+        $rect = New-Object System.Drawing.Rectangle([int]$o.x, [int]$o.y, [int]$o.w, [int]$o.h)
+        $visible = @([System.Windows.Forms.Screen]::AllScreens | Where-Object { $_.WorkingArea.IntersectsWith($rect) }).Count -gt 0
+        if ($visible -and $rect.Width -ge $form.MinimumSize.Width -and $rect.Height -ge $form.MinimumSize.Height) {
+            $form.StartPosition = "Manual"
+            $form.Bounds = $rect
+        }
+        if ($null -ne $o.top -and [int]$o.top -ge 0 -and [int]$o.top -lt $runTabs.TabCount) { $runTabs.SelectedIndex = [int]$o.top }
+        if ($null -ne $o.chart -and [int]$o.chart -ge 0 -and [int]$o.chart -lt $tabs.TabCount) { $tabs.SelectedIndex = [int]$o.chart }
+        if ($null -ne $o.range -and [int]$o.range -ge 0 -and [int]$o.range -lt $cmbRange.Items.Count) { $cmbRange.SelectedIndex = [int]$o.range }
+    } catch {}
+}
+if ($Tab) {
+    foreach ($name in @($Tab.Split(",") | ForEach-Object { $_.Trim() })) {
+        foreach ($pg in $runTabs.TabPages) { if ([string]$pg.Tag -eq $name -or $script:TabTitles[[string]$pg.Tag] -eq $name) { $runTabs.SelectedTab = $pg } }
+        foreach ($pg in $tabs.TabPages) { if ($pg.Text -eq $name) { $tabs.SelectedTab = $pg } }
+    }
+}
+Move-Charts
 
 # ステータス行
 $status = New-Object System.Windows.Forms.Label
 $status.Dock = "Fill"; $status.AutoSize = $true
 $status.Padding = New-Object System.Windows.Forms.Padding(6, 4, 6, 4)
 $status.Text = "起動中…"
-$root.Controls.Add($status, 0, 3)
+$root.Controls.Add($status, 0, 2)
+$form.Add_Resize({ $status.MaximumSize = New-Object System.Drawing.Size([Math]::Max(200, $form.ClientSize.Width - 12), 0) })
 
 # ---- 表示の更新 ----
 function Update-Panel([string]$run, $obj) {
@@ -848,6 +1176,7 @@ function Update-Panel([string]$run, $obj) {
     $v = $u.vals
     if ($null -eq $obj) {
         $v.process.Text = "取得失敗"; $v.process.ForeColor = [System.Drawing.Color]::Firebrick
+        Set-TabState $run "● 取得失敗" ([System.Drawing.Color]::Firebrick)
         return
     }
     $running = ($obj.process -eq "running")
@@ -861,6 +1190,8 @@ function Update-Panel([string]$run, $obj) {
     $v.process.Text = $ptxt
     $v.process.ForeColor = if (-not $running) { [System.Drawing.Color]::Firebrick } elseif ($stopping) { [System.Drawing.Color]::DarkOrange } else { [System.Drawing.Color]::ForestGreen }
     $v.process.Font = New-Object System.Drawing.Font($form.Font, [System.Drawing.FontStyle]::Bold)
+    $tabText = if (-not $obj.exists) { "● run なし" } elseif ($stopping) { "● 停止処理中" } elseif ($running) { "● 稼働中" } else { "● 停止" }
+    Set-TabState $run $tabText $v.process.ForeColor
     $u.startButton.Enabled = (-not $running -or $stopping)
     $u.stopButton.Enabled = ($running -and -not $stopping)
     if ($script:StartCheck.ContainsKey($run)) {
@@ -882,7 +1213,8 @@ function Update-Panel([string]$run, $obj) {
     $st = $obj.status
     if ($null -eq $st) {
         foreach ($k in $script:Keys) { if ($k[0] -ne "process") { $v[$k[0]].Text = "-" } }
-        $u.log.Text = ""
+        $u.logText = ""
+        Show-RunLog $run
         return
     }
     $stTime = [datetime]::ParseExact($st.time, "yyyy-MM-dd HH:mm:ss", $null)
@@ -917,12 +1249,12 @@ function Update-Panel([string]$run, $obj) {
             $(if ($null -ne $ex.source_step -and $null -ne $ex.main_step) { "（本体より " + (Format-Int ([long]$ex.source_step - [long]$ex.main_step)) + " 古い）" } else { "" }),
             $(if ($null -ne $ex.refreshed_at) { "、作り直し " + (Format-Ago (From-Unix $ex.refreshed_at)) } else { "" })
     } else { $v.exploiter.Text = "-" }
+    Set-RowVisible $u "exploiter" ($null -ne $st.exploiter)   # 本体には無い行なので隠して縦を詰める
     $rs = @($st.restarts)
     $v.restarts.Text = if ($rs.Count -gt 0) { "{0} 回（最終 {1}）" -f $rs.Count, $rs[$rs.Count - 1] } else { "0 回" }
     if ($null -ne $obj.log_tail) {
-        $u.log.Text = (@($obj.log_tail) -join "`r`n")
-        $u.log.SelectionStart = $u.log.Text.Length
-        $u.log.ScrollToCaret()
+        $u.logText = (@($obj.log_tail) -join "`r`n")
+        Show-RunLog $run
     }
     if ($script:Data.ContainsKey($run)) {
         $d = $script:Data[$run]
@@ -945,6 +1277,10 @@ function Update-Panel([string]$run, $obj) {
             $lm = $ms[$ms.Count - 1]
             $v.match.Text = "{0} / {1} 局（{2:P0}、{3}、{4}）" -f $lm.a_points, $lm.n, [double]$lm.winrate, $lm.go, (Format-Ago (From-Unix $lm.time))
         } else { $v.match.Text = "（まだ無い）" }
+        # 自動計測が無効で結果も無い run（搾取者）では強さ・対外対局の行を隠す
+        $autoCfgOn = ($null -ne $d.auto_cfg -and $d.auto_cfg.enabled)
+        Set-RowVisible $u "elo" ($autoCfgOn -or $anc.Count -gt 0 -or $chain.Count -gt 0)
+        Set-RowVisible $u "match" ($autoCfgOn -or $ms.Count -gt 0)
         $au = $d.auto; $ac = $d.auto_cfg
         if ($null -eq $ac -or -not $ac.enabled) { $v.auto.Text = "無効（config.toml の [auto]）" }
         elseif ($null -ne $au -and $null -ne $au.running) { $v.auto.Text = "{0} 実行中（{1}）" -f $au.running.kind, (Format-Ago (From-Unix $au.running.started)) }
@@ -954,7 +1290,8 @@ function Update-Panel([string]$run, $obj) {
             $v.auto.Text = "待機（次の自己評価 {0}、待ち {1} 件、{2} 時間ごと）" -f $next, $q, $ac.every_hours
         }
     }
-    $tabs.SelectedTab.Controls[0].Invalidate()
+    # クラウドのタブを見ている間はグラフにハンドルが無く SelectedTab が null
+    if ($null -ne $tabs.SelectedTab) { $tabs.SelectedTab.Controls[0].Invalidate() }
 }
 function Update-StatusBar {
     # 0.5 秒ごとに書き直すので、操作の結果は $script:Notes に持って期限まで出し続ける
@@ -969,6 +1306,7 @@ function Update-StatusBar {
     }
     if ($script:HistNote) { $parts += $script:HistNote; $bad = $true }
     if ($script:VastError) { $parts += "vast : " + $script:VastError; $bad = $true }
+    if ($script:VastHistError) { $parts += "vast : " + $script:VastHistError; $bad = $true }
     if ($script:VastLeak) { $parts += "vast : セッションが動いていないのにインスタンスが残っています（課金中）。クラウド タブの「後始末」を押してください"; $bad = $true }
     $wait = [Math]::Max(0, ($script:NextFetch - [datetime]::Now).TotalSeconds)
     $pend = if ($script:Pending.Count -gt 0) { "  取得中…" } else { "" }
@@ -1041,6 +1379,7 @@ function Start-Vast {
     $credit = if ($null -ne $o -and $null -ne $o.account -and $null -ne $o.account.credit) { '${0:N2}' -f [double]$o.account.credit } else { "不明" }
     $msg = ('{0} を最大 ${1:N2}/h で {2} 時間借りて、ls に自己対局の局を足します。' -f $gpu, $dph, $hours) + "`r`n" +
            ('費用は最大 ${0:N2} 程度（準備の 5〜15 分を含む）。残高 {1}。' -f ($dph * ($hours + 0.25)), $credit) + "`r`n" +
+           (Get-VastPast $gpu $hours) + "`r`n" +
            "時間が来たら残りの局を取ってインスタンスを消します。途中で止めるときは「停止」。よろしいですか？"
     if (-not (Confirm-Action $msg)) { return }
     try {
@@ -1131,6 +1470,13 @@ function Update-VastPanel {
             $v.instances.ForeColor = if ($script:VastLeak) { [System.Drawing.Color]::Firebrick } else { $black }
         }
     }
+    # セッションが始まった・終わったら履歴を取り直す
+    $skey = if ($null -ne $s) { "{0}|{1}" -f $s.dir, $alive } else { "" }
+    if ($skey -ne $script:VastSessionKey) { $script:VastSessionKey = $skey; $script:NextVastHist = [datetime]::MinValue }
+    if ($script:VastLeak) { Set-TabState "cloud" "● インスタンスが残っている" ([System.Drawing.Color]::Firebrick) }
+    elseif ($alive) { Set-TabState "cloud" ("● " + [string]$s.phase) ([System.Drawing.Color]::ForestGreen) }
+    elseif ($null -ne $s -and [string]$s.phase -like "異常終了*") { Set-TabState "cloud" "● 異常終了" ([System.Drawing.Color]::Firebrick) }
+    else { Set-TabState "cloud" "" ([System.Drawing.Color]::DimGray) }
     if ($null -ne $o.log_tail) {
         $vlog.Text = (@($o.log_tail) -join "`r`n")
         $vlog.SelectionStart = $vlog.Text.Length
@@ -1145,6 +1491,12 @@ $timer.Add_Tick({
     try {
         Complete-Fetches
         Complete-VastFetch
+        Complete-VastHistFetch
+        if ($null -eq $script:VastHistPending -and [datetime]::Now -ge $script:NextVastHist) {
+            # 動いているセッションの行（回収局・費用）は 1 分ごと、ほかは VastAccountSec ごと
+            $script:NextVastHist = [datetime]::Now.AddSeconds($(if ($script:VastSessionKey -like "*|True") { 60 } else { $VastAccountSec }))
+            Start-VastHistFetch
+        }
         if ($null -eq $script:VastPending -and [datetime]::Now -ge $script:NextVast) {
             $script:NextVast = [datetime]::Now.AddSeconds([int]$numIv.Value)
             Start-VastFetch
@@ -1156,9 +1508,10 @@ $timer.Add_Tick({
             foreach ($r in $Runs) { Start-Fetch $r $withHistory }
         }
         Update-StatusBar
-        if ($Screenshot -and -not $script:ShotDone -and $script:Pending.Count -eq 0 -and $script:Data.Count -eq $Runs.Count -and $null -eq $script:VastPending -and ($null -ne $script:Vast -or $script:VastError)) {
+        if ($Screenshot -and -not $script:ShotDone -and $script:Pending.Count -eq 0 -and $script:Data.Count -eq $Runs.Count -and $null -eq $script:VastPending -and ($null -ne $script:Vast -or $script:VastError) -and $null -eq $script:VastHistPending -and ($null -ne $script:VastHist -or $script:VastHistError)) {
             $script:ShotDone = $true
-            $tabs.SelectedTab.Controls[0].Refresh()
+            if ($null -ne $tabs.SelectedTab) { $tabs.SelectedTab.Controls[0].Refresh() }
+            $histChart.Refresh()
             $bmp = New-Object System.Drawing.Bitmap($form.Width, $form.Height)
             $form.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle(0, 0, $form.Width, $form.Height)))
             $bmp.Save($Screenshot, [System.Drawing.Imaging.ImageFormat]::Png)
@@ -1170,6 +1523,8 @@ $timer.Add_Tick({
             }
             $vphase = if ($null -ne $script:Vast -and $null -ne $script:Vast.session) { $script:Vast.session.phase } else { "-" }
             [Console]::WriteLine(("vast: phase={0} credit={1} error={2}" -f $vphase, $(if ($null -ne $script:Vast -and $null -ne $script:Vast.account) { $script:Vast.account.credit } else { "-" }), $script:VastError))
+            $ht = if ($null -ne $script:VastHist) { $script:VastHist.totals } else { $null }
+            [Console]::WriteLine(("vast history: sessions={0} cost={1} net_games={2} usd_per_1m={3} error={4} top={5} chart={6} size={7}x{8}" -f $ht.sessions, $ht.est_cost_usd, $ht.net_games, $ht.usd_per_1m, $script:VastHistError, [string]$runTabs.SelectedTab.Tag, $tabs.SelectedTab.Text, $form.Width, $form.Height))
             $form.Close()
         }
     } catch {
@@ -1178,8 +1533,13 @@ $timer.Add_Tick({
         if ($Screenshot) { [Console]::WriteLine("error: " + $_.Exception.Message + " " + $_.ScriptStackTrace); $form.Close() }
     }
 })
-$form.Add_Shown({ $timer.Start() })
-$form.Add_FormClosing({ $timer.Stop(); foreach ($f in $script:Pending.Values) { try { $f.proc.Kill() } catch {} }; if ($null -ne $script:VastPending) { try { $script:VastPending.proc.Kill() } catch {} } })
+$form.Add_Shown({ Move-Charts; $timer.Start() })
+$form.Add_FormClosing({
+    $timer.Stop()
+    foreach ($f in $script:Pending.Values) { try { $f.proc.Kill() } catch {} }
+    foreach ($f in @($script:VastPending, $script:VastHistPending)) { if ($null -ne $f) { try { $f.proc.Kill() } catch {} } }
+    if (-not $Screenshot) { Save-Layout }
+})
 
 if ($UpdateDesktopModel) {
     $info = Update-DesktopModel
@@ -1203,4 +1563,5 @@ if ($Do) {
 }
 Load-History
 Update-DesktopModelLabel
+if (-not $Screenshot -and -not $Size) { Restore-Layout }
 [void]$form.ShowDialog()
