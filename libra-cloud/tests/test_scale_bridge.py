@@ -58,3 +58,40 @@ def test_worker_bridge_roundtrip(tmp_path):
     co.write_active(co.active())
     b.cycle()
     assert json.loads((host / "active.json").read_text())["done"] and b.done()
+
+
+def test_bridge_gives_up_when_worker_died(tmp_path):
+    d, _ = make_seq(tmp_path, ["1f 1a"])
+    host = write_scale_dir(d, tmp_path / "bundle")
+    now = [0.0]
+    state = {"alive": True}
+    logs: list[str] = []
+    b = ScaleBridge(d, ScaleLocalTransport(host, alive=lambda: state["alive"]), tmp_path / "bridge", log=logs.append,
+                    alive_check_s=300.0, clock=lambda: now[0])
+    b.cycle()
+    assert not b.dead
+    state["alive"] = False
+    now[0] = 299.0
+    b.cycle()
+    assert b.dead_checks == 0  # 間隔が来るまで確かめない
+    now[0] = 300.0
+    b.cycle()
+    assert b.dead_checks == 1 and not b.dead  # 1 回だけなら続ける
+    now[0] = 600.0
+    b.cycle()
+    assert b.dead and any("not running" in s for s in logs)
+
+
+def test_bridge_gives_up_when_nothing_passes(tmp_path):
+    d, _ = make_seq(tmp_path, ["1f 1a"])
+    host = write_scale_dir(d, tmp_path / "bundle")
+    bad = {"kb": "1f", "kw": "1a", "result": 1, "reason": "no_legal_move", "plies": 3, "moves": "P*5e", "worker": "x"}
+    logs: list[str] = []
+    b = ScaleBridge(d, ScaleLocalTransport(host), tmp_path / "bridge", log=logs.append)
+    for i in range(2):
+        S.write_chunk(host / "inbox", "vast1", i, [bad])
+    b.cycle()
+    assert b.stats["rejected_files"] == 2 and not b.dead
+    S.write_chunk(host / "inbox", "vast1", 2, [bad])
+    b.cycle()
+    assert b.dead and any("giving up" in s for s in logs)

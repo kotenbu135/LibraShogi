@@ -37,12 +37,21 @@ FIELDS = ("kb", "kw", "result", "reason", "plies", "moves")
 
 
 class ScaleLocalTransport(LocalTransport):
+    def __init__(self, remote_run: Path, alive: Callable[[], bool] = lambda: True):
+        super().__init__(remote_run)
+        self.alive = alive
+
     def list_inbox(self) -> list[str]:
         d = self.root / "inbox"
         return sorted(p.name for p in d.glob("*.jsonl.gz")) if d.is_dir() else []
 
 
 class ScaleSSHTransport(SSHTransport):
+    def alive(self) -> bool:
+        """ホストのワーカーのプロセスが生きているか。"""
+        out = self.ssh(f"P=$(cat {shlex.quote(self.pid_file)} 2>/dev/null) && kill -0 $P 2>/dev/null && echo alive || echo dead")
+        return out.decode(errors="replace").strip() == "alive"
+
     def list_inbox(self) -> list[str]:
         out = self.ssh(f"cd {shlex.quote(self.root + '/inbox')} 2>/dev/null && ls -1 | grep '\\.jsonl\\.gz$' || true")
         return sorted(out.decode(errors="replace").split())
@@ -60,7 +69,13 @@ class ScaleSSHTransport(SSHTransport):
 
 
 class ScaleBridge:
-    def __init__(self, scale_dir: Path, transport, out: Path, *, max_files: int = 20, log: Callable[[str], None] = print):
+    def __init__(self, scale_dir: Path, transport, out: Path, *, max_files: int = 20, log: Callable[[str], None] = print,
+                 alive_check_s: float = 300.0, clock: Callable[[], float] = time.monotonic):
+        self.alive_check_s = alive_check_s  # ワーカーが落ちたまま課金が続かないよう、この間隔で生存を確かめ、2 回続けて死んでいたら抜ける
+        self.clock = clock
+        self.last_alive_check = clock()
+        self.dead_checks = 0
+        self.dead = False
         self.d = Path(scale_dir)
         self.search = read_json(self.d / "config.json")["search"]
         self.t = transport
@@ -138,6 +153,9 @@ class ScaleBridge:
         os.replace(p, self.rejected / p.name)
         for old in sorted(self.rejected.iterdir(), key=lambda q: q.stat().st_mtime)[:-KEEP_REJECTED]:
             old.unlink(missing_ok=True)
+        if self.stats["files"] == 0 and self.stats["rejected_files"] >= 3:  # 1 つも通らないまま課金を続けない
+            self.log("bridge: every file so far was rejected; giving up")
+            self.dead = True
 
     def cycle(self) -> int:
         try:
@@ -145,7 +163,16 @@ class ScaleBridge:
         except ERRORS as e:
             self.stats["errors"] += 1
             self.log(f"bridge: push active.json failed: {type(e).__name__}: {str(e)[:300]}")
-        return self.pull()
+        n = self.pull()
+        if self.clock() - self.last_alive_check >= self.alive_check_s:
+            self.last_alive_check = self.clock()
+            if self.t.alive():
+                self.dead_checks = 0
+            else:
+                self.dead_checks += 1
+                self.log(f"bridge: worker process is not running ({self.dead_checks})")
+                self.dead = self.dead_checks >= 2
+        return n
 
     def write_status(self) -> None:
         tmp = self.out / "bridge.json.tmp"
@@ -182,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
     bridge = ScaleBridge(d, ScaleSSHTransport(a.host, a.port, remote), out, log=log)
     log(f"bridge: {d} <-> {a.host}:{a.port}:{remote} for {a.hours} h")
     return serve(bridge, interval=a.interval, deadline=time.time() + a.hours * 3600,
-                 stop=lambda: bool(stopping) or (out / "STOP").exists() or bridge.done(), max_error_s=a.max_error_minutes * 60)
+                 stop=lambda: bool(stopping) or (out / "STOP").exists() or bridge.done() or bridge.dead, max_error_s=a.max_error_minutes * 60)
 
 
 if __name__ == "__main__":
