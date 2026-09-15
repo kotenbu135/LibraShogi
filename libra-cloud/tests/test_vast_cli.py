@@ -2,6 +2,7 @@
 """bin/libra-vast（libra_cloud.vast_cli）: 起動の前提の検査、二重起動の拒否、切り離した起動、停止（STOP か SIGTERM）、段階と費用の表示。
 vast.ai は使わない（launch_argv を手元のダミーのコマンドに差し替える）。"""
 import json
+import os
 import time
 from pathlib import Path
 
@@ -120,3 +121,70 @@ def test_status_reports_cost_remaining_and_result(tmp_path: Path, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["session"]["phase"] == "終了" and out["bridge"]["games"] == 1200
     assert vast_cli.main(["--root", str(tmp_path / "empty"), "status"]) == 0 and "まだありません" in capsys.readouterr().out
+
+
+def _write(p: Path, obj) -> None:
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(obj if isinstance(obj, str) else json.dumps(obj), encoding="utf-8")
+
+
+def _stamp(t: float) -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t))
+
+
+def test_history_lists_every_session_with_cost_per_million_games(tmp_path: Path, capsys):
+    """管理コンソールの「クラウド履歴」: 過去のセッションごとの費用・回収局数・学習側が古すぎて捨てた局・100 万局あたりの費用。"""
+    root = tmp_path / "cloud"
+    t0 = time.mktime(time.strptime("2026-09-14 12:00:00", "%Y-%m-%d %H:%M:%S"))
+    # 1 回目: 条件に合うオファーが無く借りなかった（session.json と launcher.log だけ）
+    a = root / "ls-20260914-120000"
+    _write(a / "session.json", {"run": "ls", "gpu": "RTX 5070 Ti", "max_dph": 0.28, "hours": 3.0, "started": t0, "pid": None})
+    _write(a / "launcher.log", "credit $9.55; run x\n8 offers, 0 usable; cheapest: \n")
+    # 2 回目: 2 時間借りて 40,000 局、そのうち学習側が 5,000 局を捨てた（ユーザーが停止）
+    b = root / "ls-20260914-130000"
+    t_rent, t_bridge = t0 + 3600, t0 + 3600 + 300
+    offer = {"dph_total": 0.25, "gpu_name": "RTX 5080", "cpu_name": "AMD Ryzen 9 7900 ", "geolocation": "Australia, AU", "reliability2": 0.998}
+    _write(b / "session.json", {"run": "ls", "gpu": "RTX 5080", "max_dph": 0.3, "hours": 3.0, "started": t0 + 3590, "pid": None,
+                                "stop_requested": t_bridge + 7000})
+    _write(b / "launcher.log", "credit $9\ncreate #1\nssh ready\nbridge pid 7\nbridge: stopping\ndestroyed instance 5 (show_instance after: none)\n")
+    _write(b / "instance.json", {"instance": 5, "offer": offer, "t_rent": t_rent, "t_bridge": t_bridge})
+    _write(b / "result.json", {"worker": "vast1", "offer": offer, "t_ready_s": 140, "rented_h": 2.0, "est_cost_usd": 0.5,
+                               "bridge": {"time": t_bridge + 7200, "games": 40000, "files": 400, "rejected_files": 1, "errors": 2}})
+    # 3 回目: 動いている途中（result.json はまだ無い。launcher のプロセスは自分自身）
+    c = root / "ls-20260914-160000"
+    t3 = t0 + 4 * 3600
+    _write(c / "session.json", {"run": "ls", "gpu": "RTX 5070 Ti", "max_dph": 0.28, "hours": 3.0, "started": t3, "pid": os.getpid()})
+    _write(c / "launcher.log", "credit $9\ncreate #1\nssh ready\nbridge pid 7\n")
+    _write(c / "instance.json", {"instance": 6, "offer": {**offer, "dph_total": 0.2, "gpu_name": "RTX 5070 Ti"}, "t_rent": t3, "t_bridge": t3})
+    _write(c / "bridge" / "bridge.json", {"time": t3 + 3600, "games": 30000, "files": 300, "rejected_files": 0, "errors": 0})
+    (root / "current").write_text(c.name, encoding="utf-8")
+    # 学習側のログ: 2 回目の間に 5,000 局、3 回目の間に 100 局を捨てた。2 回目より前の行と別のワーカーの行は数えない
+    lines = [f"{_stamp(t0 + 60)} workers: dropped 100 stale games from vast1 (weights step 1, 3000 steps behind)"]
+    lines += [f"{_stamp(t_bridge + 3000)} workers: dropped 100 stale games from vast1 (weights step 2, 2441 steps behind)"] * 50
+    lines += [f"{_stamp(t_bridge + 3100)} workers: dropped 100 stale games from w1 (weights step 2, 2441 steps behind)",
+              f"{_stamp(t_bridge + 3200)} workers: ingested 100 games (total 100)",
+              f"{_stamp(t3 + 1800)} workers: dropped 100 stale games from vast1 (weights step 3, 2500 steps behind)"]
+    _write(tmp_path / "runs" / "ls" / "log.txt", "\n".join(lines) + "\n")
+
+    h = vast_cli.history(root, tmp_path / "runs", now=t3 + 3600)
+    s1, s2, s3 = h["sessions"]
+    assert s1["name"] == a.name and s1["phase"] == "終了（条件に合うオファーなし）" and s1["est_cost_usd"] is None and s1["games"] == 0
+    assert s1["usd_per_1m"] is None
+    assert s2["gpu"] == "RTX 5080" and s2["cpu"] == "AMD Ryzen 9 7900" and s2["where"] == "Australia, AU" and s2["dph"] == 0.25
+    assert s2["phase"] == "終了" and s2["stopped_by_user"] and s2["rented_h"] == 2.0 and s2["est_cost_usd"] == 0.5 and s2["t_ready_s"] == 140
+    assert s2["games"] == 40000 and s2["stale_games"] == 5000 and s2["net_games"] == 35000 and s2["rejected_files"] == 1 and s2["errors"] == 2
+    assert s2["bridge_h"] == 2.0 and s2["games_per_day"] == 480000
+    assert s2["usd_per_1m"] == round(0.5 / 35000 * 1e6, 2) and s2["usd_per_1m_gross"] == round(0.5 / 40000 * 1e6, 2)
+    assert s3["alive"] and s3["phase"] == "稼働" and s3["rented_h"] == 1.0 and s3["est_cost_usd"] == 0.2 and s3["stale_games"] == 100
+    assert s3["games"] == 30000 and s3["net_games"] == 29900
+    tot = h["totals"]
+    assert tot["sessions"] == 3 and tot["rented"] == 2 and tot["est_cost_usd"] == 0.7 and tot["games"] == 70000 and tot["net_games"] == 64900
+    assert tot["usd_per_1m"] == round(0.7 / 64900 * 1e6, 2)
+    assert h["months"] == [{"month": "2026-09", "sessions": 3, "est_cost_usd": 0.7, "games": 70000, "net_games": 64900}]
+    assert vast_cli.main(["--root", str(root), "history", "--json", "--run-root", str(tmp_path / "runs")]) == 0
+    assert [s["name"] for s in json.loads(capsys.readouterr().out)["sessions"]] == [a.name, b.name, c.name]
+    assert vast_cli.main(["--root", str(root), "history", "--run-root", str(tmp_path / "runs")]) == 0
+    out = capsys.readouterr().out
+    assert "RTX 5080" in out and "35,000" in out and "合計" in out
+    assert vast_cli.main(["--root", str(tmp_path / "empty"), "history", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["sessions"] == []

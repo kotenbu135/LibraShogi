@@ -3,6 +3,7 @@
 
     bin/libra-vast start --run ls --gpu "RTX 5070 Ti" --max-dph 0.28 --hours 3
     bin/libra-vast status [--json] [--account]
+    bin/libra-vast history [--json]
     bin/libra-vast stop
     bin/libra-vast offers --gpu "RTX 5070 Ti" --max-dph 0.28
     bin/libra-vast cleanup --yes
@@ -19,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import signal
 import subprocess
@@ -123,6 +125,106 @@ def session_status(d: Path, tail: int = 10, now: float | None = None) -> dict:
     if inst and inst.get("t_bridge") and not ended and s.get("hours") is not None:
         out["remaining_h"] = round(max(0.0, float(s["hours"]) - (now - float(inst["t_bridge"])) / 3600), 2)
     return out
+
+
+STALE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) workers: dropped (\d+) stale games from (\S+)", re.M)
+
+
+def stale_drops(log_text: str, t0: float, t1: float, worker: str | None = None) -> int:
+    """学習側の log.txt から、[t0, t1) の間に古すぎて捨てた局数を数える（workers.py の「workers: dropped N stale games from W」の行）。"""
+    n = 0
+    for m in STALE_RE.finditer(log_text):
+        if worker and m.group(3) != worker:
+            continue
+        t = time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S"))
+        if t0 <= t < t1:
+            n += int(m.group(2))
+    return n
+
+
+def per_million(cost, games):
+    return round(float(cost) / games * 1e6, 2) if cost is not None and games and games > 0 else None
+
+
+def history(root: Path, run_root: Path, now: float | None = None) -> dict:
+    """過去のセッションを古い順に並べ、費用・回収局数・学習側が捨てた局・100 万局あたりの費用を出す（管理コンソールの「クラウド履歴」）。
+    捨てた局は学習側の log.txt の行を、そのセッションのブリッジ起動から次のセッションの開始（無ければ終わりの 10 分後）までで数える。"""
+    now = time.time() if now is None else now
+    dirs = sorted((d for d in root.glob("*-*") if d.is_dir() and (d / "session.json").exists()),
+                  key=lambda d: (read_json(d / "session.json") or {}).get("started") or 0)
+    logs: dict[str, str] = {}
+    rows = []
+    for i, d in enumerate(dirs):
+        st = session_status(d, tail=0, now=now)
+        s, inst, res = st["session"], st["instance"] or {}, st["result"] or {}
+        b = res.get("bridge") or st["bridge"] or {}
+        offer = inst.get("offer") or res.get("offer") or {}
+        run = s.get("run") or "ls"
+        games = int(b.get("games") or 0)
+        t_bridge = inst.get("t_bridge")
+        end = now if s["alive"] else b.get("time")
+        bridge_h = round((float(end) - float(t_bridge)) / 3600, 3) if t_bridge and end else None
+        stale = 0
+        if t_bridge:
+            if run not in logs:
+                try:
+                    logs[run] = (run_root / run / "log.txt").read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    logs[run] = ""
+            nxt = (read_json(dirs[i + 1] / "session.json") or {}).get("started") if i + 1 < len(dirs) else None
+            stale = stale_drops(logs[run], float(t_bridge), float(nxt or (end or now) + 600), res.get("worker"))
+        net = games - stale
+        rows.append({"name": d.name, "run": run, "started": s.get("started"), "alive": s["alive"], "phase": s["phase"],
+                     "stopped_by_user": bool(s.get("stop_requested")), "hours": s.get("hours"), "max_dph": s.get("max_dph"),
+                     "gpu": offer.get("gpu_name") or s.get("gpu"), "cpu": str(offer.get("cpu_name") or "").strip() or None,
+                     "where": offer.get("geolocation"), "reliability": offer.get("reliability2"), "dph": offer.get("dph_total"),
+                     "instance": inst.get("instance"), "t_ready_s": res.get("t_ready_s"),
+                     "rented_h": st["rented_h"], "est_cost_usd": st["est_cost_usd"], "bridge_h": bridge_h,
+                     "games": games, "stale_games": stale, "net_games": net, "files": b.get("files"),
+                     "rejected_files": b.get("rejected_files"), "errors": b.get("errors"), "verify_ms_per_game": b.get("verify_ms_per_game"),
+                     "games_per_day": round(games / bridge_h * 24) if bridge_h and bridge_h > 0 else None,
+                     "usd_per_1m": per_million(st["est_cost_usd"], net), "usd_per_1m_gross": per_million(st["est_cost_usd"], games)})
+    rented = [r for r in rows if r["est_cost_usd"] is not None]
+    cost = round(sum(float(r["est_cost_usd"]) for r in rented), 3)
+    net = sum(r["net_games"] for r in rows)
+    totals = {"sessions": len(rows), "rented": len(rented), "rented_h": round(sum(float(r["rented_h"] or 0) for r in rented), 3),
+              "est_cost_usd": cost, "games": sum(r["games"] for r in rows), "stale_games": sum(r["stale_games"] for r in rows),
+              "net_games": net, "usd_per_1m": per_million(cost, net)}
+    months: dict[str, dict] = {}
+    for r in rows:
+        key = time.strftime("%Y-%m", time.localtime(r["started"])) if r["started"] else "?"
+        m = months.setdefault(key, {"month": key, "sessions": 0, "est_cost_usd": 0.0, "games": 0, "net_games": 0})
+        m["sessions"] += 1
+        m["est_cost_usd"] = round(m["est_cost_usd"] + float(r["est_cost_usd"] or 0), 3)
+        m["games"] += r["games"]
+        m["net_games"] += r["net_games"]
+    return {"root": str(root), "sessions": rows, "totals": totals, "months": list(months.values())}
+
+
+def cmd_history(a: argparse.Namespace) -> int:
+    h = history(Path(a.root).expanduser(), Path(a.run_root).expanduser())
+    if a.json:
+        print(json.dumps(h, ensure_ascii=False))
+        return 0
+    if not h["sessions"]:
+        print("セッションはまだありません")
+        return 0
+
+    def money(v, fmt="{:.2f}"):
+        return "-" if v is None else "$" + fmt.format(v)
+
+    print(f"{'開始':<11} {'GPU':<12} {'$/h':>6} {'借りた h':>8} {'費用':>7} {'回収局':>8} {'捨てた':>7} {'有効局':>8} {'局/日':>9} {'$/100万局':>9}  結果")
+    for r in h["sessions"]:
+        started = time.strftime("%m/%d %H:%M", time.localtime(r["started"])) if r["started"] else "-"
+        print(f"{started:<11} {str(r['gpu'] or '-'):<12} {money(r['dph'], '{:.3f}'):>6} {r['rented_h'] if r['rented_h'] is not None else '-':>8} "
+              f"{money(r['est_cost_usd']):>7} {r['games']:>8,} {r['stale_games']:>7,} {r['net_games']:>8,} "
+              f"{format(r['games_per_day'], ',') if r['games_per_day'] is not None else '-':>9}{money(r['usd_per_1m']):>9}  {r['phase']}")
+    t = h["totals"]
+    print(f"合計 {t['sessions']} 回（借りた {t['rented']} 回、{t['rented_h']:.2f} h）  費用 {money(t['est_cost_usd'])}  "
+          f"有効局 {t['net_games']:,}（捨てた {t['stale_games']:,}）  100 万局あたり {money(t['usd_per_1m'])}")
+    for m in h["months"]:
+        print(f"  {m['month']}: {m['sessions']} 回  費用 {money(m['est_cost_usd'])}  有効局 {m['net_games']:,}")
+    return 0
 
 
 def launch_argv(a: argparse.Namespace, run_dir: Path, d: Path) -> list[str]:
@@ -305,13 +407,16 @@ def main(argv: list[str] | None = None) -> int:
     p_st.add_argument("--json", action="store_true")
     p_st.add_argument("--tail", type=int, default=10)
     p_st.add_argument("--account", action="store_true", help="vast.ai の残高と借りているインスタンスも出す")
+    p_h = sub.add_parser("history", help="過去のセッションごとの費用・回収局数・捨てた局・100 万局あたりの費用")
+    p_h.add_argument("--run-root", default="~/libra-run", help="学習側の run の置き場所（log.txt から捨てた局を数える）")
+    p_h.add_argument("--json", action="store_true")
     p_c = sub.add_parser("cleanup", help="libra- のラベルのインスタンスをすべて消す（残ったときの後始末）")
     p_c.add_argument("--yes", action="store_true")
     p_c.add_argument("--force", action="store_true", help="セッションが動いていても消す")
     a = ap.parse_args(argv)
     if getattr(a, "gpu", None):
         a.gpu = a.gpu.replace("_", " ")  # 管理コンソールは wsl.exe に渡すので空白の代わりに _ を使う
-    return {"start": cmd_start, "stop": cmd_stop, "status": cmd_status, "offers": cmd_offers, "cleanup": cmd_cleanup}[a.cmd](a)
+    return {"start": cmd_start, "stop": cmd_stop, "status": cmd_status, "history": cmd_history, "offers": cmd_offers, "cleanup": cmd_cleanup}[a.cmd](a)
 
 
 if __name__ == "__main__":
