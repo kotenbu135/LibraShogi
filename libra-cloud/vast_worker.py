@@ -67,6 +67,8 @@ def main() -> int:
     ap.add_argument("--max-inet-cost", type=float, default=MAX_INET_COST, help="転送料（$/GB）の上限")
     ap.add_argument("--rent", choices=("bid", "on-demand"), default="on-demand", help="借り方（bid は割り込みあり。bin/libra-vast の既定は bid）")
     ap.add_argument("--bid-margin", type=float, default=0.1, help="入札額 = 最低入札 × (1 + この値)")
+    ap.add_argument("--ssh-timeout", type=float, default=1200.0,
+                    help="借りてから ssh で入れるまで待つ秒数（イメージの取得に 15 分かかったホストで 1200 秒を超えた。2026-09-15）")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     from vastai.sdk import VastAI
@@ -150,7 +152,7 @@ def main() -> int:
             write_json(out / "instance.json", {"instance": iid, "offer": result["offer"], "t_rent": t_rent})
             try:
                 v.attach_ssh(iid, pub)
-                host = wait_ssh(v, iid, timeout=1200)
+                host = wait_ssh(v, iid, timeout=a.ssh_timeout)
                 break
             except Exception as e:  # noqa: BLE001  起動しないホストは消して次へ
                 log(f"instance {iid} failed to start: {type(e).__name__}: {str(e)[:200]}")
