@@ -71,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     qr.add_argument("--threads", type=int, default=12)
     qr.add_argument("--compile", default="max-autotune", choices=("none", "default", "max-autotune"))
     qr.add_argument("--worker", default="local")
+    qr.add_argument("--notify", choices=("none", "windows"), default="none", help="windows: アラートを Windows の通知領域にも出す（WSL の powershell.exe）")
     qst = qs.add_parser("status", help="進み具合・打ち切りの内訳・アラート・対称な組の勝率")
     qst.add_argument("--dir", required=True)
     qw = qs.add_parser("worker", help="別マシンで打つだけ（--dir に config.json・weights.pt・active.json。libra-cloud の host_scale.sh が起動）")
@@ -166,7 +167,8 @@ def seq_main(a) -> int:
             f.write(line + "\n")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    return S.run_local(d, device, a.n_games, a.threads, a.compile, a.worker, log=log_file, should_stop=lambda: bool(stop))
+    return S.run_local(d, device, a.n_games, a.threads, a.compile, a.worker, log=log_file, should_stop=lambda: bool(stop),
+                       notify=S.windows_notify if a.notify == "windows" else None)
 
 
 if __name__ == "__main__":

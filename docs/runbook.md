@@ -112,7 +112,7 @@ GPU（CUDA）で読ませたいときは「エンジン」→「実行ファイ�
 `--libra-opt Scale_Table=<path>`）。表は世代ごとに作り直す（探索値は数分、検証対局は最終世代だけ本格的に）。
 verify の最後のログ `v_hat - verify winrate`（scale.json の `verify.v_hat_minus_w`・`v_hat_minus_w_se`。検証した組の V̂ と実際の勝率の差の平均）を measurements.md に書く。
 平均が標準誤差の 2 倍を超えて 0 から離れたら、学習目標の偏りを疑う（docs/method-evidence.md §4.4。v0.1 は −0.008）。
-**全組の作り直し**（v0.1 の表、2026-09-15〜。decisions.md 同日）は `bin/libra-scale seq run --dir ~/libra-run/ls/scale/seq-v0.1 --table ~/libra-run/ls/scale/scale-v0.1.json`（手順は libra-scale/README.md の seq）。この作り直しの間は ls・lx を止める（ユーザーの決定）。最初の約 5.5 時間は対称な置き方の 27 組だけを打つ。後手に傾いたら `~/libra-run/ls/scale/seq-v0.1/ALERT.txt` と log.txt の `ALERT` 行に出るので、`bin/libra-scale seq status --dir ~/libra-run/ls/scale/seq-v0.1` で見る。止めるときは同じディレクトリに `STOP` を置き、再開は同じ `seq run --dir`（打ち切りと局数は続きから）。
+**全組の作り直し**（v0.1 の表、2026-09-15〜。decisions.md 同日）は `bin/libra-scale seq run --dir ~/libra-run/ls/scale/seq-v0.1 --table ~/libra-run/ls/scale/scale-v0.1.json --notify windows`（手順は libra-scale/README.md の seq）。この作り直しの間は ls・lx を止める（ユーザーの決定）。GPU を使う Windows のアプリも閉じる（共有すると専有の 0.30 倍、measurements.md 2026-09-15 21:55）。最初の約 5.5 時間は対称な置き方の 27 組だけを打つ。後手に傾いたら `~/libra-run/ls/scale/seq-v0.1/ALERT.txt` と log.txt の `ALERT` 行に出るので、`bin/libra-scale seq status --dir ~/libra-run/ls/scale/seq-v0.1` で見る。止めるときは同じディレクトリに `STOP` を置き、再開は同じ `seq run --dir`（打ち切りと局数は続きから）。
 それ以外のリリースごとの build・verify は、**ls・lx は止めずに、GPU を共有したまま回す**（decisions.md 2026-09-15、ユーザーの決定）。検証対局の勝率は共有しても変わらず、変わるのは所要時間と、その間の ls の局/日（2026-09-11 の v0 では約半分）だけ。GPU メモリは ls 約 9.3 GB ＋ lx 約 1.7 GB ＋ verify 約 2.9 GB（16 GB 中）。回した時間と局/日の低下は measurements.md に書く。
 
 ## 搾取者リーグ（Main exploiter）

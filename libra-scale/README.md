@@ -21,7 +21,7 @@ bin/libra-scale show
 
 ```bash
 D=~/libra-run/ls/scale/seq-v0.1
-bin/libra-scale seq run --dir $D --table ~/libra-run/ls/scale/scale-v0.1.json   # 初回（V̂ とモデルは --table から）。再開は --dir だけ
+bin/libra-scale seq run --dir $D --table ~/libra-run/ls/scale/scale-v0.1.json --notify windows   # 初回（V̂ とモデルは --table から）。再開は --dir だけ
 bin/libra-scale seq run --dir $D --eps-place 0.01                                # 置く側の 2 段目を足して再開
 bin/libra-scale seq status --dir $D                                              # 進み具合・打ち切りの内訳・アラート・対称な組
 bin/libra-scale seq table --dir $D --out ~/libra-run/ls/scale/scale-v0.1.1.json  # 表（version 1）
@@ -30,7 +30,8 @@ touch $D/STOP                                                                   
 
 - **選ぶ側**: 組ごとに 100 局打ってから 50 局ごとに見て、95% で有意（|w − 0.5| > 1.96·se）か、半幅 1.96·se ≤ 0.02 で打ち切る。
 - **対称な組を先に打つ**: 線対称・点対称の 27 組（鏡映込み 51 組）を最初にまとめて打ち、有意では止めずに半幅 0.02 まで打つ。
-- **アラート**: 対称な組が後手に傾いたら、log.txt の `ALERT` 行と `ALERT.txt` に出す。途中の判定は「先手の得点 + 3.0·se < 0.5」、止まった後の判定は 95% 区間の上限 < 0.5。
+- **アラート**: 対称な組が後手に傾いたら、log.txt の `ALERT` 行と `ALERT.txt` に出す。`--notify windows` を付けると Windows の通知領域にも出す（WSL の powershell.exe）。途中の判定は「先手の得点 + 3.0·se < 0.5」、止まった後の判定は 95% 区間の上限 < 0.5。
+- **GPU**: Windows 側のアプリと GPU を共有すると大きく遅くなる（2026-09-15 に専有の 0.30 倍。measurements.md）。回す間は GPU を使うアプリを閉じる。
 - **置く側**: `--eps-place` を付けると、精度で止まり区間が 0.5 を含んだ組だけに打ち足す。`balanced` は、区間が 0.5 を含んだまま止まった組。
 - **局の打ち方**: 自己対局と同じエンジン（同時 512 局）で、打ち切っていない組の玉 2 手を布石として渡す。棋譜は 1 局 1 行で `games/*.jsonl.gz` に残る（CC0）。
 - **手元以外のワーカー**: 局を `inbox/` に置けば、手元の run が一緒に数える（ファイルの形は `seqrun.py` の冒頭）。

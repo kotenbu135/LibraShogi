@@ -149,9 +149,10 @@ def check_record(r: dict, search: dict) -> None:
 class Coordinator:
     """inbox の棋譜を取り込み、規則を当て、アラート・active.json・status.json を書く。"""
 
-    def __init__(self, d: Path, log: Callable[[str], None] = print):
+    def __init__(self, d: Path, log: Callable[[str], None] = print, notify: Callable[[str], None] | None = None):
         self.d = Path(d)
         self.log = log
+        self.notify = notify  # アラートを人に知らせる（CLI の --notify windows は Windows の通知領域に出す）
         self.config = read_json(self.d / "config.json")
         self.state = read_json(self.d / "state.json")
         self.rule = R.Rule.from_dict(self.config["rule"])
@@ -223,6 +224,11 @@ class Coordinator:
             self.log("ALERT " + a["message"])
             with open(self.d / "ALERT.txt", "a", encoding="utf-8") as f:
                 f.write(f"{a['time']} {a['message']}\n")
+            if self.notify is not None:
+                try:
+                    self.notify(a["message"])
+                except Exception as e:  # noqa: BLE001  知らせに失敗しても検証は続ける
+                    self.log(f"seq: notify failed: {type(e).__name__}: {str(e)[:200]}")
         phase = self.phase()
         if phase != self.state.get("phase"):
             if self.state.get("phase") == "symmetric":
@@ -290,9 +296,28 @@ class Player:
         return self.loop.round()
 
 
+def windows_notify(message: str, title: str = "LibraShogi scale ALERT") -> None:
+    """WSL から Windows の通知領域にバルーンを出す（60 秒、待たない）。文字化けを避けて本文は UTF-8 の base64 を環境変数で渡す。"""
+    import base64
+    import shutil
+    import subprocess
+
+    exe = shutil.which("powershell.exe") or "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+    script = ("Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; "
+              "$m = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:LIBRA_MSG)); "
+              "$n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Warning; "
+              f"$n.BalloonTipTitle = '{title}'; $n.BalloonTipText = $m; $n.Visible = $true; $n.ShowBalloonTip(60000); "
+              "Start-Sleep -Seconds 60; $n.Dispose()")
+    env = dict(os.environ, LIBRA_MSG=base64.b64encode(message.encode("utf-8")).decode("ascii"),
+               WSLENV=(os.environ.get("WSLENV", "") + ":LIBRA_MSG").lstrip(":"))
+    subprocess.Popen([exe, "-NoProfile", "-WindowStyle", "Hidden", "-Command", script], env=env, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
 def run_local(d: Path, device: torch.device, n_games: int = 512, threads: int = 12, compile: str = "max-autotune", worker: str = "local",
               log: Callable[[str], None] = print, should_stop: Callable[[], bool] = lambda: False, seed: int | None = None,
-              chunk_games: int = CHUNK_GAMES, cycle_s: float = CYCLE_S, flush_s: float = FLUSH_S) -> int:
+              chunk_games: int = CHUNK_GAMES, cycle_s: float = CYCLE_S, flush_s: float = FLUSH_S,
+              notify: Callable[[str], None] | None = None) -> int:
     """手元の GPU で打ちながら取り込みと規則も回す（inbox に別マシンの局があれば一緒に数える）。打つ組が無くなるか STOP で抜ける。"""
     from .table import load_model
 
@@ -300,7 +325,7 @@ def run_local(d: Path, device: torch.device, n_games: int = 512, threads: int = 
     if (d / "STOP").exists():
         (d / "STOP").unlink()
         log("seq: removed a stale STOP")
-    co = Coordinator(d, log)
+    co = Coordinator(d, log, notify)
     co.ingest()
     co.update()
     co.save()

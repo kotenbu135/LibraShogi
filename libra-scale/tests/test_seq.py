@@ -207,3 +207,23 @@ def test_ingest_counts_once(tmp_path):
     assert co.states["5i 5a"]["sente"] == 1 and co.states["5i 5a"]["gote"] == 1 and co.state["workers"]["vast1"] == 2
     with gzip.open(next((d / "games").glob("vast1-*-000001.jsonl.gz")), "rt") as fh:
         assert len(fh.readlines()) == 3
+
+
+def test_coordinator_alert_writes_and_notifies(tmp_path):
+    bt = write_tiny(tmp_path)
+    d = tmp_path / "seq"
+    S.init_dir(d, bt, sims=4, rule=R.Rule(), keys=["5i 5a", "2g 6a"])
+    got: list[str] = []
+    logs: list[str] = []
+
+    def boom(msg: str) -> None:
+        got.append(msg)
+        raise OSError("no powershell")
+
+    co = S.Coordinator(d, log=logs.append, notify=boom)
+    co.states["5i 5a"].update(n=2450, sente=1127, gote=1323, next_look=2450)
+    alerts = co.update()
+    assert alerts and len(got) == len(alerts) and all("後手" in m for m in got)
+    assert any(s.startswith("ALERT ") for s in logs) and any("notify failed" in s for s in logs)
+    assert (d / "ALERT.txt").read_text(encoding="utf-8").count("後手") == len(alerts)
+    assert co.update() == [] and len(co.state["alerts"]) == len(alerts)
