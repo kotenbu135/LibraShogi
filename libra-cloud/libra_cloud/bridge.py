@@ -5,6 +5,8 @@
       .venv/bin/python -m libra_cloud.bridge --run-dir ~/libra-run/ls --host <ip> --port <port> --out <dir>
 
 - 学習側が weights/latest.pt を書き換えたら（学習のたび。ls で約 69 秒ごと）ホストへ送る（.tmp に送ってから mv）。
+  ただし前の送信から --min-push-seconds（300）が経つまでは送らない（20 MB を 69 秒ごとに送ると 3 時間で 6.7 GB になり、
+  回線が詰まると送信が遅れて局が古くなる。学習側の max_lag_steps 2000 は ls で約 24 分）。
 - 布石（[selfplay] openings）が変わったらホストの <run>/openings.json へ送る。
 - ホストの inbox/*.npz を取ってきてホストから消し、手元で手を再生して検査（workers.verify_games_file）してから
   学習側の inbox/ に置く（.tmp に書いてから os.replace）。不正なものは <out>/rejected/ に残す。
@@ -129,12 +131,16 @@ class SSHTransport:
 
 
 class Bridge:
-    def __init__(self, run_dir: Path, transport: Transport, out: Path, *, max_files: int = 20, log: Callable[[str], None] = print):
+    def __init__(self, run_dir: Path, transport: Transport, out: Path, *, max_files: int = 20, min_push_s: float = 0.0,
+                 clock: Callable[[], float] = time.monotonic, log: Callable[[str], None] = print):
         self.cfg = load_config(run_dir / "config.toml")
         self.run_dir = run_dir
         self.t = transport
         self.out = out
         self.max_files = max_files
+        self.min_push_s = min_push_s  # 重みは前の送信からこの秒数が経つまで送らない（布石は待たない）
+        self.clock = clock
+        self.last_weights_push: float | None = None
         self.log = log
         self.inbox = run_dir / "inbox"
         self.weights = run_dir / "weights" / "latest.pt"
@@ -146,20 +152,25 @@ class Bridge:
         self.pushed: dict[str, int] = {}
         self.waiting_logged = False
         self.stats: dict = {"pushes": {}, "push_s": {}, "files": 0, "games": 0, "rejected_files": 0, "verify_s": 0.0, "verify_ms_per_game": None,
-                            "last_pull": None, "last_push": None, "errors": 0}
+                            "last_pull": None, "last_push": None, "errors": 0, "push_bytes": 0, "pull_bytes": 0}
 
-    def push_if_changed(self, src: Path, rel: str) -> None:
+    def push_if_changed(self, src: Path, rel: str, min_interval: float = 0.0) -> None:
         try:
             mt = src.stat().st_mtime_ns
         except FileNotFoundError:
             return
         if self.pushed.get(rel) == mt:
             return
+        if min_interval > 0 and self.last_weights_push is not None and self.clock() - self.last_weights_push < min_interval:
+            return
         nbytes = src.stat().st_size
         t0 = time.time()
         self.t.push(src, rel)
         now = time.time()
         self.pushed[rel] = mt
+        self.stats["push_bytes"] += nbytes
+        if min_interval > 0:
+            self.last_weights_push = self.clock()
         self.stats["pushes"][rel] = self.stats["pushes"].get(rel, 0) + 1
         self.stats["last_push"] = now
         # 送信にかかった時間と、学習側が書いてからホストに届くまでの時間（age）。ワーカーの重みの遅れの内訳を見るため
@@ -183,6 +194,7 @@ class Bridge:
         names = [n for n in self.t.list_inbox() if NAME.match(n)][:self.max_files]
         if names:
             self.t.fetch(names, self.staging)
+            self.stats["pull_bytes"] += sum((self.staging / n).stat().st_size for n in names if (self.staging / n).exists())
             self.t.delete(names)
             self.stats["last_pull"] = time.time()
         n = 0
@@ -220,10 +232,10 @@ class Bridge:
     def cycle(self) -> int:
         """送信に失敗しても回収は続ける（送れなかったものは次の周回で送り直す。ワーカーはその間古い重みで打つ）。
         ホストが落ちていれば回収も失敗するので、serve の打ち切りはそちらで働く。"""
-        pushes = [(self.weights, "weights/latest.pt")] + ([(self.openings, "openings.json")] if self.openings is not None else [])
-        for src, rel in pushes:
+        pushes = [(self.weights, "weights/latest.pt", self.min_push_s)] + ([(self.openings, "openings.json", 0.0)] if self.openings is not None else [])
+        for src, rel, min_interval in pushes:
             try:
-                self.push_if_changed(src, rel)
+                self.push_if_changed(src, rel, min_interval)
             except ERRORS as e:
                 self.stats["errors"] += 1
                 self.log(f"bridge: push {rel} failed: {type(e).__name__}: {str(e)[:300]}")
@@ -279,6 +291,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--remote-run", default=None, help="ホストの run ディレクトリ（既定: /root/libra/run/<run_id>）")
     ap.add_argument("--out", required=True, help="ログ・状態（bridge.json）・検査で弾いたファイルの置き場所")
     ap.add_argument("--interval", type=float, default=15.0)
+    ap.add_argument("--min-push-seconds", type=float, default=300.0,
+                    help="重みを前の送信からこの秒数が経つまで送らない（学習側の max_lag_steps 2000 は ls で約 24 分）")
     ap.add_argument("--hours", type=float, default=3.0, help="この時間が過ぎたらワーカーを止めて残りを取って抜ける")
     ap.add_argument("--max-error-minutes", type=float, default=10.0)
     a = ap.parse_args(argv)
@@ -298,8 +312,8 @@ def main(argv: list[str] | None = None) -> int:
     stopping: list[int] = []
     for s in (signal.SIGINT, signal.SIGTERM):
         signal.signal(s, lambda signum, frame: stopping.append(signum))
-    bridge = Bridge(run_dir, SSHTransport(a.host, a.port, remote), out, log=log)
-    log(f"bridge: {run_dir} <-> {a.host}:{a.port}:{remote} for {a.hours} h")
+    bridge = Bridge(run_dir, SSHTransport(a.host, a.port, remote), out, min_push_s=a.min_push_seconds, log=log)
+    log(f"bridge: {run_dir} <-> {a.host}:{a.port}:{remote} for {a.hours} h (weights at most every {a.min_push_seconds:.0f} s)")
     return serve(bridge, interval=a.interval, deadline=time.time() + a.hours * 3600, stop=lambda: bool(stopping) or (out / "STOP").exists(),
                  max_error_s=a.max_error_minutes * 60)
 

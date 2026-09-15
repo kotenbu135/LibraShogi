@@ -159,6 +159,17 @@ def _stamp(t: float) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t))
 
 
+def test_transfer_cost_is_estimated_for_sessions_without_byte_counts():
+    offer = {"inet_down_cost": 0.005, "inet_up_cost": 0.004}
+    # 記録あり: 送った 1 GB × 0.005 + 取ってきた 0.25 GB × 0.004
+    assert vast_cli.transfer_usd({"push_bytes": 1_000_000_000, "pull_bytes": 250_000_000}, offer, None) == (0.006, False)
+    # 記録なし: 重み 20 MB × 100 回 = 2 GB、局 100,000 × 5,300 バイト = 0.53 GB
+    old = {"pushes": {"weights/latest.pt": 100, "openings.json": 3}, "games": 100_000}
+    assert vast_cli.transfer_usd(old, offer, 20_000_000) == (round(2.0 * 0.005 + 0.53 * 0.004, 4), True)
+    assert vast_cli.transfer_usd(old, offer, None) == (None, False)  # 重みの大きさが分からない
+    assert vast_cli.transfer_usd(old, {}, 20_000_000) == (None, False)  # 単価が無い
+
+
 def test_history_lists_every_session_with_cost_per_million_games(tmp_path: Path, capsys):
     """管理コンソールの「クラウド履歴」: 過去のセッションごとの費用・回収局数・学習側が古すぎて捨てた局・100 万局あたりの費用。"""
     root = tmp_path / "cloud"
@@ -170,19 +181,22 @@ def test_history_lists_every_session_with_cost_per_million_games(tmp_path: Path,
     # 2 回目: 2 時間借りて 40,000 局、そのうち学習側が 5,000 局を捨てた（ユーザーが停止）
     b = root / "ls-20260914-130000"
     t_rent, t_bridge = t0 + 3600, t0 + 3600 + 300
-    offer = {"dph_total": 0.25, "gpu_name": "RTX 5080", "cpu_name": "AMD Ryzen 9 7900 ", "geolocation": "Australia, AU", "reliability2": 0.998}
+    offer = {"dph_total": 0.25, "gpu_name": "RTX 5080", "cpu_name": "AMD Ryzen 9 7900 ", "geolocation": "Australia, AU", "reliability2": 0.998,
+             "inet_down_cost": 0.005, "inet_up_cost": 0.004}
     _write(b / "session.json", {"run": "ls", "gpu": "RTX 5080", "max_dph": 0.3, "hours": 3.0, "started": t0 + 3590, "pid": None,
                                 "stop_requested": t_bridge + 7000})
     _write(b / "launcher.log", "credit $9\ncreate #1\nssh ready\nbridge pid 7\nbridge: stopping\ndestroyed instance 5 (show_instance after: none)\n")
     _write(b / "instance.json", {"instance": 5, "offer": offer, "t_rent": t_rent, "t_bridge": t_bridge})
     _write(b / "result.json", {"worker": "vast1", "offer": offer, "t_ready_s": 140, "rented_h": 2.0, "est_cost_usd": 0.5,
-                               "bridge": {"time": t_bridge + 7200, "games": 40000, "files": 400, "rejected_files": 1, "errors": 2}})
-    # 3 回目: 動いている途中（result.json はまだ無い。launcher のプロセスは自分自身）
+                               "bridge": {"time": t_bridge + 7200, "games": 40000, "files": 400, "rejected_files": 1, "errors": 2,
+                                          "push_bytes": 2_000_000_000, "pull_bytes": 500_000_000}})
+    # 3 回目: 動いている途中（result.json はまだ無い。launcher のプロセスは自分自身）。転送料の単価が無い（古い記録）
     c = root / "ls-20260914-160000"
     t3 = t0 + 4 * 3600
     _write(c / "session.json", {"run": "ls", "gpu": "RTX 5070 Ti", "max_dph": 0.28, "hours": 3.0, "started": t3, "pid": os.getpid()})
     _write(c / "launcher.log", "credit $9\ncreate #1\nssh ready\nbridge pid 7\n")
-    _write(c / "instance.json", {"instance": 6, "offer": {**offer, "dph_total": 0.2, "gpu_name": "RTX 5070 Ti"}, "t_rent": t3, "t_bridge": t3})
+    old_offer = {k: v for k, v in offer.items() if not k.startswith("inet_")}
+    _write(c / "instance.json", {"instance": 6, "offer": {**old_offer, "dph_total": 0.2, "gpu_name": "RTX 5070 Ti"}, "t_rent": t3, "t_bridge": t3})
     _write(c / "bridge" / "bridge.json", {"time": t3 + 3600, "games": 30000, "files": 300, "rejected_files": 0, "errors": 0})
     (root / "current").write_text(c.name, encoding="utf-8")
     # 学習側のログ: 2 回目の間に 5,000 局、3 回目の間に 100 局を捨てた。2 回目より前の行と別のワーカーの行は数えない
@@ -201,13 +215,17 @@ def test_history_lists_every_session_with_cost_per_million_games(tmp_path: Path,
     assert s2["phase"] == "終了" and s2["stopped_by_user"] and s2["rented_h"] == 2.0 and s2["est_cost_usd"] == 0.5 and s2["t_ready_s"] == 140
     assert s2["games"] == 40000 and s2["stale_games"] == 5000 and s2["net_games"] == 35000 and s2["rejected_files"] == 1 and s2["errors"] == 2
     assert s2["bridge_h"] == 2.0 and s2["games_per_day"] == 480000
-    assert s2["usd_per_1m"] == round(0.5 / 35000 * 1e6, 2) and s2["usd_per_1m_gross"] == round(0.5 / 40000 * 1e6, 2)
+    # 転送料: 送った 2 GB × $0.005 + 取ってきた 0.5 GB × $0.004。100 万局あたりは借りた費用と転送料の合計で割る
+    assert s2["transfer_usd"] == 0.012 and not s2["transfer_estimated"] and s2["total_usd"] == 0.512
+    assert s2["usd_per_1m"] == round(0.512 / 35000 * 1e6, 2) and s2["usd_per_1m_gross"] == round(0.512 / 40000 * 1e6, 2)
     assert s3["alive"] and s3["phase"] == "稼働" and s3["rented_h"] == 1.0 and s3["est_cost_usd"] == 0.2 and s3["stale_games"] == 100
     assert s3["games"] == 30000 and s3["net_games"] == 29900
+    assert s3["transfer_usd"] is None and s3["total_usd"] == 0.2
     tot = h["totals"]
     assert tot["sessions"] == 3 and tot["rented"] == 2 and tot["est_cost_usd"] == 0.7 and tot["games"] == 70000 and tot["net_games"] == 64900
-    assert tot["usd_per_1m"] == round(0.7 / 64900 * 1e6, 2)
-    assert h["months"] == [{"month": "2026-09", "sessions": 3, "est_cost_usd": 0.7, "games": 70000, "net_games": 64900}]
+    assert tot["transfer_usd"] == 0.012 and tot["total_usd"] == 0.712 and tot["usd_per_1m"] == round(0.712 / 64900 * 1e6, 2)
+    assert h["months"] == [{"month": "2026-09", "sessions": 3, "est_cost_usd": 0.7, "transfer_usd": 0.012, "total_usd": 0.712,
+                            "games": 70000, "net_games": 64900}]
     assert vast_cli.main(["--root", str(root), "history", "--json", "--run-root", str(tmp_path / "runs")]) == 0
     assert [s["name"] for s in json.loads(capsys.readouterr().out)["sessions"]] == [a.name, b.name, c.name]
     assert vast_cli.main(["--root", str(root), "history", "--run-root", str(tmp_path / "runs")]) == 0

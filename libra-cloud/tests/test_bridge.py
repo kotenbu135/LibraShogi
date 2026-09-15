@@ -152,6 +152,43 @@ def test_push_records_duration_and_age(tmp_path: Path):
     assert json.loads((tmp_path / "out" / "bridge.json").read_text())["push_s"]["openings.json"]["n"] == 1
 
 
+def test_weights_push_waits_for_min_interval_and_bytes_are_counted(tmp_path: Path):
+    """重みは前の送信から min_push_s 経つまで送らない（学習のたびに 20 MB を送ると 3 時間で 6.7 GB。max_lag_steps 2000 は約 24 分）。
+    布石は変わったらすぐ送る。送った・取ってきたバイト数を数える（転送料の計上）。"""
+    run = _learner(tmp_path)
+    host = tmp_path / "host"
+    (host / "inbox").mkdir(parents=True)
+    now = [1000.0]
+    b = Bridge(run, LocalTransport(host), tmp_path / "out", min_push_s=300, clock=lambda: now[0], log=_quiet)
+    b.cycle()
+    assert b.stats["pushes"]["weights/latest.pt"] == 1 and b.stats["push_bytes"] == 2 + 2  # b"w1" と "[]"
+    w = run / "weights" / "latest.pt"
+
+    def rewrite(data: bytes) -> None:
+        w.write_bytes(data)
+        st = w.stat()
+        os.utime(w, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+
+    rewrite(b"w2")
+    now[0] += 100
+    b.cycle()
+    assert b.stats["pushes"]["weights/latest.pt"] == 1 and (host / "weights" / "latest.pt").read_bytes() == b"w1"
+    op = Path(b.openings)
+    op.write_text("[1]", encoding="utf-8")
+    st = op.stat()
+    os.utime(op, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+    b.cycle()
+    assert b.stats["pushes"]["openings.json"] == 2 and (host / "openings.json").read_text() == "[1]"  # 布石は待たない
+    now[0] += 201
+    rewrite(b"w3!")
+    b.cycle()
+    assert b.stats["pushes"]["weights/latest.pt"] == 2 and (host / "weights" / "latest.pt").read_bytes() == b"w3!"
+    assert b.stats["push_bytes"] == 2 + 2 + 3 + 3
+    f = write_games_file(host / "inbox", "vast1", 5, "ls", _games(2, 27))
+    size = f.stat().st_size
+    assert b.cycle() == 2 and b.stats["pull_bytes"] == size
+
+
 def test_push_timeout_scales_with_size():
     assert push_timeout(0) == 60.0
     assert 150 < push_timeout(20_501_387) < 170  # ls の fp16 の重み。通常は 10 秒で送れる

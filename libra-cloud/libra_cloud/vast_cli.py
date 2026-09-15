@@ -148,6 +148,28 @@ def per_million(cost, games):
     return round(float(cost) / games * 1e6, 2) if cost is not None and games and games > 0 else None
 
 
+PULL_BYTES_PER_GAME = 5_300  # 対局ファイルは 100 局で約 530 kB（2026-09-15 の ls の inbox）
+
+
+def transfer_usd(bridge: dict, offer: dict, weights_bytes: int | None) -> tuple[float | None, bool]:
+    """転送料（$）と見積もりかどうか。送った重み・布石はホストの下り（inet_down_cost $/GB）、取ってきた局は上り（inet_up_cost）。
+    バイト数の記録が無い古いセッションは、重みの送信回数 × 今の重みの大きさと、局数 × PULL_BYTES_PER_GAME で見積もる。単価が無ければ None。"""
+    down, up = offer.get("inet_down_cost"), offer.get("inet_up_cost")
+    if down is None or up is None:
+        return None, False
+    estimated = False
+    push = bridge.get("push_bytes")
+    if push is None:
+        n = int((bridge.get("pushes") or {}).get("weights/latest.pt") or 0)
+        if n and weights_bytes is None:
+            return None, False
+        push, estimated = n * (weights_bytes or 0), True
+    pull = bridge.get("pull_bytes")
+    if pull is None:
+        pull, estimated = int(bridge.get("games") or 0) * PULL_BYTES_PER_GAME, True
+    return round(push / 1e9 * float(down) + pull / 1e9 * float(up), 4), estimated
+
+
 def history(root: Path, run_root: Path, now: float | None = None) -> dict:
     """過去のセッションを古い順に並べ、費用・回収局数・学習側が捨てた局・100 万局あたりの費用を出す（管理コンソールの「クラウド履歴」）。
     捨てた局は学習側の log.txt の行を、そのセッションのブリッジ起動から次のセッションの開始（無ければ終わりの 10 分後）までで数える。"""
@@ -155,6 +177,7 @@ def history(root: Path, run_root: Path, now: float | None = None) -> dict:
     dirs = sorted((d for d in root.glob("*-*") if d.is_dir() and (d / "session.json").exists()),
                   key=lambda d: (read_json(d / "session.json") or {}).get("started") or 0)
     logs: dict[str, str] = {}
+    wbytes: dict[str, int | None] = {}
     rows = []
     for i, d in enumerate(dirs):
         st = session_status(d, tail=0, now=now)
@@ -176,6 +199,13 @@ def history(root: Path, run_root: Path, now: float | None = None) -> dict:
             nxt = (read_json(dirs[i + 1] / "session.json") or {}).get("started") if i + 1 < len(dirs) else None
             stale = stale_drops(logs[run], float(t_bridge), float(nxt or (end or now) + 600), res.get("worker"))
         net = games - stale
+        if run not in wbytes:
+            try:
+                wbytes[run] = (run_root / run / "weights" / "latest.pt").stat().st_size
+            except OSError:
+                wbytes[run] = None
+        tr, tr_est = transfer_usd(b, offer, wbytes[run])
+        total = None if st["est_cost_usd"] is None else round(float(st["est_cost_usd"]) + (tr or 0.0), 4)
         rows.append({"name": d.name, "run": run, "started": s.get("started"), "alive": s["alive"], "phase": s["phase"],
                      "stopped_by_user": bool(s.get("stop_requested")), "hours": s.get("hours"), "max_dph": s.get("max_dph"),
                      "gpu": offer.get("gpu_name") or s.get("gpu"), "cpu": str(offer.get("cpu_name") or "").strip() or None,
@@ -185,19 +215,25 @@ def history(root: Path, run_root: Path, now: float | None = None) -> dict:
                      "games": games, "stale_games": stale, "net_games": net, "files": b.get("files"),
                      "rejected_files": b.get("rejected_files"), "errors": b.get("errors"), "verify_ms_per_game": b.get("verify_ms_per_game"),
                      "games_per_day": round(games / bridge_h * 24) if bridge_h and bridge_h > 0 else None,
-                     "usd_per_1m": per_million(st["est_cost_usd"], net), "usd_per_1m_gross": per_million(st["est_cost_usd"], games)})
+                     "transfer_usd": tr, "transfer_estimated": tr_est, "total_usd": total,
+                     "usd_per_1m": per_million(total, net), "usd_per_1m_gross": per_million(total, games)})
     rented = [r for r in rows if r["est_cost_usd"] is not None]
     cost = round(sum(float(r["est_cost_usd"]) for r in rented), 3)
+    transfer = round(sum(float(r["transfer_usd"] or 0) for r in rented), 4)
+    total = round(cost + transfer, 4)
     net = sum(r["net_games"] for r in rows)
     totals = {"sessions": len(rows), "rented": len(rented), "rented_h": round(sum(float(r["rented_h"] or 0) for r in rented), 3),
-              "est_cost_usd": cost, "games": sum(r["games"] for r in rows), "stale_games": sum(r["stale_games"] for r in rows),
-              "net_games": net, "usd_per_1m": per_million(cost, net)}
+              "est_cost_usd": cost, "transfer_usd": transfer, "total_usd": total,
+              "games": sum(r["games"] for r in rows), "stale_games": sum(r["stale_games"] for r in rows),
+              "net_games": net, "usd_per_1m": per_million(total, net)}
     months: dict[str, dict] = {}
     for r in rows:
         key = time.strftime("%Y-%m", time.localtime(r["started"])) if r["started"] else "?"
-        m = months.setdefault(key, {"month": key, "sessions": 0, "est_cost_usd": 0.0, "games": 0, "net_games": 0})
+        m = months.setdefault(key, {"month": key, "sessions": 0, "est_cost_usd": 0.0, "transfer_usd": 0.0, "total_usd": 0.0, "games": 0, "net_games": 0})
         m["sessions"] += 1
         m["est_cost_usd"] = round(m["est_cost_usd"] + float(r["est_cost_usd"] or 0), 3)
+        m["transfer_usd"] = round(m["transfer_usd"] + float(r["transfer_usd"] or 0), 4)
+        m["total_usd"] = round(m["total_usd"] + float(r["total_usd"] or 0), 4)
         m["games"] += r["games"]
         m["net_games"] += r["net_games"]
     return {"root": str(root), "sessions": rows, "totals": totals, "months": list(months.values())}
@@ -219,13 +255,14 @@ def cmd_history(a: argparse.Namespace) -> int:
     for r in h["sessions"]:
         started = time.strftime("%m/%d %H:%M", time.localtime(r["started"])) if r["started"] else "-"
         print(f"{started:<11} {str(r['gpu'] or '-'):<12} {money(r['dph'], '{:.3f}'):>6} {r['rented_h'] if r['rented_h'] is not None else '-':>8} "
-              f"{money(r['est_cost_usd']):>7} {r['games']:>8,} {r['stale_games']:>7,} {r['net_games']:>8,} "
+              f"{money(r['total_usd']):>7} {r['games']:>8,} {r['stale_games']:>7,} {r['net_games']:>8,} "
               f"{format(r['games_per_day'], ',') if r['games_per_day'] is not None else '-':>9}{money(r['usd_per_1m']):>9}  {r['phase']}")
     t = h["totals"]
-    print(f"合計 {t['sessions']} 回（借りた {t['rented']} 回、{t['rented_h']:.2f} h）  費用 {money(t['est_cost_usd'])}  "
+    print(f"合計 {t['sessions']} 回（借りた {t['rented']} 回、{t['rented_h']:.2f} h）  費用 {money(t['total_usd'])}"
+          f"（うち転送料 {money(t['transfer_usd'], '{:.3f}')}）  "
           f"有効局 {t['net_games']:,}（捨てた {t['stale_games']:,}）  100 万局あたり {money(t['usd_per_1m'])}")
     for m in h["months"]:
-        print(f"  {m['month']}: {m['sessions']} 回  費用 {money(m['est_cost_usd'])}  有効局 {m['net_games']:,}")
+        print(f"  {m['month']}: {m['sessions']} 回  費用 {money(m['total_usd'])}（うち転送料 {money(m['transfer_usd'], '{:.3f}')}）  有効局 {m['net_games']:,}")
     return 0
 
 

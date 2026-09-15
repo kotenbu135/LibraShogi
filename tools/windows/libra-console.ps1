@@ -1083,7 +1083,8 @@ function Update-HistDetail {
     $lines += "予定 {0} 時間・上限 {1}/h" -f (Fmt-Num $r.hours "0.#"), (Fmt-Num $r.max_dph "N2" '$')
     if ($null -ne $r.instance) {
         $lines += "インスタンス #{0}: {1}、{2}（{3}、信頼度 {4}）、{5}/h" -f $r.instance, $r.gpu, $r.cpu, $r.where, (Fmt-Num $r.reliability "N3"), (Fmt-Num $r.dph "N3" '$')
-        $lines += "借りた {0} 時間（ssh まで {1} 秒）、ブリッジ {2} 時間、費用 {3}" -f (Fmt-Num $r.rented_h "N2"), (Fmt-Num $r.t_ready_s), (Fmt-Num $r.bridge_h "N2"), (Fmt-Num $r.est_cost_usd "N2" '$')
+        $lines += "借りた {0} 時間（ssh まで {1} 秒）、ブリッジ {2} 時間、費用 {3}（借りた時間 {4} ＋ 転送料 {5}{6}）" -f (Fmt-Num $r.rented_h "N2"), (Fmt-Num $r.t_ready_s), (Fmt-Num $r.bridge_h "N2"),
+                  (Fmt-Num $r.total_usd "N2" '$'), (Fmt-Num $r.est_cost_usd "N2" '$'), (Fmt-Num $r.transfer_usd "N3" '$'), $(if ($r.transfer_estimated) { "、見積もり" } else { "" })
         $lines += "回収 {0} 局（{1} ファイル、弾いた {2}、エラー {3}、検査 {4} ms/局）、捨てた {5}、有効 {6}" -f (Fmt-Num $r.games), (Fmt-Num $r.files), (Fmt-Num $r.rejected_files), (Fmt-Num $r.errors), (Fmt-Num $r.verify_ms_per_game "N2"), (Fmt-Num $r.stale_games), (Fmt-Num $r.net_games)
         $lines += "局/日（ブリッジの時間で換算）{0}、100 万局あたり {1}（回収局で割ると {2}）" -f (Fmt-Num $r.games_per_day), (Fmt-Num $r.usd_per_1m "N2" '$'), (Fmt-Num $r.usd_per_1m_gross "N2" '$')
     } else { $lines += "インスタンスを借りていません（費用なし）" }
@@ -1097,12 +1098,12 @@ function Update-HistPanel {
     $t = $h.totals
     $mon = [datetime]::Now.ToString("yyyy-MM")
     $m = @($h.months) | Where-Object { $_.month -eq $mon } | Select-Object -First 1
-    $mc = if ($null -ne $m) { [double]$m.est_cost_usd } else { 0.0 }
+    $mc = if ($null -ne $m) { [double]$(if ($null -ne $m.total_usd) { $m.total_usd } else { $m.est_cost_usd }) } else { 0.0 }
     $lblHistAt.Text = "読み込み " + $script:VastHistAt.ToString("HH:mm:ss") + "（5 分ごと、セッションの開始・終了時）"
     $lblHistSum.Text = ("合計 {0} 回（借りた {1} 回・{2} 時間）費用 {3}、有効 {4} 局（捨てた {5} 局）、100 万局あたり {6}" -f $t.sessions, $t.rented, (Fmt-Num $t.rented_h "N2"),
-                        (Fmt-Num $t.est_cost_usd "N2" '$'), (Fmt-Num $t.net_games), (Fmt-Num $t.stale_games), (Fmt-Num $t.usd_per_1m "N2" '$')) + "`r`n" +
+                        (Fmt-Num $(if ($null -ne $t.total_usd) { $t.total_usd } else { $t.est_cost_usd }) "N2" '$'), (Fmt-Num $t.net_games), (Fmt-Num $t.stale_games), (Fmt-Num $t.usd_per_1m "N2" '$')) + "`r`n" +
                        ("今月（{0}）: {1} ≈ {2:N0} 円 / 上限 {3:N0} 円（{4:P1}。1 ドル {5} 円で換算）" -f $mon, (Fmt-Num $mc "N2" '$'), ($mc * $UsdJpy), $BudgetJpy, ($mc * $UsdJpy / [Math]::Max(1, $BudgetJpy)), $UsdJpy) + "`r`n" +
-                       '有効局 = 回収局 − 学習側が古すぎて捨てた局。費用は借りた時間 × $/h の見積もり（転送料を含まない）。局/日はブリッジの時間で換算'
+                       '有効局 = 回収局 − 学習側が古すぎて捨てた局。費用は借りた時間 × $/h ＋ 転送料（記録の無い古い回は見積もり）。局/日はブリッジの時間で換算'
     Set-TabState "history" ("今月 " + (Fmt-Num $mc "N2" '$')) ([System.Drawing.Color]::DimGray)
     $selName = if ($lvHist.SelectedItems.Count -gt 0) { $lvHist.SelectedItems[0].Tag.name } else { "" }
     $rows = @($h.sessions)
@@ -1112,7 +1113,7 @@ function Update-HistPanel {
     foreach ($r in $rows) {
         $it = New-Object System.Windows.Forms.ListViewItem($(if ($null -ne $r.started) { (From-Unix $r.started).ToString("MM/dd HH:mm") } else { "-" }))
         $cpu = if ($r.cpu) { "{0}（{1}）" -f ($r.cpu -replace '\s+\d+-Core Processor$', ''), $r.where } else { "-" }
-        foreach ($txt in @((([string]$r.gpu) -replace '^RTX ', ''), (Fmt-Num $r.usd_per_1m "N2" '$'), (Fmt-Num $r.net_games), (Fmt-Num $r.est_cost_usd "N2" '$'),
+        foreach ($txt in @((([string]$r.gpu) -replace '^RTX ', ''), (Fmt-Num $r.usd_per_1m "N2" '$'), (Fmt-Num $r.net_games), (Fmt-Num $(if ($null -ne $r.total_usd) { $r.total_usd } else { $r.est_cost_usd }) "N2" '$'),
                            (Fmt-Num $r.games_per_day), (Fmt-Num $r.rented_h "N2"), (Fmt-Num $r.dph "N3" '$'), (Fmt-Num $r.stale_games),
                            ([string]$r.phase + $(if ($r.stopped_by_user) { "（停止）" } else { "" })), $cpu)) {
             [void]$it.SubItems.Add([string]$txt)
@@ -1134,7 +1135,7 @@ function Get-VastPast([string]$gpu, [double]$hours) {
     $rs = @(@($script:VastHist.sessions) | Where-Object { $_.gpu -eq $gpu -and $null -ne $_.est_cost_usd -and [double]$_.rented_h -gt 0 -and [double]$_.net_games -gt 0 })
     if ($rs.Count -eq 0) { return "過去の $gpu の実績はありません。" }
     $g = 0.0; $hh = 0.0; $c = 0.0
-    foreach ($r in $rs) { $g += [double]$r.net_games; $hh += [double]$r.rented_h; $c += [double]$r.est_cost_usd }
+    foreach ($r in $rs) { $g += [double]$r.net_games; $hh += [double]$r.rented_h; $c += [double]$(if ($null -ne $r.total_usd) { $r.total_usd } else { $r.est_cost_usd }) }
     return ('過去の {0} の実績（{1} 回）: 借りた 1 時間あたり 約 {2:N0} 局、100 万局あたり ${3:N2}。{4} 時間なら 約 {5:N0} 局の見込み。' -f $gpu, $rs.Count, ($g / $hh), ($c / $g * 1e6), $hours, ($g / $hh * $hours))
 }
 
@@ -1589,7 +1590,7 @@ $timer.Add_Tick({
             $vphase = if ($null -ne $script:Vast -and $null -ne $script:Vast.session) { $script:Vast.session.phase } else { "-" }
             [Console]::WriteLine(("vast: phase={0} credit={1} error={2}" -f $vphase, $(if ($null -ne $script:Vast -and $null -ne $script:Vast.account) { $script:Vast.account.credit } else { "-" }), $script:VastError))
             $ht = if ($null -ne $script:VastHist) { $script:VastHist.totals } else { $null }
-            [Console]::WriteLine(("vast history: sessions={0} cost={1} net_games={2} usd_per_1m={3} error={4} top={5} chart={6} size={7}x{8}" -f $ht.sessions, $ht.est_cost_usd, $ht.net_games, $ht.usd_per_1m, $script:VastHistError, [string]$runTabs.SelectedTab.Tag, $tabs.SelectedTab.Text, $form.Width, $form.Height))
+            [Console]::WriteLine(("vast history: sessions={0} cost={1} net_games={2} usd_per_1m={3} error={4} top={5} chart={6} size={7}x{8}" -f $ht.sessions, $(if ($null -ne $ht.total_usd) { $ht.total_usd } else { $ht.est_cost_usd }), $ht.net_games, $ht.usd_per_1m, $script:VastHistError, [string]$runTabs.SelectedTab.Tag, $tabs.SelectedTab.Text, $form.Width, $form.Height))
             $form.Close()
         }
     } catch {
