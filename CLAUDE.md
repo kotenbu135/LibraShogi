@@ -13,7 +13,7 @@
 - 終局規定は docs/rules.md が唯一の正（大会規定: 千日手 4 回＝引き分け、連続王手は王手側負け、入玉宣言法 27 点、本将棋 320 手で引き分け、41 手目を 1 手目として数える）。マッチの裁定はハーネス（libra-sim）が行う。
 
 ## 構成
-libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX 書き出し）/ libra-search（MCGS、df-pn、配置詰み）/ libra-engine（USI 拡張エンジン libra / libra.exe、ONNX Runtime）/ libra-league（自己対局・学習ランナー、搾取者、評価、計測ハーネス、Python 版エンジン）/ libra-scale（玉配置表）/ libra-cloud（vast.ai、未着手）/ docs / data（マニフェストのみ）/ bin（起動スクリプト）/ tools / cmake
+libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX 書き出し）/ libra-search（MCGS、df-pn、配置詰み）/ libra-engine（USI 拡張エンジン libra / libra.exe、ONNX Runtime）/ libra-league（自己対局・学習ランナー、搾取者、評価、計測ハーネス、Python 版エンジン）/ libra-scale（玉配置表）/ libra-cloud（vast.ai の自己対局ワーカー）/ docs / data（マニフェストのみ）/ bin（起動スクリプト）/ tools / cmake
 
 ビルド・起動・テスト・エンジンの駆動手順は `.claude/skills/run-librashogi/SKILL.md`（`/run-librashogi`）が正。ここに書いてある通りに動かす。
 
@@ -42,10 +42,10 @@ libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX �
 - WSL2 Ubuntu-24.04（ディストリ名は `Ubuntu-24.04`）、RAM 32 GB、RTX 5070 Ti、Ryzen 9 9950X3D。データは WSL 内の ext4。
 - **sudo が使えない**（apt 不可）。cmake / ninja / pybind11 / pytest / torch / onnxruntime は `.venv` の pip、node は `~/.nvm`。apt が要るものはユーザーに依頼する（mingw-w64 は導入済み）。
 - Python パッケージは pip install しない。`PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-scale`（bin/ のスクリプトと driver は自分で通す）。
-- Windows 版 libra.exe は WSL の mingw クロスビルド（公開後は GitHub Actions windows-latest）。置き場所は `C:\Users\sakis\libra\engine\`。
+- Windows 版 libra.exe は WSL の mingw クロスビルド（CI も ubuntu-latest で同じ mingw-w64 posix のクロスビルドを確かめる）。置き場所は `C:\Users\sakis\libra\engine\`。
 - 相手側の資産の所在とハッシュは docs/protocol.md §5。desktop の clone は `~/tenbin-shogi-desktop`（wasm は GPL、黒箱テストの相手としてだけ実行）。
 - 一時ファイルはセッションの scratchpad に置き、リポジトリや `~/libra-run` を汚さない。
 
 ## 現在の目標
 2026 年内に Libra-L（自己対局のみで学習）を USI 拡張エンジンとして desktop に組み込み、v0.1 として公開する。「fuseki-shogi-ai 方策ネット＋水匠5」との 100 局は計測であり、勝てればよい。相手の分析や相手専用の対策はしない（docs/libra-local.md §4）。
-残りの主な作業: 世代が進んだら scale.json と搾取者の main.pt を作り直す / 複数葉の同時評価と fp16 でエンジンを速くする / desktop 側への Issue（終局判定、玉配置表）/ libra-cloud（vast.ai はユーザーの判断待ち）/ docs/match_report.md / v0.1 の公開準備（LICENSES、モデルカード、Releases の zip）。
+残りの主な作業: 世代が進んだら scale.json と搾取者の main.pt を作り直す / 複数葉の同時評価と fp16 でエンジンを速くする / desktop 側への Issue（終局判定、玉配置表）/ libra-cloud（11〜12 月の予算の配分はユーザーの判断待ち）/ docs/match_report.md / v0.1 の公開準備（LICENSES、モデルカード、Releases の zip）。

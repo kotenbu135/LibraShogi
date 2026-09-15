@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # ONNX Runtime（MIT）の公式バイナリを third_party/onnxruntime/ に取得する（リポジトリには入れない）。
 # 使い方: tools/fetch_onnxruntime.sh [linux-gpu|linux-cpu|win|win-dml|win-cuda]...   （省略時 linux-gpu と win-dml）
 #   win-dml : Windows 配布物の既定。NuGet の Microsoft.ML.OnnxRuntime.DirectML と Microsoft.AI.DirectML を

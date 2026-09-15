@@ -126,7 +126,7 @@ PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-sca
 - **`_search` を単独で import すると libra-sim のテーブルが未初期化**になり得る（モジュール初期化で `static Position` を作って回避済み）。`librashogi` を先に import する必要はない。
 - **エンジンの `go` の直後に `quit`/`stop` を送っても落ちない**が、探索前に止めると 1 回だけ評価して合法手の先頭を指す（`info string no search result`）。
 - **CUDA EP は cuDNN 9 / CUDA 12 の .so が要る。** `bin/libra-usi` と driver は PyTorch の pip 配布物（`.venv/lib/python3.12/site-packages/nvidia/*/lib`）を `LD_LIBRARY_PATH` に足す。素の `build/libra-engine/libra` を CUDA で使うなら同じことをする。無ければ CPU に自動フォールバックし `info string ... provider cpu` と出る。
-- **エンジンは 1 葉ずつ評価する（バッチ 1）**ので GPU でも 4 ms/評価程度。L-S が同じ GPU で動いていると 10〜20 ms。速度比較は `bin/libra pause` してから。
+- **エンジンは既定で 64 葉をまとめて評価する**（`DNN_Batch_Size`、1 にすると 1 葉ずつ。libra-engine/README.md）。L-S・lx と同じ GPU を使うと遅くなるので、速度比較はコンソールで ls・lx を停止してもらってから（一時停止は廃止）。
 - **本番のランと GPU を共有する。** driver の `engine --provider cuda` や `runner --device cuda` は L-S・lx と同居できるが局/日を落とす。CPU で済む確認は `--device cpu` / `--provider cpu`（既定）。
 - **手数上限は 320 手・41 手目起点**（`SearchConfig.max_ply`）。256 ではない。
 - **玉配置の剪定**: 後手玉が四段目のペアは 3 手目の桂打ちで先手の裁定勝ち。搾取者 lx は `search.prune_gote_rank4 = true`、本体 L-S は 36×36 一様のまま。

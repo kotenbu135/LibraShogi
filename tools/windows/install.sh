@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # Windows 側の操作ファイル（bat / vbs / 管理コンソール）を C:\Users\<user>\libra とデスクトップへ写す。
 # WSL から実行する。ファイルはすべて ASCII か UTF-8（BOM 付き .ps1）で、日本語は .ps1 の中だけ。
 set -euo pipefail

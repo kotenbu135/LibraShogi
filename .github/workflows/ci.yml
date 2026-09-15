@@ -1,5 +1,5 @@
 name: ci
-# 非公開の間は Linux のテストだけ（Windows ランナーは消費が 2 倍）。公開後に windows-latest のビルドを足す。
+# linux: ビルドとテスト。windows-cross: 配布物の libra.exe と同じ mingw-w64（posix）でのクロスビルド（実行はしない）。
 on:
   push:
     branches: [main]
@@ -34,3 +34,23 @@ jobs:
         env:
           PYTHONPATH: libra-sim/python:libra-search/python:libra-net:libra-league:libra-scale:libra-cloud
         run: python -m pytest -q libra-sim/tests/test_python.py libra-league/tests libra-net/tests libra-engine/tests libra-scale/tests libra-search/tests/test_external.py libra-search/tests/test_selfplay_threads.py libra-cloud/tests
+
+  windows-cross:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mingw-w64
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mingw-w64 ninja-build
+      - name: Fetch ONNX Runtime DirectML + DirectML (MIT / MSLT; hash pinned in tools/fetch_onnxruntime.sh)
+        run: tools/fetch_onnxruntime.sh win-dml
+      - name: Cross-build libra.exe
+        run: |
+          cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-posix.cmake \
+            -DLIBRA_BUILD_PYTHON=OFF -DLIBRA_BUILD_TESTS=OFF \
+            -DLIBRA_ORT_DIR=$PWD/third_party/onnxruntime/onnxruntime-win-x64-directml-1.24.4
+          cmake --build build-win
+          ls -l build-win/libra-engine/
+          test -f build-win/libra-engine/libra.exe && test -f build-win/libra-engine/DirectML.dll

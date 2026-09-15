@@ -19,19 +19,48 @@
 | `libra-engine/` | USI 拡張エンジン `libra` / `libra.exe`（ONNX Runtime） |
 | `libra-league/` | 自己対局、リーグ、評価・計測ハーネス |
 | `libra-scale/` | 玉配置表（天秤）の生成・検証、`scale.json` |
-| `libra-cloud/` | vast.ai テンプレート、費用モデル |
+| `libra-cloud/` | vast.ai の GPU で自己対局ワーカーを動かす道具（`bin/libra-vast`、ブリッジ、ベンチ） |
+| `bin/` | 起動スクリプト（`libra`、`libra-usi`、`libra-scale`、`libra-vast`） |
+| `tools/` | ONNX Runtime の取得（ハッシュ固定）、Windows 側の管理コンソールと bat |
 | `docs/` | 設計書、ルール仕様、runbook |
 | `data/` | データセットのマニフェスト（SHA-256、取得スクリプト）のみ |
 
 ## ビルドと実行
 
+Ubuntu 24.04、g++ 13、Python 3.12 で確認している。apt は使わず venv の pip で揃える。詳しい手順・エンジンの駆動・つまずきどころは
+[.claude/skills/run-librashogi/SKILL.md](.claude/skills/run-librashogi/SKILL.md)、Windows 版 `libra.exe` のクロスビルドは
+[libra-engine/README.md](libra-engine/README.md)。
+
 ```bash
-python3 -m venv .venv && .venv/bin/pip install cmake ninja pybind11 pytest numpy
-.venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cu128
+python3 -m venv .venv
+.venv/bin/pip install cmake ninja pybind11 pytest numpy onnx onnxruntime
+.venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cu128   # CPU だけなら https://download.pytorch.org/whl/cpu
+tools/fetch_onnxruntime.sh linux-gpu    # ONNX Runtime（MIT）を third_party/ に取得。CPU だけなら linux-cpu
 export PATH=$PWD/.venv/bin:$PATH
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -Dpybind11_DIR=$(python -c "import pybind11;print(pybind11.get_cmake_dir())")
-cmake --build build && ctest --test-dir build/libra-sim --output-on-failure
-bin/libra run        # 自己対局と学習（~/libra-run/ls）。stop / status
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -Dpybind11_DIR=$(python -c "import pybind11;print(pybind11.get_cmake_dir())") \
+  -DLIBRA_ORT_DIR=$PWD/third_party/onnxruntime/onnxruntime-linux-x64-gpu_cuda12-1.30.0   # CPU だけなら onnxruntime-linux-x64-1.30.0
+cmake --build build
+```
+
+`-DLIBRA_ORT_DIR` を渡さないと、エンジン（`build/libra-engine/libra`）は作られない（CMake は `libra-engine: skipped` と出すだけで成功する）。
+Python のパッケージは pip install しない。`bin/` のスクリプトは自分で `PYTHONPATH` を通すが、pytest を直接呼ぶときは付ける。
+
+テスト（CI の `.github/workflows/ci.yml` と同じ。結果行の `100% tests passed` と `N passed` で確かめる）:
+
+```bash
+ctest --test-dir build/libra-sim --output-on-failure
+ctest --test-dir build/libra-search --output-on-failure
+PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-scale:libra-cloud python -m pytest -q \
+  libra-sim/tests/test_python.py libra-league/tests libra-net/tests libra-engine/tests libra-scale/tests \
+  libra-search/tests/test_external.py libra-search/tests/test_selfplay_threads.py libra-cloud/tests
+```
+
+実行:
+
+```bash
+bin/libra run        # 自己対局と学習（状態は ~/libra-run/ls）。stop / status。運用は docs/runbook.md
+bin/libra-usi        # USI エンジン（モデルは ~/libra-run/ls/checkpoints/latest.onnx）
 ```
 
 ## ライセンス

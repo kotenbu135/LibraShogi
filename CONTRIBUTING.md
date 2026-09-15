@@ -21,14 +21,12 @@ CLA は無い。将来ライセンスを変える（例: Apache-2.0 → 別ラ�
 ## 進めかた
 
 - 1 タスク 1 ブランチ。テストが通ってから `main` へマージ
-- テストを先に書く。`libra-sim` の perft とルールテストは変更のたびに全部通す
+- テストを先に書く。C++ と Python のテストは変更のたびに全部通す（コマンドは [README.md](README.md) の「ビルドと実行」、CI と同じ）
 - コミットは小さく、メッセージは「何を・なぜ」
 - 決定は `docs/decisions.md` に 1 行、実測値は `docs/measurements.md` に追記
-- SPDX 識別子をソースのヘッダに付ける: `// SPDX-License-Identifier: Apache-2.0`
+- SPDX 識別子をソースのヘッダに付ける: `// SPDX-License-Identifier: Apache-2.0`（シェル・Python は `#`）
 
-## PR テンプレートの必須項目
+## Pull Request
 
-- [ ] 追加した依存のライセンスを `LICENSES/README.md` に記録した
-- [ ] 外部の将棋 AI のコード・データを含んでいない
-- [ ] 秘密情報を含んでいない
-- [ ] テストが通る
+外部からの PR は [.github/pull_request_template.md](.github/pull_request_template.md) のチェック項目を埋める。
+メンテナ自身の作業は PR を作らず、ブランチを `main` に早送りでマージする（単独開発のため）。
