@@ -77,6 +77,9 @@ def main(argv: list[str] | None = None) -> int:
         out = Path(a.out) if a.out else tpath
         write_atomic(out, table)
         log(f"wrote {out}: verified {len(pairs)} pairs, balanced {len(table['balanced'])}")
+        vb = table.get("verify") or {}
+        if "v_hat_minus_w" in vb:
+            log(f"v_hat - verify winrate: mean {vb['v_hat_minus_w']:+.4f} (se {vb['v_hat_minus_w_se']:.4f}) -> docs/measurements.md に書く")
         return 0
     if a.cmd == "show":
         tpath = Path(a.table) if a.table else run / "scale" / "scale.json"

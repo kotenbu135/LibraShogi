@@ -17,7 +17,7 @@ from libra_net.model import LibraNet, NetConfig
 from .auto import AutoJobs, append_metrics
 from .config import dump_toml, load_config
 from .league import add_result, list_pool, main_winrate, pfsp_pick, pool_name, prune_pool, tag_league_game
-from .replay import ReplayBuffer
+from .replay import ReplayBuffer, add_target_stats, summarize_target_stats
 from .selfplay import SelfPlayLoop
 from .state import StateDir, write_json_atomic
 from .supervise import EXIT_ALREADY_RUNNING, acquire_lock
@@ -531,13 +531,16 @@ class Runner:
                 # バッチ作成（CPU、replay_features は GIL を離す）と学習ステップ（GPU）を重ねる
                 sample = lambda: self.replay.sample(tr["batch_size"], self.rng, tr["mirror_prob"], tr["lambda_z"], self.cfg["search"]["policy_topk"])  # noqa: E731
                 fut = self.pool.submit(sample)
+                target_acc: dict = {}
                 for _ in range(steps):
                     batch = fut.result()
                     fut = self.pool.submit(sample)
+                    add_target_stats(target_acc, batch["target_stats"])
                     self.last_train = self.trainer.step(batch)
                 fut.result()
                 self.last_train["steps"] = steps
                 self.last_train["sec"] = round(time.time() - t0, 1)
+                self.last_train["target"] = summarize_target_stats(target_acc)  # 学習目標と結果の差（metrics.jsonl・コンソール）
                 self.loop.set_model(self.model)
                 if self.league_loop is not None:
                     self.league_loop.set_model(self.model)

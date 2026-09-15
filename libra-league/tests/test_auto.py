@@ -16,7 +16,8 @@ from libra_league.state import StateDir
 def _status(step, games):
     return {"time": "2026-09-12 00:00:00", "step": step, "generation": 1, "games_total": games, "games_per_day_1h": 1000,
             "active_games": 8, "window_games": 100,
-            "train": {"loss": 1.0, "policy": 0.5, "value": 0.2, "v41": 0.3, "policy_acc": 0.4, "lr": 1e-4},
+            "train": {"loss": 1.0, "policy": 0.5, "value": 0.2, "v41": 0.3, "policy_acc": 0.4, "lr": 1e-4,
+                      "target": {"target_minus_z": -0.018, "draw_target": 0.32}},
             "engine": {"games": games, "moves": games * 10, "sims": games * 100, "sente_wins": 1, "draws": 0, "gote_wins": 1,
                        "ruling41": 0, "no_legal_move": 2, "sennichite": 0, "perpetual_check": 0, "max_ply": 0, "plies_sum": 80.0,
                        "mate_found": 0, "proof_found": 0},
@@ -31,6 +32,7 @@ def test_metrics_append_and_downsample(tmp_path):
     rows = load_metrics(sd, 10)
     assert len(rows) <= 11 and rows[0]["step"] == 0 and rows[-1]["step"] == 49
     assert rows[-1]["engine"]["games"] == 98 and rows[-1]["train"]["loss"] == 1.0 and rows[-1]["gpu_mb"] == 2
+    assert rows[-1]["train"]["target"]["target_minus_z"] == -0.018  # 学習目標と結果の差もコンソールに渡す
     assert len(load_metrics(sd, 1000)) == 50
 
 

@@ -39,6 +39,31 @@ def soft_wdl(t: np.ndarray) -> np.ndarray:
     return np.stack([w, 1 - w - l, l], axis=1).astype(np.float32)
 
 
+def add_target_stats(acc: dict, s: dict) -> None:
+    """sample の target_stats（和と局面数）を学習 1 回ぶん足し合わせる。"""
+    for k, v in s.items():
+        acc[k] = acc.get(k, 0.0) + float(v)
+
+
+def summarize_target_stats(acc: dict) -> dict | None:
+    """学習目標・v41・探索値と実際の結果の差を、得点の尺度（値の差 / 2）の平均にする（docs/method-evidence.md §4.4 (a)）。
+    target_minus_z・v41_minus_z は布石の局面を先手から見た値、rootq_minus_z_* は手番側から見た値。
+    draw_target は布石の目標の引き分けの確率、draw_actual は同じ局面の実際の引き分けの割合。"""
+    nf, nn = acc.get("fuseki_n", 0.0), acc.get("normal_n", 0.0)
+    if nf + nn <= 0:
+        return None
+
+    def mean(k: str, n: float, scale: float = 1.0) -> float | None:
+        return round(acc[k] / n * scale, 4) if n > 0 else None
+
+    return {
+        "fuseki_n": int(nf), "normal_n": int(nn),
+        "target_minus_z": mean("fuseki_t_minus_z", nf, 0.5), "v41_minus_z": mean("fuseki_v41_minus_z", nf, 0.5),
+        "draw_target": mean("fuseki_draw_target", nf), "draw_actual": mean("fuseki_draw_actual", nf),
+        "rootq_minus_z_fuseki": mean("fuseki_rootq_minus_z", nf, 0.5), "rootq_minus_z_normal": mean("normal_rootq_minus_z", nn, 0.5),
+    }
+
+
 class ReplayBuffer:
     def __init__(self, replay_dir: Path, games_dir: Path, window_games: int, chunk_games: int, max_ply: int, count_from_41: bool):
         self.replay_dir = replay_dir
@@ -130,6 +155,16 @@ class ReplayBuffer:
         v41 = np.array([games[i]["v41"] for i in gi], np.float32) * sign
         fu = fuseki.astype(bool)
         t = np.where(fu, lambda_z * z + (1 - lambda_z) * v41, z).astype(np.float32)
+        wdl_t = soft_wdl(t)
+        # 学習目標と実際の結果の差（和）。z・t・v41 は手番側、sign を掛けると先手から見た値
+        rq = np.array([games[i]["root_q"][m] for i, m in zip(gi, mi)], np.float32)
+        nu = ~fu
+        target_stats = {
+            "fuseki_n": int(fu.sum()), "normal_n": int(nu.sum()),
+            "fuseki_t_minus_z": float(((t - z) * sign)[fu].sum()), "fuseki_v41_minus_z": float(((v41 - z) * sign)[fu].sum()),
+            "fuseki_draw_target": float(wdl_t[fu, 1].sum()), "fuseki_draw_actual": float((z[fu] == 0).sum()),
+            "fuseki_rootq_minus_z": float((rq - z)[fu].sum()), "normal_rootq_minus_z": float((rq - z)[nu].sum()),
+        }
         pidx = np.full((batch, topk), -1, np.int64)
         pp = np.zeros((batch, topk), np.float32)
         valid = np.zeros(batch, bool)
@@ -151,8 +186,9 @@ class ReplayBuffer:
         return {
             "sq": sq,
             "glob": glob,
-            "wdl": soft_wdl(t),
+            "wdl": wdl_t,
             "v41": soft_wdl(v41),
+            "target_stats": target_stats,
             "fuseki": fu,
             "policy_idx": pidx,
             "policy_p": pp,

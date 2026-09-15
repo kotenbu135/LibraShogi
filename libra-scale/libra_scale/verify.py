@@ -67,6 +67,7 @@ def apply_verification(table: dict, counts: dict[tuple[int, int], list[int]], si
     """table の pairs に verify を書き込み、balanced を信頼区間の規則で決め直す。"""
     ent = {(from_usi(e["kb"]), from_usi(e["kw"])): e for e in table["pairs"]}
     scored = []
+    diffs = []
     for key, c in counts.items():
         e = ent.get(key)
         if e is None or c[0] == 0:
@@ -76,10 +77,18 @@ def apply_verification(table: dict, counts: dict[tuple[int, int], list[int]], si
         e["verify"] = {"games": c[0], "sente": c[1], "draw": c[2], "gote": c[3], "winrate": round(w, 4),
                        "ci95": [round(lo, 4), round(hi, 4)], "sims": sims}
         scored.append((key, abs(w - 0.5), (hi - lo) / 2))
+        if "v_hat" in e:
+            diffs.append(float(e["v_hat"]) - w)
     if scored:
         m = min(d for _, d, _ in scored)
         bal = [key for key, d, h in scored if d - h <= m]
         table["balanced"] = expand_mirrors(bal)
         table["balance_rule"] = f"検証対局 {games_per_pair} 局/ペア（sims {sims}）: |w - 0.5| - 半幅 <= min |w - 0.5|"
         table["verify"] = {"pairs": len(scored), "games_per_pair": games_per_pair, "sims": sims}
+        if diffs:
+            # V̂ の偏りの確認（docs/method-evidence.md §4.4 (b)）。標準誤差は不偏分散から
+            mu = sum(diffs) / len(diffs)
+            var = sum((d - mu) ** 2 for d in diffs) / (len(diffs) - 1) if len(diffs) > 1 else 0.0
+            table["verify"]["v_hat_minus_w"] = round(mu, 4)
+            table["verify"]["v_hat_minus_w_se"] = round((var / len(diffs)) ** 0.5, 4)
     return table

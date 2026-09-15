@@ -89,3 +89,15 @@ def test_build_and_verify_small(tmp_path):
     table = apply_verification(table, counts, sims=4, games_per_pair=2)
     assert "verify" in table and any("verify" in e for e in table["pairs"])
     assert len(table["balanced"]) >= 1
+    # V̂ と検証の勝率の差（V̂ の偏りの確認、docs/method-evidence.md §4.4 (b)）
+    ver = [e for e in table["pairs"] if "verify" in e]
+    want = sum(e["v_hat"] - e["verify"]["winrate"] for e in ver) / len(ver)
+    assert abs(table["verify"]["v_hat_minus_w"] - want) < 1e-3 and table["verify"]["v_hat_minus_w_se"] >= 0
+
+
+def test_verify_bias_summary():
+    table = {"pairs": [{"kb": "5i", "kw": "5a", "v_hat": 0.48}, {"kb": "2g", "kw": "6a", "v_hat": 0.52}]}
+    counts = {(P.from_usi("5i"), P.from_usi("5a")): [100, 50, 2, 48], (P.from_usi("2g"), P.from_usi("6a")): [100, 49, 0, 51]}
+    t = apply_verification(table, counts, sims=96, games_per_pair=100)
+    # 0.48 − 0.51 = −0.03、0.52 − 0.49 = +0.03 → 平均 0、標準誤差 0.03
+    assert abs(t["verify"]["v_hat_minus_w"]) < 1e-9 and abs(t["verify"]["v_hat_minus_w_se"] - 0.03) < 1e-9

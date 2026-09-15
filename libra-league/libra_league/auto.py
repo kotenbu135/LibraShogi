@@ -68,7 +68,7 @@ def metrics_row(status: dict) -> dict:
         "gpd": status.get("games_per_day_1h"),
         "active": status.get("active_games"),
         "window": status.get("window_games"),
-        "train": {k: status["train"].get(k) for k in ("loss", "policy", "value", "v41", "policy_acc", "lr")} if status.get("train") else None,
+        "train": {k: status["train"].get(k) for k in ("loss", "policy", "value", "v41", "policy_acc", "lr", "target")} if status.get("train") else None,
         "engine": {k: eng.get(k) for k in METRIC_ENGINE_KEYS} if eng else None,
         "exploiter": {k: status["exploiter"].get(k) for k in ("games", "wins", "draws", "losses")} if status.get("exploiter") else None,
         "gpu_mb": (status.get("gpu") or {}).get("mem_reserved_mb"),

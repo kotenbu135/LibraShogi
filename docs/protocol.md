@@ -49,8 +49,8 @@ option name Threads type spin default 4 min 1 max 64
 option name DNN_Model type string default libra.onnx
 option name DNN_Provider type combo default auto var auto var cuda var dml var cpu
 option name DNN_Batch_Size type spin default 64 min 1 max 1024
-option name Sims_Fuseki type spin default 200 min 1 max 1000000
-option name Sims_Normal type spin default 400 min 1 max 1000000
+option name Sims_Fuseki type spin default 400 min 1 max 1000000
+option name Sims_Normal type spin default 800 min 1 max 1000000
 option name Scale_Table type string default scale.json
 option name USI_Ponder type check default false
 option name Declare_Win type check default false

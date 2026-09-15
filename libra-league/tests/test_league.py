@@ -8,7 +8,7 @@ import pytest
 import librasearch
 import librashogi as ls
 from libra_league.config import DEFAULTS, dump_toml, load_config
-from libra_league.replay import MIRROR_TABLE, ReplayBuffer, game_to_jsonl, soft_wdl
+from libra_league.replay import MIRROR_TABLE, ReplayBuffer, add_target_stats, game_to_jsonl, soft_wdl, summarize_target_stats
 from libra_league.state import StateDir
 
 
@@ -89,3 +89,32 @@ def test_replay_chunks_and_sampling(tmp_path: Path):
         assert abs(b["policy_p"][i, :k].sum() - 1) < 1e-3
     # 鏡映の表は対合
     assert (MIRROR_TABLE[MIRROR_TABLE] == np.arange(ls.POLICY_SIZE)).all()
+
+
+def test_target_stats_compare_targets_with_results(tmp_path: Path):
+    """学習目標・v41・探索値と実際の結果の差（docs/method-evidence.md §4.4 (a)）。値は得点の尺度（差 / 2）。"""
+    games = _dummy_games(20, 7)
+    rb = ReplayBuffer(tmp_path / "replay", tmp_path / "games", window_games=100, chunk_games=1000, max_ply=320, count_from_41=True)
+    # 全局 先手勝ち、v41 = 0.2（先手から見て）、探索値 0（手番側）
+    for g in games:
+        g["result"] = 1
+        g["v41"] = 0.2
+        g["root_q"] = np.zeros(len(g["moves"]), np.float32)
+    rb.add_games(games)
+    acc: dict = {}
+    for _ in range(4):
+        add_target_stats(acc, rb.sample(256, np.random.default_rng(1), mirror_prob=0.0, lambda_z=0.5)["target_stats"])
+    s = summarize_target_stats(acc)
+    assert s["fuseki_n"] > 0 and s["normal_n"] > 0
+    # 目標 t = 0.5·1 ＋ 0.5·0.2 = 0.6。t − z = −0.4 → 得点で −0.2。v41 − z = −0.8 → −0.4。目標の引き分け 1 − 0.6
+    assert abs(s["target_minus_z"] + 0.2) < 1e-4 and abs(s["v41_minus_z"] + 0.4) < 1e-4
+    assert abs(s["draw_target"] - 0.4) < 1e-4 and s["draw_actual"] == 0.0
+    # 全局 引き分け、v41 = 0、探索値 0.4 → 目標は z と一致、引き分けの目標 1、探索値は手番側から +0.2
+    for g in games:
+        g["result"] = 0
+        g["v41"] = 0.0
+        g["root_q"] = np.full(len(g["moves"]), 0.4, np.float32)
+    s = summarize_target_stats(rb.sample(256, np.random.default_rng(2), mirror_prob=0.0, lambda_z=0.5)["target_stats"])
+    assert abs(s["target_minus_z"]) < 1e-4 and abs(s["draw_target"] - 1.0) < 1e-4 and s["draw_actual"] == 1.0
+    assert abs(s["rootq_minus_z_fuseki"] - 0.2) < 1e-4 and abs(s["rootq_minus_z_normal"] - 0.2) < 1e-4
+    assert summarize_target_stats({}) is None
