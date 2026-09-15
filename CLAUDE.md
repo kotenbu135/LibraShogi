@@ -34,7 +34,7 @@ libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX �
 - **監視しない**。バックグラウンドタスク・待機ループ・ポーリングで稼働状態やジョブの終了を待たない。状態が要るときは `bin/libra [--run lx] status` を 1 回読むだけにして、待たずに作業を終える。結果は次にユーザーから聞かれたときに読む。
 - 本体 L-S は `~/libra-run/ls`、搾取者 lx は `~/libra-run/lx` で常時稼働。2026-09-13 から二飛香（docs/rules.md §3.2）の系列（ls は旧 ls の step 229,590 の重みから、lx はゼロから）。旧ルールの系列は `~/libra-run/ls-v0`・`lx-v0` に残し再開しない（docs/runbook.md 冒頭）。ネットの形（[net]）は変えない（変えるなら新しい run-id）。
 - ls は `[auto]` で 24 時間ごとに archive → 基準比の自己評価 100 局 → 外部計測 10 局を別プロセスで回す（docs/runbook.md §6）。結果は管理コンソールの Elo / 対外対局タブと `~/libra-run/ls/eval`・`matches`。
-- GPU を使う計測（速度比較など）はユーザーにコンソールから ls・lx を停止してもらってから行い、終わったら起動を依頼する。長い GPU 作業を共有のまま回したときは局/日が落ちる旨を measurements.md に書く。
+- GPU を使う計測（速度比較など）はユーザーにコンソールから ls・lx を停止してもらってから行い、終わったら起動を依頼する。玉配置表（libra-scale）の作り直しは止めずに GPU を共有して回す（2026-09-15 のユーザーの決定、docs/runbook.md §玉配置表）。長い GPU 作業を共有のまま回したときは局/日が落ちる旨を measurements.md に書く。
 - 1 週間の局/日（9/18 ごろ）、2 週間ごとの 20 局計測、10 月中旬の基準値マッチ 20 局、12 月の 100 局は docs/libra-local.md §5 の予定に従う。
 - Windows 側の操作（デスクトップの bat、タスク スケジューラ「LibraShogi run」「LibraShogi run lx」）は docs/runbook.md §3。自動ログオンと GPU 電力上限は設定しない（ユーザーの決定）。
 

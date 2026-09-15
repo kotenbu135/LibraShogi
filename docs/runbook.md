@@ -110,6 +110,7 @@ GPU（CUDA）で読ませたいときは「エンジン」→「実行ファイ�
 `bin/libra-scale build --sims 1600` で `~/libra-run/ls/scale/scale.json` を作り、`bin/libra-scale verify --top 48 --games 100` で
 釣り合い集合を検証対局の信頼区間で決め直す。エンジンには `setoption name Scale_Table value <path>` で渡す（`bin/libra match` は
 `--libra-opt Scale_Table=<path>`）。表は世代ごとに作り直す（探索値は数分、検証対局は最終世代だけ本格的に）。
+**ls・lx は止めずに、GPU を共有したまま回す**（decisions.md 2026-09-15、ユーザーの決定）。検証対局の勝率は共有しても変わらず、変わるのは所要時間と、その間の ls の局/日（2026-09-11 の v0 では約半分）だけ。GPU メモリは ls 約 9.3 GB ＋ lx 約 1.7 GB ＋ verify 約 2.9 GB（16 GB 中）。回した時間と局/日の低下は measurements.md に書く。
 
 ## 搾取者リーグ（Main exploiter）
 
