@@ -43,6 +43,17 @@ def annotate_price(offers: list[dict], rent: str, bid_margin: float) -> list[dic
     return out
 
 
+LOST_STATUSES = ("exited", "stopped", "offline")
+
+
+def instance_lost(inst: dict | None) -> bool:
+    """show_instance の結果から、インスタンスを失ったか（入札で負けて止められた・ホストが落ちた・消えた）。
+    起動中（loading など）と稼働中は失っていない。API の一時的な失敗と区別するため、呼び出し側は続けて 2 回見てから判断する。"""
+    if not inst:
+        return True
+    return inst.get("actual_status") in LOST_STATUSES or inst.get("intended_status") in ("stopped", "exited")
+
+
 def worker_threads(offer: dict, cap: int = 12) -> int:
     """ワーカーの自己対局のスレッド数。ホストの nproc は割り当てより多く見える（16 コア割り当てで 64）ので、オファーの実効コア数を使い、
     12 で頭打ちにする（12 を超えても apply は速くならない、measurements.md 2026-09-14 05:47）。コア数が分からなければ 12。"""

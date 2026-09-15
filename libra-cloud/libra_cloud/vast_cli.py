@@ -40,7 +40,8 @@ LABEL_PREFIX = "libra-"  # vast_worker.py（libra-worker）と vast_bench.py（l
 # launcher.log の行の目印と段階（最後に現れた目印の段階にする）
 PHASES = (("credit $", "準備"), ("create #", "インスタンス作成"), ("ssh ready", "セットアップ"), ("bridge pid", "稼働"),
           ("bridge: stopping", "停止処理"), (" 0 usable", "終了（条件に合うオファーなし）"), ("not renting", "終了（残高不足）"),
-          ("no instance started", "終了（借りられなかった）"), ("destroyed instance", "終了"))
+          ("no instance started", "終了（借りられなかった）"), ("destroyed instance", "終了"),
+          (" lost: ", "打ち切り"), ("relaunched: ", "終了（打ち切り・借り直し）"))  # 入札で止められた・ホストが落ちた → 残りの時間で次のセッション
 
 
 def pid_alive(pid) -> bool:
@@ -93,8 +94,17 @@ class Sessions:
         return d if d.is_dir() else None
 
     def create(self, run: str) -> Path:
-        d = self.root / f"{run}-{time.strftime('%Y%m%d-%H%M%S')}"
-        d.mkdir(parents=True)
+        base = f"{run}-{time.strftime('%Y%m%d-%H%M%S')}"
+        self.root.mkdir(parents=True, exist_ok=True)
+        for i in range(1, 100):  # 同じ秒に作ったら -2, -3 … を付ける（借り直しの鎖で続けて作るとき）
+            d = self.root / (base if i == 1 else f"{base}-{i}")
+            try:
+                d.mkdir()
+                break
+            except FileExistsError:
+                continue
+        else:
+            raise FileExistsError(f"cannot create a session directory for {base}")
         (self.root / "current").write_text(d.name, encoding="utf-8")
         return d
 
@@ -279,10 +289,45 @@ def launch_argv(a: argparse.Namespace, run_dir: Path, d: Path) -> list[str]:
     return ["bash", "-c", f"{shlex.join(prep)} && exec {shlex.join(work)}"]
 
 
+CONTINUE_KEYS = ("run", "gpu", "max_dph", "min_rel", "min_cpu_ghz", "min_cores", "max_inet_cost", "n_games", "rent", "bid_margin")
+MIN_CONTINUE_H = 0.25     # 残りがこれより短ければ借り直さない（借りてから打ち始めるまで 2〜6 分かかる）
+DEADLINE_SLACK_S = 1800   # セッションの鎖の締め切り = 最初の開始 + 時間 + これ（借り直しの待ちで際限なく延びないように）
+
+
+def continue_settings(prev: Path, now: float) -> tuple[dict | None, str]:
+    """ホストを失った前のセッションから、次のセッションの設定・残りの時間（ブリッジが動いた時間を引く）・締め切りを決める。
+    借り直さないときは (None, 理由)。"""
+    s = read_json(prev / "session.json") or {}
+    if not s:
+        return None, f"{prev.name} の session.json がありません"
+    if s.get("stop_requested"):
+        return None, "停止を要求されていた"
+    inst = read_json(prev / "instance.json") or {}
+    used = max(0.0, (now - float(inst["t_bridge"])) / 3600) if inst.get("t_bridge") else 0.0
+    deadline = float(s.get("deadline") or (float(s.get("started") or now) + float(s["hours"]) * 3600 + DEADLINE_SLACK_S))
+    hours = round(min(float(s["hours"]) - used, (deadline - now) / 3600), 2)
+    if hours < MIN_CONTINUE_H:
+        return None, f"残り {max(hours, 0.0):.2f} 時間（{MIN_CONTINUE_H} 時間未満）"
+    return {**{k: s[k] for k in CONTINUE_KEYS if k in s}, "hours": hours, "deadline": deadline, "continues": prev.name}, ""
+
+
 def cmd_start(a: argparse.Namespace) -> int:
     ss = Sessions(Path(a.root).expanduser())
     cur = ss.current()
-    if cur is not None and pid_alive((read_json(cur / "session.json") or {}).get("pid")):
+    cont = None
+    if getattr(a, "continue_from", None):
+        prev = ss.root / a.continue_from
+        if cur is not None and cur != prev and pid_alive((read_json(cur / "session.json") or {}).get("pid")):
+            print(f"借り直しません: 別のセッションが動いています（{cur.name}）")
+            return 3
+        cont, why = continue_settings(prev, time.time())
+        if cont is None:
+            print(f"借り直しません: {why}")
+            return 3
+        for k in (*CONTINUE_KEYS, "hours"):
+            if k in cont:
+                setattr(a, k, cont[k])
+    elif cur is not None and pid_alive((read_json(cur / "session.json") or {}).get("pid")):
         print(f"既に動いています: {cur}（止めるときは stop）")
         return 1
     run_dir = Path(a.run_root).expanduser() / a.run
@@ -306,7 +351,9 @@ def cmd_start(a: argparse.Namespace) -> int:
                              start_new_session=True, cwd=str(REPO), env=dict(os.environ, PYTHONPATH=PROJECT_PATH))
     write_json(d / "session.json", {"run": a.run, "gpu": a.gpu, "max_dph": a.max_dph, "hours": a.hours, "min_rel": a.min_rel,
                                     "min_cpu_ghz": a.min_cpu_ghz, "min_cores": a.min_cores, "max_inet_cost": a.max_inet_cost, "n_games": a.n_games,
-                                    "rent": a.rent, "bid_margin": a.bid_margin, "started": time.time(), "pid": p.pid})
+                                    "rent": a.rent, "bid_margin": a.bid_margin, "started": time.time(), "pid": p.pid,
+                                    "deadline": cont["deadline"] if cont else time.time() + a.hours * 3600 + DEADLINE_SLACK_S,
+                                    "continues": cont["continues"] if cont else None})
     how = "入札" if a.rent == "bid" else "on-demand"
     print(f"起動しました: {d.name}（pid {p.pid}。{a.gpu} を{how}で最大 ${a.max_dph:.2f}/h、{a.hours:g} 時間。準備に 5〜15 分）")
     return 0
@@ -516,6 +563,8 @@ def main(argv: list[str] | None = None) -> int:
     p_s.add_argument("--run", default="ls")
     p_s.add_argument("--run-root", default="~/libra-run")
     p_s.add_argument("--force", action="store_true", help="[workers] enabled でなくても起動する")
+    p_s.add_argument("--continue-from", default=None,
+                     help="ホストを失ったセッション名。その設定と残りの時間・締め切りで次のセッションを起動する（vast_worker.py が呼ぶ）")
     for p in (p_s, sub.add_parser("offers", help="検索したオファーを安い順に、落ちた理由と 1 つ緩めれば通る条件を付けて出す（借りない）")):
         p.add_argument("--gpu", default="RTX 5070 Ti")
         p.add_argument("--max-dph", type=float, default=0.28, help="1 時間あたりの上限（$、ストレージ込み）")

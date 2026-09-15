@@ -163,17 +163,46 @@ def main() -> int:
         write_json(out / "instance.json", {"instance": iid, "offer": result["offer"], "t_rent": t_rent, "t_bridge": time.time(),
                                            "host": f"{host.host}:{host.port}"})
         log(f"bridge pid {bridge.pid} for {a.hours} h (stop: touch {out / 'bridge' / 'STOP'})")
-        while True:
+        from libra_cloud.bench import instance_lost
+
+        def status_text(inst) -> str:
+            return f"{(inst or {}).get('actual_status')} / {(inst or {}).get('intended_status')}" if inst else "gone"
+
+        lost_polls = 0
+        while True:  # ブリッジが終わるのを待ちながら、インスタンスを失っていないか（入札で止められた・ホストが落ちた）を 60 秒ごとに見る
             try:
-                rc = bridge.wait()
+                rc = bridge.wait(timeout=60)
                 break
+            except subprocess.TimeoutExpired:
+                pass
             except KeyboardInterrupt:  # ブリッジに SIGTERM を送った後も終わるまで待つ
                 continue
+            if stopping or result.get("lost"):
+                continue
+            try:
+                inst = v.show_instance(iid)
+            except Exception as e:  # noqa: BLE001  API の一時的な失敗は失ったとみなさない
+                log(f"show_instance {iid} failed: {type(e).__name__}: {str(e)[:120]}")
+                continue
+            lost_polls = lost_polls + 1 if instance_lost(inst) else 0
+            if lost_polls >= 2:
+                result["lost"] = True
+                log(f"instance {iid} lost: {status_text(inst)}")
+                bridge.send_signal(signal.SIGTERM)  # ワーカーには届かないので、ブリッジは回収を試してから抜ける
         log(f"bridge exited rc={rc}")
-        try:
-            host.get("/root/out", out, timeout=120)
-        except Exception as e:  # noqa: BLE001
-            log(f"fetch /root/out failed: {type(e).__name__}: {str(e)[:120]}")
+        if rc == 3 and not stopping and not result.get("lost"):  # ssh が続けて失敗した: ホストを失ったかを確かめる
+            try:
+                inst = v.show_instance(iid)
+                if instance_lost(inst):
+                    result["lost"] = True
+                    log(f"instance {iid} lost: {status_text(inst)}")
+            except Exception as e:  # noqa: BLE001
+                log(f"show_instance {iid} failed: {type(e).__name__}: {str(e)[:120]}")
+        if not result.get("lost"):
+            try:
+                host.get("/root/out", out, timeout=120)
+            except Exception as e:  # noqa: BLE001
+                log(f"fetch /root/out failed: {type(e).__name__}: {str(e)[:120]}")
         return rc
     except KeyboardInterrupt:
         log("interrupted")
@@ -200,6 +229,20 @@ def main() -> int:
             result["bridge"] = json.loads(bj.read_text(encoding="utf-8"))
         (out / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=1))
         log(f"result {out / 'result.json'} est cost ${result.get('est_cost_usd', 0)}")
+        # ホストを失った（入札で止められた・落ちた）なら、残りの時間で次のセッションを起動する（ユーザーの決定「残り時間で借り直す」）。
+        # 停止（STOP・シグナル）なら借り直さない。残りの時間と締め切りの判定は bin/libra-vast start --continue-from が行う
+        if result.get("lost") and not stopping and not (out / "bridge" / "STOP").exists():
+            try:
+                p = subprocess.run([str(REPO / "bin" / "libra-vast"), "--root", str(out.parent), "start", "--continue-from", out.name,
+                                    "--run-root", str(run_dir.parent)], capture_output=True, text=True, timeout=120)
+                msg = (p.stdout + p.stderr).strip().replace("\n", " ")[:300]
+                if p.returncode == 0:
+                    nxt = (out.parent / "current").read_text(encoding="utf-8").strip()
+                    log(f"relaunched: {nxt} ({msg})")
+                else:
+                    log(f"relaunch refused rc={p.returncode}: {msg}")
+            except Exception as e:  # noqa: BLE001
+                log(f"relaunch failed: {type(e).__name__}: {str(e)[:200]}")
 
 
 if __name__ == "__main__":

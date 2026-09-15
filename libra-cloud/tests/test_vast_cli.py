@@ -150,6 +150,54 @@ def test_offers_report_explains_why_each_offer_was_rejected():
     assert rep["usable"] == 1 and rep["top"][0]["id"] == 50306639 and rep["all"][-1]["ok"] and "条件に合う 1 件" in rep["text"]
 
 
+def test_start_continue_from_a_lost_host_uses_the_remaining_time(tmp_path: Path, monkeypatch, capsys):
+    """入札で止められた・ホストが落ちたセッションの launcher が、残りの時間で次のセッションを起動する（ユーザーの決定「残り時間で借り直す」）。
+    前のセッションの launcher はまだ動いている（自分が呼ぶ）ので、二重起動の拒否はそのセッションからの続きだけ通す。"""
+    run_root = _run_dir(tmp_path).parent
+    ss = Sessions(tmp_path / "cloud")
+    now = time.time()
+    settings = {"run": "ls", "gpu": "RTX 5070 Ti", "max_dph": 0.26, "hours": 3.0, "min_rel": 0.95, "min_cpu_ghz": 4.4, "min_cores": 16,
+                "max_inet_cost": 0.02, "n_games": 512, "rent": "bid", "bid_margin": 0.1}
+    prev = ss.create("ls")
+    _write(prev / "session.json", {**settings, "started": now - 3600, "pid": os.getpid()})
+    _write(prev / "instance.json", {"instance": 5, "offer": {"dph_eff": 0.2}, "t_rent": now - 3000, "t_bridge": now - 1800})
+    seen = {}
+
+    def fake_argv(a, run_dir, d):
+        seen.update(hours=a.hours, gpu=a.gpu, rent=a.rent, bid_margin=a.bid_margin, max_dph=a.max_dph, min_rel=a.min_rel, n_games=a.n_games)
+        return ["bash", "-c", "sleep 30"]
+
+    monkeypatch.setattr(vast_cli, "launch_argv", fake_argv)
+    base = ["--root", str(tmp_path / "cloud"), "start", "--run-root", str(run_root)]
+    assert vast_cli.main(base) == 1 and "既に動いています" in capsys.readouterr().out  # 続きでなければ断る
+    assert vast_cli.main([*base, "--continue-from", prev.name]) == 0
+    nxt = ss.current()
+    s = json.loads((nxt / "session.json").read_text(encoding="utf-8"))
+    try:
+        assert nxt != prev and s["continues"] == prev.name
+        # 3 時間のうちブリッジが 0.5 時間動いたので残り 2.5 時間。締め切りは最初の開始 + 3 時間 + 30 分のまま引き継ぐ
+        assert seen == {"hours": 2.5, "gpu": "RTX 5070 Ti", "rent": "bid", "bid_margin": 0.1, "max_dph": 0.26, "min_rel": 0.95, "n_games": 512}
+        assert abs(s["deadline"] - (now - 3600 + 3 * 3600 + 1800)) < 1 and s["hours"] == 2.5 and s["rent"] == "bid"
+    finally:
+        import signal
+
+        os.killpg(s["pid"], signal.SIGKILL)
+    # 停止を要求されていた、残りが 15 分未満、締め切りが近いときは借り直さない
+    for extra, t_bridge in (({"stop_requested": now}, now - 1800), ({}, now - 2.9 * 3600), ({"deadline": now + 600}, now - 60)):
+        prev = ss.create("ls")
+        _write(prev / "session.json", {**settings, "started": now - 3600, "pid": os.getpid(), **extra})
+        _write(prev / "instance.json", {"instance": 6, "offer": {}, "t_rent": t_bridge, "t_bridge": t_bridge})
+        assert vast_cli.main([*base, "--continue-from", prev.name]) == 3, extra
+        assert ss.current() == prev and "借り直しません" in capsys.readouterr().out
+
+
+def test_phase_shows_lost_host_and_relaunch():
+    assert phase_of("bridge pid 7\ninstance 5 lost: exited / running\n") == "打ち切り"
+    assert phase_of("bridge pid 7\ninstance 5 lost: exited\ndestroyed instance 5 (show_instance after: none)\nrelaunched: ls-20260915-130000\n") \
+        == "終了（打ち切り・借り直し）"
+    assert phase_of("bridge pid 7\ninstance 5 lost: exited\ndestroyed instance 5 (show_instance after: none)\n") == "終了"
+
+
 def test_offers_report_for_bids_uses_effective_price():
     from libra_cloud.bench import annotate_price
 

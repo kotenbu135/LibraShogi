@@ -10,7 +10,8 @@ import torch
 
 import librasearch
 import librashogi as ls
-from libra_cloud.bench import annotate_price, bench_config, games_per_day, near_misses, offer_rejects, pick_offers, scan_inbox, worker_threads
+from libra_cloud.bench import (annotate_price, bench_config, games_per_day, instance_lost, near_misses, offer_rejects, pick_offers, scan_inbox,
+                               worker_threads)
 from libra_cloud.prepare import BUNDLE_PATHS, make_bundle, write_run_dir
 from libra_league.config import load_config
 from libra_league.workers import load_weights, write_games_file
@@ -95,6 +96,16 @@ def test_annotate_price_bids_above_min_bid_and_ranks_by_effective_price():
     assert [o["id"] for o in pick_offers(a, max_dph=0.30, price_key="dph_eff")] == [3, 2]  # 1 は実効 $0.321 で上限超え
     od = annotate_price(offers, "on-demand", 0.1)
     assert [(o["bid"], o["dph_eff"]) for o in od] == [(None, 0.2944), (None, 0.19), (None, 0.18)]
+
+
+def test_instance_lost_when_preempted_stopped_or_gone():
+    """入札で負けて止められた・ホストが落ちた・消えたインスタンス。起動中（loading）と稼働中は失っていない。"""
+    assert instance_lost(None) and instance_lost({})
+    assert not instance_lost({"actual_status": "running", "intended_status": "running"})
+    assert not instance_lost({"actual_status": "loading", "intended_status": "running"})
+    assert instance_lost({"actual_status": "exited", "intended_status": "running"})
+    assert instance_lost({"actual_status": "running", "intended_status": "stopped"})
+    assert instance_lost({"actual_status": "offline", "intended_status": "running"})
 
 
 def test_worker_threads_follow_allocated_cores():
