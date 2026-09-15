@@ -596,15 +596,16 @@ function Run-Color([string]$run, [int]$i = 0) {
     if ($script:Colors.ContainsKey($run)) { return $script:Colors[$run] }
     return $script:Palette[$i % $script:Palette.Length]
 }
-function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt, [bool]$zeroBase, [string]$note) {
+function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt, [bool]$zeroBase, [string]$note, [bool]$allTime = $false) {
     $g.SmoothingMode = "AntiAlias"
     $g.Clear([System.Drawing.Color]::White)
     $font = New-Object System.Drawing.Font("Yu Gothic UI", 8)
     $gray = [System.Drawing.Brushes]::Gray
     $black = [System.Drawing.Brushes]::Black
-    $left = 72; $right = 14; $top = 30; $bottom = 24
+    $left = 72; $right = 14; $top = 30; $bottom = 24; $lineH = 15
     $g.DrawString($title, $font, $black, 6, 3)
-    $t0 = Get-Range
+    # 1 日 1 回の計測（Elo・対外対局）は、期間の選択が短いと前回の点が外れて推移が見えないので常に全期間を描く
+    $t0 = if ($allTime) { [datetime]::MinValue } else { Get-Range }
     $now = [datetime]::Now
     $tmin = $null; $tmax = $now
     $ymin = [double]::MaxValue; $ymax = [double]::MinValue
@@ -627,6 +628,20 @@ function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt
     }
     if ($t0 -gt [datetime]::MinValue) { $tmin = $t0 }
     if (($tmax - $tmin).TotalSeconds -lt 600) { $tmin = $tmax.AddMinutes(-10) }
+    # 見出し: タイトルの右に注記、その右に凡例を置き、入らなければ次の行に回して描画域を下げる（重なって読めなくなるため）
+    $shown = @($series | Where-Object { @($_.pts | Where-Object { $_.t -ge $tmin }).Count -gt 0 })
+    $legendW = 0
+    foreach ($s in $shown) { $legendW += 22 + $g.MeasureString($s.name, $font).Width + 8 }
+    $rowEnd = 6 + $g.MeasureString($title, $font).Width
+    $noteRow = 0; $noteX = 0
+    if ($note) {
+        $nw = $g.MeasureString($note, $font).Width
+        if ($rowEnd + 12 + $nw -le $w - $right) { $noteX = $rowEnd + 12 } else { $noteRow = 1; $noteX = 6 }
+        $rowEnd = $noteX + $nw
+    }
+    $legendRow = $noteRow
+    if ($rowEnd + 12 + $legendW -gt $w - $right) { $legendRow++ }
+    $top += $lineH * $legendRow
     if ($zeroBase) { $ymin = [Math]::Min(0.0, $ymin); if ($ymax -le $ymin) { $ymax = $ymin + 1 } }
     $pad = ($ymax - $ymin) * 0.1
     if ($pad -le 0) { $pad = [Math]::Max(1.0, [Math]::Abs($ymax) * 0.1) }
@@ -650,10 +665,8 @@ function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt
     $mid = $tmin.AddSeconds($span / 2)
     $g.DrawString($mid.ToString($fmt), $font, $gray, $left + $pw / 2 - 30, $h - $bottom + 4)
     $g.DrawString($tmax.ToString($fmt), $font, $gray, $w - $right - 70, $h - $bottom + 4)
-    $shown = @($series | Where-Object { @($_.pts | Where-Object { $_.t -ge $tmin }).Count -gt 0 })
-    $legendW = 0
-    foreach ($s in $shown) { $legendW += 22 + $g.MeasureString($s.name, $font).Width + 8 }
     $lx = $w - $right - $legendW
+    $ly = 3 + $lineH * $legendRow
     foreach ($s in $shown) {
         $brush = New-Object System.Drawing.SolidBrush($s.color)
         $rp = New-Object System.Drawing.Pen($s.color, 2)
@@ -696,11 +709,11 @@ function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt
             $tx = [Math]::Min($last.x + 4, $w - $right - $sz.Width)
             $g.DrawString($txt, $font, $brush, [single]$tx, [single]($last.y - 16))
         }
-        $g.FillRectangle($brush, [single]$lx, 6, 10, 10)
-        $g.DrawString($s.name, $font, $black, [single]($lx + 12), 3)
+        $g.FillRectangle($brush, [single]$lx, [single]($ly + 3), 10, 10)
+        $g.DrawString($s.name, $font, $black, [single]($lx + 12), [single]$ly)
         $lx += 22 + $g.MeasureString($s.name, $font).Width + 8
     }
-    if ($note) { $g.DrawString($note, $font, $gray, [single](6 + $g.MeasureString($title, $font).Width + 12), 3) }
+    if ($note) { $g.DrawString($note, $font, $gray, [single]$noteX, [single](3 + $lineH * $noteRow)) }
 }
 
 function Get-Metrics([string]$run) {
@@ -709,7 +722,7 @@ function Get-Metrics([string]$run) {
 }
 function Build-Series([string]$tab) {
     $series = @()
-    $note = ""
+    $note = ""; $all = $false
     $yfmt = "{0:N0}"; $zero = $true; $title = $tab
     $sel = Selected-Run
     switch ($tab) {
@@ -734,7 +747,8 @@ function Build-Series([string]$tab) {
             }
         }
         "Elo" {
-            $title = "強さの推移（Elo。0 は乱数初期化のネット。実線は固定の基準との差、点線は前の世代との差を足した鎖）"
+            $title = "強さの推移（Elo。0 は系列の最初の基準。実線は固定の基準との差、薄い点線は前の世代との差を足した鎖）"
+            $all = $true
             $i = 0
             foreach ($r in $Runs) {
                 $s = New-Series ($r + " 基準比") (Run-Color $r $i) $true
@@ -742,25 +756,26 @@ function Build-Series([string]$tab) {
                     foreach ($a in @($script:Data[$r].anchor)) {
                         $lo = Ci-Val $a.ci95 0
                         $hi = Ci-Val $a.ci95 1
-                        Add-Pt $s (From-Unix $a.t) ([double]$a.elo) $lo $hi ("step " + (Format-Int $a.step))
+                        Add-Pt $s (From-Unix $a.t) ([double]$a.elo) $lo $hi ("基準比 step " + (Format-Int $a.step))
                     }
                 }
                 $series += $s
-                $c = New-Series ($r + " 鎖") (Run-Color $r $i) $false $true
+                # 鎖は同じ重みを基準比と別の方法で測った補助の値。同じ色で並ぶと基準比が下がったように見えるので薄くして名前を付ける
+                $c = New-Series ($r + " 鎖") ([System.Drawing.Color]::FromArgb(110, (Run-Color $r $i))) $false $true
                 if ($script:Data.ContainsKey($r)) {
                     foreach ($e in @($script:Data[$r].evals)) {
                         if ($null -eq $e.cumulative) { continue }
-                        Add-Pt $c (From-Unix $e.time) ([double]$e.cumulative)
+                        Add-Pt $c (From-Unix $e.time) ([double]$e.cumulative) $null $null "鎖"
                     }
                 }
                 $series += $c
                 $i++
             }
-            $note = "基準比は 1 日 1 回 100 局。基準に 85% 勝つと基準を置き換えて差を足す"
+            $note = "基準比が主（1 日 1 回 100 局、縦線は 95% 区間）。基準に 85% 勝つと基準を置き換えて差を足す。全期間を表示"
         }
         "対外対局" {
             $title = "外部エンジン（fuseki_usi_server.py = 方策ネット＋やねうら王/水匠5）との勝率"
-            $yfmt = "{0:P0}"
+            $yfmt = "{0:P0}"; $all = $true
             $i = 0
             foreach ($r in $Runs) {
                 $s = New-Series $r (Run-Color $r $i) $true
@@ -820,7 +835,7 @@ function Build-Series([string]$tab) {
     }
     # 5 分ごとの metrics（とコンソールの 30 秒観測）から作る系列は、観測の途切れで線を切る
     if (@("局/日", "学習", "終局内訳", "手数") -contains $tab) { foreach ($s in $series) { $s.gap = $true } }
-    return @{ title = $title; series = $series; yfmt = $yfmt; zero = $zero; note = $note }
+    return @{ title = $title; series = $series; yfmt = $yfmt; zero = $zero; note = $note; all = $all }
 }
 
 # グラフは 1 組だけ作り、選んでいる run のタブの下半分（chartSlot）に Move-Charts が付け替える
@@ -856,7 +871,7 @@ foreach ($name in $script:TabNames) {
     $panel.Add_Paint({
         param($s, $e)
         $b = Build-Series ([string]$s.Tag)
-        Draw-Chart $e.Graphics $s.ClientSize.Width $s.ClientSize.Height $b.title $b.series $b.yfmt $b.zero $b.note
+        Draw-Chart $e.Graphics $s.ClientSize.Width $s.ClientSize.Height $b.title $b.series $b.yfmt $b.zero $b.note ([bool]$b.all)
     })
     $panel.Add_Resize({ param($s, $e) $s.Invalidate() })
     $page.Controls.Add($panel)
