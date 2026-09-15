@@ -256,9 +256,9 @@ def test_ssh_prefers_direct_connection(monkeypatch):
     vb = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(vb)
     inst = {"actual_status": "running", "status_msg": "success", "ssh_host": "ssh2.vast.ai", "ssh_port": 19638,
-            "public_ipaddr": "190.111.198.202 ", "ports": {"22/tcp": [{"HostIp": "0.0.0.0", "HostPort": "10299"}]}}
+            "public_ipaddr": "203.0.113.10 ", "ports": {"22/tcp": [{"HostIp": "0.0.0.0", "HostPort": "10299"}]}}
     hs = vb.ssh_hosts(inst)
-    assert [(h.host, h.port) for h in hs] == [("190.111.198.202", 10299), ("ssh2.vast.ai", 19638)]
+    assert [(h.host, h.port) for h in hs] == [("203.0.113.10", 10299), ("ssh2.vast.ai", 19638)]
     assert [(h.host, h.port) for h in vb.ssh_hosts({"ssh_host": "ssh2.vast.ai", "ssh_port": 1})] == [("ssh2.vast.ai", 1)]
     monkeypatch.setattr(vb, "log", lambda m: None)
     monkeypatch.setattr(vb.time, "sleep", lambda s: None)
@@ -269,7 +269,7 @@ def test_ssh_prefers_direct_connection(monkeypatch):
             return inst
 
     h = vb.wait_ssh(Api(), 1, timeout=60)
-    assert (h.host, h.port) == ("190.111.198.202", 10299)
+    assert (h.host, h.port) == ("203.0.113.10", 10299)
 
 
 def test_image_cuda_sets_min_driver():
