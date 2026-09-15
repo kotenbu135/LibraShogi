@@ -1,9 +1,12 @@
 name: ci
 # linux: ビルドとテスト。windows-cross: 配布物の libra.exe と同じ mingw-w64（posix）でのクロスビルド（実行はしない）。
+# 文書だけの変更（docs、Markdown、ライセンスの全文、NOTICE）では走らせない。テストは文書を読まない（2026-09-15）
 on:
   push:
     branches: [main]
+    paths-ignore: ["docs/**", "**.md", "LICENSES/**", "NOTICE"]
   pull_request:
+    paths-ignore: ["docs/**", "**.md", "LICENSES/**", "NOTICE"]
 
 jobs:
   linux:

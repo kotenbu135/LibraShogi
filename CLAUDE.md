@@ -18,7 +18,7 @@ libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX �
 ビルド・起動・テスト・エンジンの駆動手順は `.claude/skills/run-librashogi/SKILL.md`（`/run-librashogi`）が正。ここに書いてある通りに動かす。
 
 ## 作業の進め方
-1. **1 タスク 1 ブランチ**。`git checkout -b <task>` → 実装 → テスト全通過 → `git checkout main && git merge --ff-only <task> && git push origin main && git branch -d <task>`。PR は作らない（単独開発）。CI（.github/workflows/ci.yml、ubuntu-latest）が緑であることを push 後に `gh run list --limit 2` で確かめる。
+1. **1 タスク 1 ブランチ**。`git checkout -b <task>` → 実装 → テスト全通過 → `git checkout main && git merge --ff-only <task> && git push origin main && git branch -d <task>`。PR は作らない（単独開発）。CI（.github/workflows/ci.yml、ubuntu-latest）が緑であることを push 後に `gh run list --limit 2` で確かめる。文書だけの変更（`docs/**`、`*.md`、`LICENSES/**`、`NOTICE`）では CI は走らない（`paths-ignore`）ので、確かめなくてよい。
 2. **テストを先に書く**。C++ は `ctest --test-dir build/libra-sim` と `build/libra-search`、Python は SKILL.md の pytest 行。変更のたびに全部通す。パイプの `| tail` は終了コードを隠すので、コミット条件に使うときは pytest の結果行を目で確認する。
 3. **コミットは小さく**、メッセージは「何を・なぜ」を日本語で。`git commit -s`（DCO の Signed-off-by）を付け、末尾に `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`。
 4. **決定は docs/decisions.md に 1 行**（日付、内容、理由。ユーザーの決定はその旨を書く）。**実測値は docs/measurements.md に 1 行**（日付、条件、値、備考。予定と実測の差も書く）。文書は docs/runbook.md（運用）、docs/protocol.md（GUI との接続仕様）、docs/rules.md（ルール）。libra-design.md と libra-local.md はユーザーの計画書で、書き換えない（差異は protocol.md §4 と decisions.md に記録する）。
