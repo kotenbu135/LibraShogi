@@ -8,7 +8,19 @@ import librashogi as ls
 from libra_net.model import LibraNet, NetConfig
 from libra_scale import pairs as P
 from libra_scale.table import build_table, measured_winrates, wilson
-from libra_scale.verify import apply_verification, verify_pairs
+from libra_scale.verify import apply_verification, sampling_pairs, verify_pairs
+
+
+def test_sampling_pairs_equal_weight():
+    """自己対局は抽選の一覧から一様に選ぶ。鏡映が自分と同じ 5 筋の組も、他の組と同じ回数だけ一覧に入る。"""
+    from collections import Counter
+    pairs = [(P.from_usi("5h"), P.from_usi("5b")), (P.from_usi("2g"), P.from_usi("6a")), (P.from_usi("5i"), P.from_usi("3c"))]
+    kp = sampling_pairs(pairs)
+    assert all(len(x) == 2 for x in kp)
+    c = Counter(P.canonical(a, b) for a, b in kp)
+    assert c == {P.canonical(a, b): 2 for a, b in pairs}
+    # 鏡映が別の組なら、代表と鏡映が 1 回ずつ（先手・後手の向きは変えない）
+    assert [P.from_usi("8g"), P.from_usi("4a")] in kp and [P.from_usi("2g"), P.from_usi("6a")] in kp
 
 
 def test_pair_counts_and_mirror():

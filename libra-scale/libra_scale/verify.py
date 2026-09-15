@@ -17,6 +17,14 @@ from .pairs import canonical, from_usi, mirror_sq, usi
 from .table import expand_mirrors, wilson
 
 
+def sampling_pairs(pairs: list[tuple[int, int]]) -> list[list[int]]:
+    """自己対局の抽選の一覧（[kb, kw] の並び）。自己対局は一覧から一様に選ぶので、代表ごとに代表と鏡映を 1 回ずつ入れる。
+    鏡映が自分と同じ組（両玉が 5 筋）は同じ組が 2 回入り、他の組と同じ確率で当たる。2026-09-15 までは鏡映を省いていたため
+    5 筋の組が半分しか当たらず、全組が games_per_pair に届くまで回す verify の局数が延びた（v0.1 の上位 48 組・100 局で、
+    模擬の中央値が約 10,200 局。直した後は約 5,950 局。measurements.md 同日）。"""
+    return [[a, b] for a, b in pairs] + [[mirror_sq(a), mirror_sq(b)] for a, b in pairs]
+
+
 @torch.no_grad()
 def verify_pairs(model, pairs: list[tuple[int, int]], games_per_pair: int, sims: int, concurrent: int, threads: int,
                  seed: int, device: torch.device, dtype: torch.dtype = torch.float16, log=None,
@@ -26,7 +34,7 @@ def verify_pairs(model, pairs: list[tuple[int, int]], games_per_pair: int, sims:
     cfg.update({"full_prob": 1.0, "full_sims": sims, "policy_topk": 8})
     if search_overrides:
         cfg.update(search_overrides)
-    kp = [[a, b] for a, b in pairs] + [[mirror_sq(a), mirror_sq(b)] for a, b in pairs if (mirror_sq(a), mirror_sq(b)) != (a, b)]
+    kp = sampling_pairs(pairs)
     cfg["king_pairs"] = kp
     n_slots = max(1, min(concurrent, len(kp) * 4))
     eng = librasearch.SelfPlay(cfg, n_slots, seed, threads)
