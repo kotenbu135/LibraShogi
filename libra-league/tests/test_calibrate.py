@@ -156,3 +156,7 @@ def test_runner_writes_calib_on_interval(tmp_path: Path):
     fake.cfg["run"]["calib_minutes"] = 0  # 0 で無効
     Runner.maybe_write_calib(fake, 99999.0)
     assert len(load_calib(sd, 10)) == 1
+    fake.cfg["run"]["calib_minutes"] = 60  # 搾取者の run では書かない
+    fake.cfg["exploiter"] = {"main_ckpt": "main.pt"}
+    Runner.maybe_write_calib(fake, 99999.0)
+    assert len(load_calib(sd, 10)) == 1

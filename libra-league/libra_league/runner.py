@@ -458,10 +458,11 @@ class Runner:
         self.maybe_write_calib(now)
 
     def maybe_write_calib(self, now: float) -> None:
-        """calib_minutes ごとに、窓の最新 calib_games 局で同じネットの較正を calib.jsonl に足す（docs/decisions.md 2026-09-17）。"""
+        """calib_minutes ごとに、窓の最新 calib_games 局で同じネットの較正を calib.jsonl に足す（docs/decisions.md 2026-09-17）。
+        搾取者の run では書かない: 記録が全部本体との対局で、自己対局の較正と同じ意味にならない（手で `libra --run lx calib` は回せる）。"""
         rc = self.cfg["run"]
         minutes = float(rc.get("calib_minutes", 60))
-        if minutes <= 0 or now - self.last_calib < minutes * 60 or not self.replay.games:
+        if self.cfg.get("exploiter", {}).get("main_ckpt") or minutes <= 0 or now - self.last_calib < minutes * 60 or not self.replay.games:
             return
         from .calibrate import append_calib, make_row
 
