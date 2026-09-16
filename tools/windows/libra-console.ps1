@@ -864,6 +864,34 @@ function Build-Series([string]$tab) {
             $series += $s
             $note = "0 から離れた線は、学習目標が実際の結果からずれている。2026-09-15 の集計では布石の目標 約 −0.02、引き分け 約 +0.32"
         }
+        "較正" {
+            # 同じネットの自己対局の較正（calib.jsonl、1 時間ごと。docs/decisions.md 2026-09-17）。ECE は予測と実際の差を区間の局面数で平均した値
+            $title = "探索値の較正 ECE（$sel、0 に近いほど予測の勝率が実際に合う）"
+            $yfmt = "{0:N3}"
+            $defs = [ordered]@{
+                "start"        = "3 手目（両玉の直後）"
+                "fuseki_sente" = "布石・先手の番"
+                "fuseki_gote"  = "布石・後手の番"
+                "normal_sente" = "本将棋・先手の番"
+                "normal_gote"  = "本将棋・後手の番"
+            }
+            $rows = @()
+            if ($script:Data.ContainsKey($sel) -and $null -ne $script:Data[$sel].PSObject.Properties["calib"]) { $rows = @($script:Data[$sel].calib) }
+            $i = 0
+            foreach ($k in $defs.Keys) {
+                $s = New-Series $defs[$k] $script:Palette[$i]
+                foreach ($r in $rows) {
+                    $g = $r.groups.$k
+                    if ($null -ne $g -and $g.n -gt 0) { Add-Pt $s (From-Unix $r.t) ([double]$g.ece) }
+                }
+                $series += $s; $i++
+            }
+            $note = "曲線と偏りは bin/libra calib（lx は --run lx）"
+            if ($rows.Count -gt 0) {
+                $a = $rows[-1].groups.all
+                if ($null -ne $a -and $a.n -gt 0) { $note = "最新 step {0}: 全体 ECE {1:N3}・偏り（予測 − 実際）{2:+0.000;-0.000}。{3}" -f (Format-Int $rows[-1].step), [double]$a.ece, [double]$a.bias, $note }
+            }
+        }
         "終局内訳" {
             $title = "終局の内訳と先手勝率（$sel、5 分ごとの新規対局の割合）"
             $yfmt = "{0:P0}"
@@ -899,7 +927,7 @@ function Build-Series([string]$tab) {
         }
     }
     # 5 分ごとの metrics（とコンソールの 30 秒観測）から作る系列は、観測の途切れで線を切る
-    if (@("局/日", "学習", "学習目標", "終局内訳", "手数") -contains $tab) { foreach ($s in $series) { $s.gap = $true } }
+    if (@("局/日", "学習", "学習目標", "較正", "終局内訳", "手数") -contains $tab) { foreach ($s in $series) { $s.gap = $true } }
     return @{ title = $title; series = $series; yfmt = $yfmt; zero = $zero; note = $note; all = $all }
 }
 
@@ -919,13 +947,13 @@ $cmbRange.SelectedIndex = 1
 $cmbRange.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
 $cmbRange.Add_SelectedIndexChanged({ $tabs.Invalidate($true) })
 $cbar.Controls.Add($cmbRange)
-$lblChartNote = New-Label "学習・学習目標・終局内訳・手数はこのタブの run、ほかは両方" 4
+$lblChartNote = New-Label "学習・学習目標・較正・終局内訳・手数はこのタブの run、ほかは両方" 4
 $lblChartNote.ForeColor = [System.Drawing.Color]::DimGray
 $cbar.Controls.Add($lblChartNote)
 $chartHost.Controls.Add($cbar, 0, 0)
 $tabs = New-Object System.Windows.Forms.TabControl
 $tabs.Dock = "Fill"
-$script:TabNames = @("局/日", "Elo", "対外対局", "学習", "学習目標", "終局内訳", "手数")
+$script:TabNames = @("局/日", "Elo", "対外対局", "学習", "学習目標", "較正", "終局内訳", "手数")
 foreach ($name in $script:TabNames) {
     $page = New-Object System.Windows.Forms.TabPage
     $page.Text = $name
