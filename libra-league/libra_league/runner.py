@@ -60,6 +60,7 @@ class Runner:
         self.openings_checked = 0.0
         self.auto = AutoJobs(sd, cfg, self.state, self.log)
         self.last_metrics = 0.0
+        self.last_calib = 0.0
         # 自己対局ワーカー（[workers] enabled）: 重みを weights/ に配り、inbox/ に届いた局を取り込む。搾取者の run では使わない
         self.inbox: Inbox | None = None
         wk = cfg.get("workers", {})
@@ -454,6 +455,19 @@ class Runner:
         if now - self.last_metrics >= float(self.cfg["run"].get("metrics_minutes", 5)) * 60 and self.loop is not None:
             append_metrics(self.sd, status)
             self.last_metrics = now
+        self.maybe_write_calib(now)
+
+    def maybe_write_calib(self, now: float) -> None:
+        """calib_minutes ごとに、窓の最新 calib_games 局で同じネットの較正を calib.jsonl に足す（docs/decisions.md 2026-09-17）。"""
+        rc = self.cfg["run"]
+        minutes = float(rc.get("calib_minutes", 60))
+        if minutes <= 0 or now - self.last_calib < minutes * 60 or not self.replay.games:
+            return
+        from .calibrate import append_calib, make_row
+
+        games = list(self.replay.games)[-int(rc.get("calib_games", 20000)):]
+        append_calib(self.sd, make_row(games, self.state.get("step"), self.state.get("generation"), now=now))
+        self.last_calib = now
 
     # ---- メインループ ----
     def run(self) -> None:

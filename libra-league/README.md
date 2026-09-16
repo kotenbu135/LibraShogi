@@ -4,7 +4,7 @@
 
 | ファイル | 内容 |
 |---|---|
-| `libra_league/cli.py` | `bin/libra`: `run` / `stop` / `status` / `eval-now` / `match-now` / `eval` / `match` / `export` / `worker` / `openings` |
+| `libra_league/cli.py` | `bin/libra`: `run` / `stop` / `status` / `eval-now` / `match-now` / `eval` / `match` / `export` / `worker` / `openings` / `calib` |
 | `libra_league/config.py` | 設定（TOML、既定は L-S） |
 | `libra_league/state.py` | 状態ディレクトリ（`~/libra-run/<run-id>/`）、原子的な書き込み、フラグ |
 | `libra_league/supervise.py` | `libra run` の監視役: ランナー本体を子プロセスで回し、異常終了したら起動し直す |
@@ -17,6 +17,7 @@
 | `libra_league/workers.py` | `libra worker`: 自己対局だけのワーカー、重みの配布、対局ファイル（npz、pickle なし）の検査と inbox の取り込み |
 | `libra_league/auto.py` | `metrics.jsonl`、archive、24 時間ごとの自動計測ジョブ（`libra eval` / `libra match` を別プロセスで） |
 | `libra_league/evaluate.py` | `libra eval`: 世代間 Elo と較正 |
+| `libra_league/calibrate.py` | `libra calib` と `calib.jsonl`: 同じネットの自己対局の較正（探索値と結果の信頼度曲線・ECE・Brier） |
 | `libra_league/usi_client.py`, `harness.py` | `libra match`: 外部エンジンとの無人対局、libra-sim による裁定、JSONL 棋譜 |
 | `libra_league/usi_engine.py` | `bin/libra-usi-py`: USI 拡張エンジン（Python 版、暫定。C++ 版は libra-engine） |
 
@@ -28,6 +29,7 @@
 | `test_supervise.py` | 監視役の起動し直しと、利用者が止めたときに起動し直さないこと |
 | `test_cli_status.py` | `libra status --json`（管理コンソールが読む形） |
 | `test_auto.py` | 進捗の時系列・archive・自動ジョブ |
+| `test_calibrate.py` | 較正の区間・ECE・Brier、布石と手番の区別が学習のバッチと同じこと、`libra calib`、`calib.jsonl` |
 | `test_exploiter.py` | 搾取者モード（相手の手のマスク）と布石 |
 | `test_league_pool.py` | 過去の搾取者のプールと PFSP |
 | `test_workers.py` | 対局ファイルの書式と検査、重みの配布、inbox の取り込み |

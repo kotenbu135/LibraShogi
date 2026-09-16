@@ -19,6 +19,8 @@ import librasearch
 import librashogi as ls
 from libra_net.model import LibraNet, NetConfig
 
+from .calibrate import reliability
+
 
 def load_model(path: Path, device: torch.device, dtype: torch.dtype = torch.float16) -> LibraNet:
     sd = torch.load(path, map_location=device, weights_only=False)
@@ -50,16 +52,7 @@ def calibration(games: list[dict], side_of: "callable", bins: int = 10) -> list[
             z = res if sente else -res
             qs.append((float(q) + 1) / 2)
             zs.append((z + 1) / 2)
-    qs, zs = np.array(qs), np.array(zs)
-    out = []
-    edges = np.linspace(0, 1, bins + 1)
-    for i in range(bins):
-        m = (qs >= edges[i]) & ((qs < edges[i + 1]) if i < bins - 1 else (qs <= 1.0))
-        if m.sum() == 0:
-            continue
-        out.append({"lo": round(float(edges[i]), 2), "hi": round(float(edges[i + 1]), 2), "n": int(m.sum()),
-                    "pred": round(float(qs[m].mean()), 4), "actual": round(float(zs[m].mean()), 4)})
-    return out
+    return reliability(np.array(qs), np.array(zs), bins).get("bins", [])
 
 
 @torch.no_grad()

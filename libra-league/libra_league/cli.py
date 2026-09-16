@@ -71,6 +71,10 @@ def main(argv: list[str] | None = None) -> int:
     p_op.add_argument("--chunks", type=int, default=50, help="新しい側から何チャンク（100 局単位）見るか")
     p_op.add_argument("--moves", type=int, default=12, help="玉 2 手のあとに残す布石の手数")
     p_op.add_argument("--out", default=None, help="既定: <run>/openings.json")
+    p_ca = sub.add_parser("calib", help="同じネットの自己対局の較正（探索値と結果の信頼度曲線・ECE・Brier）を、最新の対局から出す")
+    p_ca.add_argument("--games", type=int, default=20000, help="新しい側から何局使うか（書き出し済みのチャンクから）")
+    p_ca.add_argument("--bins", type=int, default=10)
+    p_ca.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     sd = StateDir(Path(a.root) / a.run)
     if a.cmd == "run":
@@ -129,6 +133,13 @@ def main(argv: list[str] | None = None) -> int:
         out = Path(a.out) if a.out else sd.root / "openings.json"
         write_openings(out, lines, str(sd.root))
         print(f"wrote {out}: {len(lines)} openings")
+        return 0
+    if a.cmd == "calib":
+        from .calibrate import format_table, make_row, newest_games
+
+        state = sd.read_state() if sd.state_json.exists() else {}
+        row = make_row(newest_games(sd.replay, a.games), state.get("step"), state.get("generation"), a.bins)
+        print(json.dumps(row, ensure_ascii=False) if a.json else format_table(row))
         return 0
     if a.cmd == "stop":
         sd.set_flag("STOP")
@@ -236,6 +247,9 @@ def main(argv: list[str] | None = None) -> int:
                 out["evals"] = collect_evals(sd)
                 out["anchor"] = collect_anchor(sd)
                 out["matches"] = collect_matches(sd)
+                from .calibrate import load_calib
+
+                out["calib"] = load_calib(sd, a.history)
                 out["archives"] = [{"step": s_, "file": p.name} for p in list_archives(sd) if (s_ := int(p.stem.split("_")[1])) is not None]
                 out["auto"] = state.get("auto") if state else None
                 out["exploiter_state"] = state.get("exploiter") if state else None

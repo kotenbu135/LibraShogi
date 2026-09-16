@@ -86,7 +86,9 @@ DEFAULTS: dict[str, Any] = {
     "workers": {"enabled": False, "ingest_seconds": 10.0, "max_lag_steps": 2000},
     "run": {"checkpoint_minutes": 10, "status_seconds": 30, "chunk_games": 100, "keep_checkpoints": 3,
             "export_onnx": True,   # チェックポイントごとに latest.onnx も書く（libra / libra.exe 用）
-            "metrics_minutes": 5},  # metrics.jsonl（進捗の時系列）の追記間隔
+            "metrics_minutes": 5,   # metrics.jsonl（進捗の時系列）の追記間隔
+            # calib.jsonl: 窓の最新 calib_games 局で、探索値と結果の較正（libra calib と同じ）を calib_minutes ごとに足す。0 で無効
+            "calib_minutes": 60, "calib_games": 20000},
     # 自動計測（docs/runbook.md §6）: every_hours ごとにチェックポイントを archive に残し、直前の archive と対局させて Elo を鎖にする。
     # match_games > 0 なら外部エンジン（fuseki_usi_server.py）とも少数局を指す。どちらも別プロセスで GPU を共有する。
     # anchor_*: 固定の基準ネットとの対局。連続世代どうしの Elo は伸びが測定幅（100 局で ±70 Elo）に埋もれ、
