@@ -114,7 +114,11 @@ USI の申告と `info` の形式は [protocol.md](protocol.md) §3。天秤将�
 efeac0b7b1a55fe990503f394121643583ea3cf4e08faa3295f0c69d02598fd5  libra-v0.1.pt
 61a7aefe05edc9f140ac0f154804700d3dabb156c2d38c6acc9c7d7aa4504a07  libra-v0.1.onnx
 4f2d652cd57ec1cefd1ac6542dc73b337835a328afa9c212811d3f7107b34aee  scale-v0.1.json
+9b032662b2a18bcfae02b212766139f2edeeb59e178f5a60bb9abb055c74a392  libra-v0.1-windows-x64.zip
+28e87a95023e984629a905f6f2af1640fe6b9e234cf2a7f8b659a83219e402ae  libra-v0.1-selfplay-sample.jsonl.gz
 ```
+
+Release の `SHA256SUMS` と同じ。zip と標本は `tools/package_release.sh` で作り直しても同じ値になる（§9）。
 
 ## 9. 配布物の作り方
 
@@ -124,11 +128,11 @@ cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FI
   -DLIBRA_BUILD_PYTHON=OFF -DLIBRA_BUILD_TESTS=OFF -DLIBRA_ORT_DIR=$PWD/third_party/onnxruntime/onnxruntime-win-x64-directml-1.24.4
 cmake --build build-win
 # 2. Release に載せるものを作る（zip・SHA256SUMS）
-tools/package_release.sh v0.1 ~/libra-run/releases/v0.1
+tools/package_release.sh v0.1 ~/libra-run/releases/v0.1 '2026-09-15 12:25:25'   # 末尾は自己対局の標本の中心の時刻
 ```
 
 zip の中身は `libra.exe`、DirectML 版 ONNX Runtime 1.24.4 と DirectML 1.15.4 の DLL、`libra.onnx`（＝`libra-v0.1.onnx`）、
 `scale.json`（＝`scale-v0.1.json`）、`README.txt`、`MODEL-CARD.md`、`LICENSES/`（Apache-2.0・CC BY 4.0・CC0 1.0・NOTICE・
-依存物の全文と ThirdPartyNotices）。**`Scale_Table` の既定は空なので、GUI に登録するときにこのオプションへ `scale.json` の場所を入れる**（[protocol.md](protocol.md) §3）。
+依存物の全文と ThirdPartyNotices）。zip と標本の gzip は日時を固定して詰めるので、同じ入力からは同じ SHA-256 になる。**`Scale_Table` の既定は空なので、GUI に登録するときにこのオプションへ `scale.json` の場所を入れる**（[protocol.md](protocol.md) §3）。
 
 エンジンが名乗る版は `id name LibraShogi 0.0.2`（`libra-engine/src/engine.cpp` の `VERSION`。エンジンの版で、重みの版とは別）。

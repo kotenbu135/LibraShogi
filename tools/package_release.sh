@@ -59,18 +59,36 @@ NVIDIA の GPU では CUDA 版の onnxruntime.dll に差し替えると速い (C
 https://github.com/kotenbu135/LibraShogi
 TXT
 
-( cd "$STAGE" && python3 -c "import shutil,sys; shutil.make_archive(sys.argv[1], \"zip\", \".\", sys.argv[2])" "$DIST/libra-$VER-windows-x64" "libra-$VER-windows-x64" )
+# 同じ中身なら同じハッシュになるよう、名前順・固定の日時で詰める（zip は既定で mtime を埋め込む）
+python3 - "$STAGE/libra-$VER-windows-x64" "$DIST/libra-$VER-windows-x64.zip" <<'PY'
+import os, sys, zipfile
+root, out = sys.argv[1:3]
+base = os.path.basename(root)
+paths = sorted(os.path.relpath(os.path.join(dp, f), root)
+               for dp, _, fs in os.walk(root) for f in fs)
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+    for rel in paths:
+        info = zipfile.ZipInfo(f"{base}/{rel.replace(os.sep, '/')}", date_time=(1980, 1, 1, 0, 0, 0))
+        info.compress_type = zipfile.ZIP_DEFLATED
+        info.external_attr = 0o644 << 16
+        with open(os.path.join(root, rel), "rb") as f:
+            z.writestr(info, f.read())
+print(f"zip: {len(paths)} files, {os.path.getsize(out)/1e6:.1f} MB")
+PY
 for f in "$SRC/libra-$VER.onnx" "$SRC/libra-$VER.pt" $SCALE; do [ -f "$f" ] && cp "$f" "$DIST/"; done
 if [ "${3:-}" != "" ]; then
-  GAMES="$(dirname "$(dirname "$SRC")")/ls/games"
-  [ -d "$GAMES" ] || GAMES="$HOME/libra-run/ls/games"
+  # 既定は <重みの置き場>/../../<run>/games。別の場所なら LIBRA_GAMES_DIR で渡す
+  GAMES="${LIBRA_GAMES_DIR:-$(dirname "$(dirname "$SRC")")/${LIBRA_RUN_ID:-ls}/games}"
+  [ -d "$GAMES" ] || { echo "自己対局の棋譜が見つかりません: $GAMES（LIBRA_GAMES_DIR で指す）" >&2; exit 1; }
   python3 - "$GAMES" "$3" "$DIST/libra-$VER-selfplay-sample.jsonl.gz" <<'PY'
-import datetime, glob, gzip, os, sys
+import datetime, glob, gzip, io, os, sys
 games, center, out = sys.argv[1:4]
 t = datetime.datetime.strptime(center, "%Y-%m-%d %H:%M:%S").timestamp()
 fs = sorted(f for f in glob.glob(os.path.join(games, "games_*.jsonl")) if abs(os.path.getmtime(f) - t) < 3600)
 n = 0
-with gzip.open(out, "wt", encoding="utf-8") as w:
+# gzip はヘッダに mtime を書くので、同じ中身なら同じハッシュになるよう 0 に固定する
+with open(out, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as gz, \
+     io.TextIOWrapper(gz, encoding="utf-8") as w:
     for f in fs:
         for line in open(f, encoding="utf-8"):
             if line.strip():
