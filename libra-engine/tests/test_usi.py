@@ -140,6 +140,44 @@ def test_batched_leaves_keep_node_budget(engine):
         engine.send("setoption name DNN_Batch_Size value 64")
 
 
+def test_choose_reports_winrate_on_multipv1(engine):
+    """GUI（desktop 0.10.0 `play.ts`）の「選ぶ」は ply 2 の `go` の `multipv 1` の行の winrate だけを見る。
+
+    GUI が対局で送る語（`movetime` と `btime/wtime/byoyomi`）のどちらでも、手番（＝先手）の
+    勝率が 0..1 で出ること。`bestmove` は GUI が指さないので中身は問わない。
+    """
+    for go_args in ("movetime 300", "btime 60000 wtime 60000 byoyomi 3000"):
+        engine.send("position fuseki moves K*5i K*5a")
+        engine.send(f"go {go_args}")
+        lines = engine.wait_for(lambda l: l.startswith("bestmove"), 60)
+        mp1 = [l.split() for l in lines
+               if l.startswith("info ") and "string" not in l.split()
+               and "multipv" in l.split() and l.split()[l.split().index("multipv") + 1] == "1"]
+        assert mp1, go_args
+        t = mp1[-1]
+        assert "winrate" in t, (go_args, " ".join(t))
+        assert 0.0 <= float(t[t.index("winrate") + 1]) <= 1.0, (go_args, " ".join(t))
+
+
+def test_scale_table_answers_with_clock_words(engine, tmp_path):
+    """1〜2 手目に時計の語が来ても玉配置表から即座に返す（GUI は布石でも btime/wtime/byoyomi を送る）。"""
+    import json
+    import time
+
+    table = {"balanced": [["5i", "5a"]]}
+    path = tmp_path / "scale-clock.json"
+    path.write_text(json.dumps(table))
+    engine.send(f"setoption name Scale_Table value {path}")
+    try:
+        for line, expect in (("position fuseki", "K*5i"), ("position fuseki moves K*5i", "K*5a")):
+            t0 = time.time()
+            bm, _ = engine.go(line, "btime 60000 wtime 60000 byoyomi 10000", timeout=30)
+            assert bm == expect, (line, bm)
+            assert time.time() - t0 < 2.0, (line, time.time() - t0)  # byoyomi 10 秒を待たない
+    finally:
+        engine.send("setoption name Scale_Table value <empty>")
+
+
 def test_scale_table_places_kings(engine, tmp_path):
     import json
 

@@ -1,6 +1,6 @@
 # Libra と tenbin-shogi-desktop の接続仕様（確定版）
 
-- 根拠: tenbin-shogi-desktop `12c4a8d`（0.5.0、2026-09-10）の `docs/usi-fuseki-extension.md`（布石 USI 拡張 仕様 v0）、`src/usi/parse.ts`、`src/usi/engine.ts`、`src/usi/evalscale.ts`、`src/ui/play.ts`、`src/ui/engines.ts`、`src/ui/analysis.ts`、`src/state/game.ts`、`crates/usi-host/src/lib.rs` を読んで確定した（2026-09-11）。
+- 根拠: tenbin-shogi-desktop `8a4d176`（0.10.0、2026-09-14。0.10.3 `ba77856` まで本書に関わる変更なし）の `docs/usi-fuseki-extension.md`（布石 USI 拡張 仕様 v0）、`src/usi/parse.ts`、`src/usi/engine.ts`、`src/usi/evalscale.ts`、`src/ui/play.ts`、`src/ui/engines.ts`、`src/ui/analysis.ts`、`src/state/game.ts`、`crates/usi-host/src/lib.rs` を読んで確定した（2026-09-11、0.10.0 に合わせて 2026-09-16 に改訂）。
 - fuseki-shogi-ai は `scripts/fuseki_usi_server.py` の冒頭（起動方法・オプション既定値・`Normal_Engine` への中継の設定）だけを読んだ。相手 AI の内部は読んでいない。
 - 本書は docs/libra-local.md §6.2 の表を置き換える。ライセンス: CC BY 4.0。
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | 起動 | `path` を `args`（空白区切り）で起動。作業フォルダは省略時に実行ファイルのフォルダ。Windows では `CREATE_NO_WINDOW`。stdin/stdout の行往復、stderr はログに流す（`usi-host`） | 標準入出力は行バッファ。stderr に進捗を書いてよい（起動中は画面に出る） |
 | 登録の下見 | `usi` を送り 15 秒以内の `usiok` を待つ。`isready` は送らない（`UsiEngine.probe`） | `usi` への応答でモデルを読まない。申告（`id name`、`option`）だけを即座に返す |
-| 種別の自動判定 | `option name` が `Fuseki_` で始まる項目が 1 つでもあれば `kind='fuseki'`（布石にも対応）。無ければ `id name` の既知パターン、それも無ければ `normal`（`engines.ts probeInto`） | `Fuseki_Mode` を申告する（下表）。利用者が手で「布石にも対応」に変えなくても済む |
+| 種別の自動判定 | `option name` が `Fuseki_` で始まる項目が 1 つでもあれば `kind='fuseki'`（布石にも対応）。無ければ `id name` の既知パターン、それも無ければ `normal`（`engines.ts probeInto`）。**`kind='fuseki'` のエンジンは本将棋（41 手目以降）の席にも選べる**（0.10.0。`engines.ts` の `default-normal`）。布石と本将棋に同じエンジンを選ぶと同じ id なので 1 本のプロセスが続けて指す | `Fuseki_Mode` を申告する（下表）。利用者が手で「布石にも対応」に変えなくても済む。**Libra は 1 回登録すれば 1 手目から終局まで指せる**（2 回登録して GPU のエンジン同士がぶつかることはなくなった） |
 | GPU 判定 | `DNN_` で始まる項目があれば `gpu=true`。効果: (1) `isready` を既定 1200 秒待つ（通常 120 秒）、(2) 同時に 1 本だけ起動、(3) エンジン同士の対局では先後で同じ 1 本のプロセスを使い回す | `DNN_Model` を申告するので GPU 扱い。1 プロセスで両方の手番の `go` を受けられること（状態を手番に依存させない） |
 | 起動手順 | `usi` → `usiok` → 上書き分の `setoption`（既定と同じ値は送らない） → `isready` → `readyok` → `usinewgame`（`ensureStarted` → `newGame`）。`stop` を先に送ることがある | モデルの読み込みは `isready` で行う。`usinewgame` は毎局来るとは限らない（先後で共用するときは 1 回） |
 | 局面 | 布石: `position fuseki` ／ `position fuseki moves K*5i K*5a P*7g ...`。`choose:` は送らない（`game.ts positionCommand`）。本将棋: `position sfen <40 手完了時の SFEN> moves 7g7f ...`（`startpos` は来ない） | `choose:` が来ても読み飛ばす。SFEN は持ち駒なし・手番 b・手数 41（通算）で来る（wasm の `fw_to_sfen` と一致させた） |
@@ -22,21 +22,29 @@
 | 目盛り（`Eval_Coef`） | 登録時に `option name Eval_Coef` の既定値があれば `scale=その値, offset=0`。無ければ `id name` の既知パターン（水匠5: 652/+51、やねうら王: 600/0、dlshogi 系: 756/0、`Tenbin Fuseki Engine`: 435/+34）。どれでもなければ 600/0。利用者が設定画面で変えられる（`evalscale.ts`） | `Eval_Coef` は申告しない（offset 0 の式なので 435/+34 と両立しない）。Libra は `winrate` を常に出すので目盛りは表示に効かない |
 | `bestmove` の検証 | 布石: wasm の合法打ち一覧と照合。本将棋: shogiops の `isLegal`。指せない手なら**同じ局面でもう 1 回 `go`**、2 回目も駄目なら対局を**一時停止**（負けにはしない）（`play.ts` 236〜270） | 非合法手を返さない。ハーネスでは非合法手は即負け（大会規定第 27 条 1 項 3 号） |
 | `bestmove resign` | 投了として扱う | 使ってよい |
-| `bestmove win`（本将棋） | **検証せず、その手番のエンジンの投了として扱う**（`play.ts` 379〜382: 宣言した旨を表示して `resign` を返す） | GUI 経由では `win` を送ると負けになる。ハーネスは条件（docs/rules.md）を検証して受ける。→ §4 の未対応事項 |
+| `bestmove win`（本将棋） | **条件を検証して裁く**（0.10.0、`game.ts`）。docs/rules.md §5.3 の 27 点法（1〜5。6 の持ち時間は時計が先に切れ負けにする）を満たせば宣言側の勝ち、満たさなければ宣言側の**負け**。宣言した旨を画面に出す（`play.ts` 386） | ハーネスと同じ扱いになった。条件を満たさない局面で `win` を出さないこと（出せば負け） |
 | `bestmove win`（40 手完了時） | GUI は 40 手目を適用した時点で自分で 41 手目の裁定（`verifyFinalSfen`）を行い、裁定に当たれば先手の勝ちで終局する。**その局面で `go` は来ない** | ハーネスは仕様 v0 どおり `go` を送り `bestmove win` を期待する。Libra は裁定に当たる局面では探索せず `bestmove win` |
 | 41 手目に先手の合法手なし | shogiops の `isEnd()`（詰み・ステイルメイト）で終局。GUI が判定 | libra-sim も同じ判定（先手の負け） |
-| 千日手・手数上限・宣言法 | GUI には**無い** | ハーネスが docs/rules.md で裁定する。GUI での対局結果は比較に使わない |
+| 千日手・手数上限・宣言法 | **docs/rules.md §5 と同じに裁く**（0.10.0、`game.ts`）。千日手は盤・持ち駒・手番が同じ局面の 4 回目で引き分け（40 手完了局面を 1 回目に数える）、連続王手は王手側の負け、双方がすべて王手なら引き分け。手数上限は 41 手目起点で本将棋 320 手。裁く順は 詰み（手が無い）→ 千日手 → 手数上限。人も自分の手番にツールバーの「入玉宣言」で宣言できる | ハーネスと同じ規定。**それでも GUI での対局結果は強さの比較に使わない**（非合法手の扱いが違う。下の `bestmove` の検証の行と §4 の 4） |
+| 棋譜（KIF）の終局 | 0.10.0 から `千日手`・`持将棋`（手数上限）・`入玉勝ち` を書く。不当な宣言は `*入玉宣言` の注記つきの `反則負け` | — |
 | 終了 | `quit` を送り 3 秒待って kill | `quit` で速やかに終了 |
 
 ## 2. 天秤将棋の 1〜2 手目と「選ぶ」
 
-GUI（`play.ts think`）は天秤将棋の `kings`（1〜2 手目）と `choose` を、席のエンジンが外部エンジンであっても**常に内蔵の両玉の価値表**（`king_pairs_iter1177_games.json`、`BuiltinEvaluator.choose` / `placerPick`）で処理する。外部エンジンに `position fuseki` ＋ `go`（1 手目）、`position fuseki moves K*5i` ＋ `go`（2 手目）、2 手目後の `winrate`（選択）を問い合わせる口は無い。fuseki_usi_server.py 側は `Fuseki_Mode=tenbin` で 1〜2 手目を玉打ちとして応答できる実装になっているが、GUI はそれを使っていない。
+desktop 0.10.0（`play.ts think` / `engineChoose`）から、**`Fuseki_Mode` を名乗る外のエンジンの席には、天秤将棋の 1〜2 手目（両玉）と先後の選択も任せる**。`Fuseki_Mode` を名乗らないエンジンの席と内蔵の席は、これまでどおり GUI 同梱の両玉の価値表（`king_pairs_iter1177_games.json`、`BuiltinEvaluator.choose` / `placerPick`）で処理する。
 
-したがって:
+| 場面 | GUI が送るもの | Libra が返すもの |
+|---|---|---|
+| 1 手目（先手玉） | `position fuseki` ＋ `go`（布石と同じ語。`movetime T` か `btime B wtime W byoyomi Y`） | `bestmove K*yy`。GUI はその手を指す |
+| 2 手目（後手玉） | `position fuseki moves K*xx` ＋ 同じ `go` | `bestmove K*yy`。GUI はその手を指す |
+| 選択（先後） | `position fuseki moves K*xx K*yy` ＋ `go`。時計があるときは選ぶ側の枠の残りを `btime` と `wtime` の**両方**に入れる | `multipv 1`（または multipv 無し）の `info` に `winrate`（手番＝先手の勝率）。GUI は**最後の**その値を見て 0.5 以上なら先手を持つ（§1 の勝率の優先順位で読む）。返った `bestmove` は 3 手目の候補なので GUI は指さない |
 
-- **GUI 上の天秤将棋では、Libra の `scale.json` は使われない**（両玉の配置と選択は GUI 同梱の表で決まり、Libra は 3 手目から打つ）。
-- **計測（100 局）はハーネスで行う。** ハーネスは両エンジンに `position fuseki` → `go` → `bestmove K*xx`、`position fuseki moves K*xx` → `go` → `bestmove K*yy` で両玉を置かせ、選ぶ側には `position fuseki moves K*xx K*yy` → `go` を送って `winrate`（手番＝先手の勝率）の符号で選ばせる（0.5 以上なら先手）。
-- GUI 側で「置く・選ぶをエンジンに任せる」を可能にする改修は tenbin-shogi-desktop の別作業（§4）。
+- 評価の行が 1 つも来なければ GUI は同梱の両玉の表に落とす（`engineChoose` が `null` を返す）。
+- **GUI 上の天秤将棋でも Libra の `Scale_Table`（`scale.json`）が使われる。** 表に載っていない局面では探索で置く。
+- 時計の語（`btime/wtime/byoyomi`）が来ても、表に当たる 1〜2 手目は読まずに即座に返す（`libra-engine/tests/test_usi.py::test_scale_table_answers_with_clock_words`）。
+- 選択の `winrate` は `multipv 1` の行に必ず出す（同 `::test_choose_reports_winrate_on_multipv1`）。
+- ルールの版を持つエンジン（`Fuseki_Rules` を名乗るもの）には `position` より先に `setoption name Fuseki_Rules` が来る。Libra は名乗らない（§4 の 9）。
+- **計測（100 局）はこれまでどおりハーネスで行う**（GUI は非合法手を負けにしないため。§1・§4 の 4）。ハーネスの手順は上の表と同じ。
 
 ## 3. Libra の申告と出力
 
@@ -65,7 +73,7 @@ usiok
   先に試した実行プロバイダが失敗して次へ進んだときは、続けて `info string provider fallback <ep>: <理由>` を 1 行出す
   （例: CUDA 版の DLL に差し替えて cuDNN が無いと `provider cpu` の後に `provider fallback cuda: … cudnn64_9.dll …`）。
   使えない実行プロバイダ（DLL に含まれないもの）を飛ばしただけのときは出さない。
-- `Declare_Win`: 本将棋で宣言法の条件を満たしたとき `bestmove win` を出す。GUI は `win` を投了として扱う（§4）ので既定は false。ハーネスは true にして起動する。
+- `Declare_Win`: 本将棋で宣言法の条件を満たしたとき `bestmove win` を出す。既定は false だが、**GUI は `Declare_Win` を名乗るエンジンに、登録の設定で値を持っていなければ本将棋の毎 `go` の前に `setoption name Declare_Win value true` を送る**（0.10.0、`play.ts` 384）。利用者が登録の設定で明示した値があればそちらが優先される。ハーネスは true にして起動する。
 - `Mate_Nodes`: 各手の根で行う df-pn 詰み探索の節点数。
 - C++ 版エンジン `libra` / `libra.exe`（`libra-engine/`、ONNX Runtime）と Python 版 `bin/libra-usi-py`（`libra_league/usi_engine.py`）がこの申告を実装している。`bin/libra-usi` は C++ 版を起動する（未ビルドなら Python 版）。desktop には
   実行ファイル `C:\Windows\System32\wsl.exe`、引数 `-d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra-usi` で登録する（`DNN_Model` を申告するので GPU 扱い、`Fuseki_Mode` を申告するので「布石にも対応」に自動判定される）。
@@ -74,13 +82,13 @@ usiok
 - `info` 行: `info depth D seldepth S multipv K score cp X winrate W nodes N nps P time T pv M ...`、末尾に `info string phase fuseki|normal ply N method mcgs|mcts|proof|scale`。
 - `score cp` は `winrate` から作る: `cp = round(435 · ln(p/(1−p)) + 34)`（`p` は `[1e-6, 1−1e-6]` に丸める。`-0` は `0`）。GUI の `cpToWinrate(cp, 435, 34)` の逆関数。この換算はテストで固定する。
 - 布石の `pv` は候補の 1 手だけでよい（仕様 v0）。Libra は MCGS の主変化を続けて出してよい（GUI は次の既知キーまで読む）。
-- 40 手完了時に手番（先手）が後手玉を取れる局面での `go` → `bestmove win`。本将棋で入玉宣言の条件（docs/rules.md）を満たすときの `go` → `bestmove win`（GUI 経由では負けになる。§4）。
+- 40 手完了時に手番（先手）が後手玉を取れる局面での `go` → `bestmove win`。本将棋で入玉宣言の条件（docs/rules.md）を満たすときの `go` → `bestmove win`（GUI も条件を検証して裁く。§1）。
 
 ## 4. libra-local.md の想定と食い違う点（ルール設計者への報告）
 
 1. **手数上限。** 大会の最新規定（世界コンピュータ将棋選手権 大会ルール、第 36 回用 `rule.pdf`、SHA-256 `9387db36…bed`、第 27 条 3 項）は **320 手**。「256 手」は現行規定ではない（320 手への変更は 2019 年）。→ ルール設計者の決定（2026-09-11）で **320 手・41 手目を 1 手目として数える**に揃えた。libra-sim の既定 `max_ply = 320`。
-2. **本将棋の `bestmove win`。** GUI は検証せず、宣言したエンジンの投了として扱う。Libra が GUI 経由で正当な宣言をすると負けになる。desktop 側の宣言法・千日手・手数上限の判定追加は、Libra 側の準備ができた時点で tenbin-shogi-desktop に Issue を起票する（ルール設計者の決定、2026-09-11）。それまで GUI 対局では `Declare_Win=false`（既定）で宣言を出さない。
-3. **置く・選ぶ。** GUI は外部エンジンに両玉の配置と選択を任せない（§2）。libra-local §6.2「選択そのものはハーネス（または GUI）が行う」のうち GUI は Libra の `winrate` を使わず自分の表で選ぶ。GUI で Libra の `scale.json` を使う改修は、上記 2 と同じ Issue で desktop 側に提案する（ルール設計者の決定、2026-09-11）。
+2. **本将棋の `bestmove win`。** ~~GUI は検証せず、宣言したエンジンの投了として扱う。~~ **desktop 0.10.0（2026-09-14）で解消した。** GUI も docs/rules.md §5.3 の条件を検証し、正当なら宣言側の勝ち、不当なら負けにする。千日手・手数上限も §5 と同じに裁く。Issue の起票を待たずに desktop 側で実装されたので、2026-09-11 の「Libra 側の準備ができたら Issue を起票する。それまで GUI 対局は `Declare_Win=false`」は不要になった（GUI が毎 `go` の前に `Declare_Win=true` を送る。§1・§3）。
+3. **置く・選ぶ。** ~~GUI は外部エンジンに両玉の配置と選択を任せない。~~ **desktop 0.10.0 で解消した。** `Fuseki_Mode` を名乗るエンジンの席では GUI が 1〜2 手目と選択をエンジンに問い合わせ、Libra の `scale.json` と `winrate` が使われる（§2）。libra-local §6.2「選択そのものはハーネス（または GUI）が行う」は GUI でも満たされた。
 4. **非合法手の扱い。** GUI は 1 回聞き直し、2 回目で一時停止（負けにしない）。ハーネスは大会規定どおり負けにする。
 5. **`go` の語。** GUI は対局では `movetime` か `btime/wtime/byoyomi` だけを送る（布石中も）。`go nodes` は検討・対局とも来ない。想定どおり全語を受ければよい。
 6. **`Eval_Coef`。** DNN 系エンジンの目盛りは申告の `Eval_Coef`（offset 0）→ 既知名 → 600/0 の順。Libra は `winrate` を常に出すので影響しない（想定どおり）。ただし Libra の `score cp`（435/+34）と GUI に登録される既定の目盛り（600/0）は一致しないので、cp を GUI の目盛りで読み直す場面（winrate の無い行）を作らない。

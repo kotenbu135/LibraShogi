@@ -140,7 +140,7 @@ libra-sim（`libra-sim/tests/perft.cpp`）で固定している perft 値。後�
 |---|---|---|---|---|---|
 | Libra（本書） | 4 回で引き分け、連続王手は王手側負け | 本将棋 320 手で引き分け（41 手目起点、`max_ply` で変更可） | 27 点宣言法。`win` を検証 | 本書 §3.4 | 負け |
 | 公開版 fuseki-shogi-web `6c4c1f7` | 同じ | 本将棋 320 手で引き分け（`MAX_NORMAL_MOVES = 320`） | 合意による持将棋あり。AI の `win` は無検証で宣言勝ち | 同じ | 負け |
-| desktop GUI `12c4a8d` | 無し | 無し | 無し（`win` は投了扱い） | 同じ（wasm の `verifyFinalSfen`） | 1 回聞き直し、2 回目で一時停止 |
+| desktop GUI 0.10.0 `8a4d176`（以降 0.10.3 まで同じ） | 同じ（`src/state/game.ts`。40 手完了局面を 1 回目に数える） | 同じ（本将棋 320 手、`MAX_NORMAL_MOVES`） | 同じ。`win` を検証し、不当な宣言は宣言側の負け | 同じ（wasm の `verifyFinalSfen`） | 1 回聞き直し、2 回目で一時停止 |
 | 大会ルール（WCSC36） | 同じ | 320 手 | 同じ | — | 負け |
 
 - **二飛香（§3.2、2026-09-13 決定）**: Libra（libra-sim、tenbinshogi.com の WASM）は 2026-09-13 から適用する。公開版 fusekishogi.com・オンラインの判定役（kotenbu135/fuseki-shogi-web#1）と desktop GUI（kotenbu135/tenbin-shogi-desktop#1、0.8.0 でリリース）も 2026-09-13 に入った。desktop 0.8.0 より前の GUI は二飛香が無く、人の側だけ二飛香の手が通る（Libra はその局面を非合法として `bad position` を出し投了する）。
