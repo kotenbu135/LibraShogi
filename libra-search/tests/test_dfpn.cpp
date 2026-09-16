@@ -113,6 +113,24 @@ int main() {
     CHECK(r == PROOF_PROVEN);
     CHECK(move_to_usi(best_m) == "R*5b");
   }
+  // 置換表を使い回しても（前の solve の項は世代で空とみなす）、新しい表で解くのと同じ結果・節点数・証明手になる
+  {
+    const char* sfens[] = {"9/8k/6G2/9/9/9/9/9/K8 b RG 1", "8k/9/9/9/9/9/9/9/K8 b G 1", "4k4/9/4G4/9/9/9/9/9/3L1L2K b P 1",
+                           "7k1/9/6G2/9/9/9/9/9/K8 b GS 1"};
+    DfPn shared(6);  // 小さい表で入れ替えも起こす
+    MateProblem prob;
+    for (int round = 0; round < 3; ++round)
+      for (const char* sf : sfens)
+        for (std::uint64_t nodes : {5, 50, 2000}) {
+          Position a, b;
+          CHECK(a.set_sfen(sf, PHASE_NORMAL) && b.set_sfen(sf, PHASE_NORMAL));
+          DfPn fresh(6);
+          Move ma = MOVE_NONE, mb = MOVE_NONE;
+          ProofResult ra = shared.solve(a, prob, true, nodes, &ma);
+          ProofResult rb = fresh.solve(b, prob, true, nodes, &mb);
+          CHECK(ra == rb && ma == mb && shared.nodes() == fresh.nodes());
+        }
+  }
   std::printf("%d passed, %d failed\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

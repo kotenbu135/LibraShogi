@@ -697,15 +697,14 @@ int SelfPlay::descend(Game& g) {
           }
         }
       }
-      for (size_t i = 0; i < g.path_moves.size(); ++i) sp.undo_move();
       ni = e.child;
       Node& child = g.nodes[ni];
-      if (!child.expanded) {
-        if (child.vloss > 0) return 3;  // 合流した先が評価待ち
-        g.leaf = ni;
-        for (Move m : g.path_moves) g.sp.do_move(m);
+      if (!child.expanded && child.vloss == 0) {
+        g.leaf = ni;  // g.sp は葉まで進めたまま返す
         return 1;
       }
+      for (size_t i = 0; i < g.path_moves.size(); ++i) sp.undo_move();
+      if (!child.expanded) return 3;  // 合流した先が評価待ち
       // 合流済み or 終端 → 値を逆伝播
       backprop(g, child, child.terminal ? child.terminal_value : (child.visits ? child.wsum / child.visits : child.net_value));
       return 0;

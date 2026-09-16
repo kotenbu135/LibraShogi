@@ -24,30 +24,20 @@ void MateProblem::moves(Position& pos, bool or_node, MoveList& out) {
     return;
   }
   out.n = 0;
-  for (Move m : all) {
-    pos.do_move(m);
-    bool chk = pos.in_check();
-    pos.undo_move();
-    if (chk) out.add(m);
-  }
+  for (Move m : all)
+    if (pos.gives_check(m)) out.add(m);
 }
 
 void attacking_drops(Position& pos, MoveList& out, bool with_pass) {
   out.n = 0;
   MoveList all;
   pos.legal_moves(all);
-  Color us = pos.turn(), them = ~us;
   bool pass_done[HAND_PT_NB] = {};
   MoveList passes;
   for (Move m : all) {
     PieceType pt = drop_type(m);
     bool liner = pt == ROOK || pt == BISHOP || pt == LANCE || pt == KNIGHT;
-    bool attacks = false;
-    if (liner) {
-      pos.do_move(m);
-      attacks = pos.king_attacked(them);
-      pos.undo_move();
-    }
+    bool attacks = liner && pos.gives_check(m);
     if (attacks) {
       out.add(m);
     } else if (with_pass && !pass_done[pt]) {
@@ -89,17 +79,19 @@ DfPn::Entry& DfPn::look(std::uint64_t key) {
   ++clock_;
   Entry* victim = b;
   for (int i = 0; i < WAYS; ++i) {
-    if (b[i].key == key) {
+    const bool live = b[i].gen == gen_;  // 前の solve の項は空として扱う（表を毎回消す代わり）
+    if (live && b[i].key == key) {
       b[i].age = clock_;
       return b[i];
     }
-    if (b[i].key == 0) {
+    if (!live || b[i].key == 0) {
       victim = &b[i];
       break;
     }
     if (b[i].age < victim->age) victim = &b[i];
   }
   victim->key = key;
+  victim->gen = gen_;
   victim->pn = victim->dn = 1;
   victim->age = clock_;
   return *victim;
@@ -120,7 +112,10 @@ static std::uint64_t node_key(const Position& pos) {
 ProofResult DfPn::solve(Position& pos, Problem& prob, bool or_node, std::uint64_t max_nodes, Move* best) {
   nodes_ = 0;
   max_nodes_ = max_nodes;
-  for (Entry& e : tt_) e = Entry();
+  if (++gen_ == 0) {  // 世代が一周したら本当に消す
+    for (Entry& e : tt_) e = Entry();
+    gen_ = 1;
+  }
   mid(pos, prob, or_node, INF - 1, INF - 1, 0);
   Entry& r = look(node_key(pos));
   ProofResult res = r.pn == 0 ? PROOF_PROVEN : r.dn == 0 ? PROOF_DISPROVEN : PROOF_UNKNOWN;
@@ -170,10 +165,16 @@ void DfPn::mid(Position& pos, Problem& prob, bool or_node, std::uint32_t thpn, s
     }
     return;
   }
-  std::vector<std::uint64_t> keys(ml.n);
+  // 子の鍵は深さごとに keys_ に積む（節点ごとに確保しない。再帰の間に伸びるので添字で引く）
+  struct KeyFrame {
+    std::vector<std::uint64_t>& v;
+    std::size_t base;
+    ~KeyFrame() { v.resize(base); }
+  } frame{keys_, keys_.size()};
+  keys_.resize(frame.base + std::size_t(ml.n));
   for (int i = 0; i < ml.n; ++i) {
     pos.do_move(ml.m[i]);
-    keys[i] = node_key(pos);
+    keys_[frame.base + i] = node_key(pos);
     pos.undo_move();
   }
   for (;;) {
@@ -185,7 +186,7 @@ void DfPn::mid(Position& pos, Problem& prob, bool or_node, std::uint32_t thpn, s
       pn = INF;
       dn = 0;
       for (int i = 0; i < ml.n; ++i) {
-        Entry& c = look(keys[i]);
+        Entry& c = look(keys_[frame.base + i]);
         if (c.pn < best_v) {
           second_v = best_v;
           best_v = c.pn;
@@ -201,7 +202,7 @@ void DfPn::mid(Position& pos, Problem& prob, bool or_node, std::uint32_t thpn, s
       pn = 0;
       dn = INF;
       for (int i = 0; i < ml.n; ++i) {
-        Entry& c = look(keys[i]);
+        Entry& c = look(keys_[frame.base + i]);
         if (c.dn < best_v) {
           second_v = best_v;
           best_v = c.dn;

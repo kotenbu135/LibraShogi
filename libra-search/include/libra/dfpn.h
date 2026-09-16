@@ -56,11 +56,14 @@ class DfPn {
     std::uint64_t key = 0;
     std::uint32_t pn = 1, dn = 1;
     std::uint32_t age = 0;
+    std::uint32_t gen = 0;  // 書いた solve の世代。gen_ と違えば空
   };
   std::vector<Entry> tt_;
   std::uint64_t mask_;
   std::uint64_t nodes_ = 0, max_nodes_ = 0;
   std::uint32_t clock_ = 0;
+  std::uint32_t gen_ = 0;
+  std::vector<std::uint64_t> keys_;  // mid の子の鍵（深さごとに積む）
   int max_depth_ = 64;
   Entry& look(std::uint64_t key);
   void mid(Position& pos, Problem& prob, bool or_node, std::uint32_t thpn, std::uint32_t thdn, int depth);
