@@ -125,6 +125,12 @@ decisions.md 2026-09-15 の同名の行。claude.ai の設計案の 1 行「分�
 | `libra-net/libra_net/losses.py` | どこからも読まれていない。書いてある損失（価値は z の 1 点、V̂41 は期待値の二乗誤差）と、実際に学習で使う `trainer.py` の損失（`soft_wdl` の交差エントロピー）が違う。**2026-09-15 に削除した（§4.4 (d)）** |
 | docs/protocol.md の Sims_Normal | 既定 400 と書いてあるが、エンジンの既定は 800（Sims_Fuseki も 200 と書いてあり、実装は 400）。**2026-09-15 に実装に合わせた（§4.4 (d)）** |
 
+### 2.7 計測（2026-09-17 に追加）
+
+| 項目 | 今の値・形 | 出所 | 文献・計測との対応 | 区分 |
+|---|---|---|---|---|
+| 同じネットの自己対局の較正（`libra calib`、`calib.jsonl`） | 全読みの手の `root_q` を得点の予測にして結果と 10 区間で比べる。3 手目・布石／本将棋 × 手番、ECE・MCE・偏り・Brier。証明済み（\|q\|=1）とリーグの対局は除く。最新 20,000 局、60 分ごと | decisions 9/17（Jev [TypeSafe] の「確率を当たる頻度に合わせる」考え方から。手法の出典なし、ユーザーの了承「足す」） | 定義は [Guo17] §2 の信頼度曲線・ECE・MCE を、最上位の選択肢の確信度ではなく手番側の得点の予測に当てはめた（区間は論文の 15 でなく `libra eval` と同じ 10）。確かめる計測はこの曲線そのもの（measurements 9/17 08:40） | 一部（区間 10・20,000 局・60 分は Claude が決めた値） |
+
 ---
 
 ## 3. 読めなかった資料
@@ -225,6 +231,8 @@ decisions.md 2026-09-15 の同名の行。claude.ai の設計案の 1 行「分�
 
 ## 参考文献
 
+- [Guo17] Guo, Pleiss, Sun, Weinberger, On Calibration of Modern Neural Networks (ICML 2017, arXiv:1706.04599) §2. https://ar5iv.labs.arxiv.org/html/1706.04599
+- [TypeSafe] TypeSafe AI, Introducing System One Models & Jev（2026-09-15、宣伝文。RLCD の方法は非公開）. https://typesafe.ai/blog/introducing-system-one-models-and-jev
 - [Silver18] Silver et al., A general reinforcement learning algorithm that masters chess, shogi, and Go through self-play (arXiv:1712.01815). https://ar5iv.labs.arxiv.org/html/1712.01815
 - [Wu19] Wu, Accelerating Self-Play Learning in Go (arXiv:1902.10565). https://ar5iv.labs.arxiv.org/html/1902.10565
 - [KGM] KataGo Methods. https://github.com/lightvector/KataGo/blob/master/docs/KataGoMethods.md
