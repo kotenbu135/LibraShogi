@@ -15,7 +15,7 @@
 ## 構成
 libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX 書き出し）/ libra-search（MCGS、df-pn、配置詰み）/ libra-engine（USI 拡張エンジン libra / libra.exe、ONNX Runtime）/ libra-league（自己対局・学習ランナー、搾取者、評価、計測ハーネス、Python 版エンジン）/ libra-scale（玉配置表）/ libra-cloud（vast.ai の自己対局ワーカー）/ docs / data（マニフェストのみ）/ bin（起動スクリプト）/ tools / cmake
 
-ビルド・起動・テスト・エンジンの駆動手順は `.claude/skills/run-librashogi/SKILL.md`（`/run-librashogi`）が正。ここに書いてある通りに動かす。
+ビルド・起動・テスト・エンジンの駆動手順は `.claude/skills/run-librashogi/SKILL.md`（`/run-librashogi`）が正。ここに書いてある通りに動かす。人向けの同じ手順は docs/getting-started.md で、コマンドを変えるときは両方を直す。
 
 ## 作業の進め方
 1. **1 タスク 1 ブランチ**。`git checkout -b <task>` → 実装 → テスト全通過 → `git checkout main && git merge --ff-only <task> && git push origin main && git branch -d <task>`。PR は作らない（単独開発）。CI（.github/workflows/ci.yml、ubuntu-latest）が緑であることを push 後に `gh run list --limit 2` で確かめる。文書だけの変更（`docs/**`、`*.md`、`LICENSES/**`、`NOTICE`）では CI は走らない（`paths-ignore`）ので、確かめなくてよい。

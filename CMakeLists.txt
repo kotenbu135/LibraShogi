@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 cmake_minimum_required(VERSION 3.20)
 project(LibraShogi LANGUAGES CXX)
 option(LIBRA_BUILD_PYTHON "Build the pybind11 modules" ON)

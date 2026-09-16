@@ -34,7 +34,7 @@ touch $D/STOP                                                                   
 - **GPU**: Windows 側のアプリと GPU を共有すると大きく遅くなる（2026-09-15 に専有の 0.30 倍。measurements.md）。回す間は GPU を使うアプリを閉じる。
 - **置く側**: `--eps-place` を付けると、精度で止まり区間が 0.5 を含んだ組だけに打ち足す。`balanced` は、区間が 0.5 を含んだまま止まった組。
 - **局の打ち方**: 自己対局と同じエンジン（同時 512 局）で、打ち切っていない組の玉 2 手を布石として渡す。棋譜は 1 局 1 行で `games/*.jsonl.gz` に残る（CC0）。
-- **手元以外のワーカー**: 局を `inbox/` に置けば、手元の run が一緒に数える（ファイルの形は `seqrun.py` の冒頭）。
+- **手元以外のワーカー**: 局を `inbox/` に置けば、手元の run が一緒に数える（ファイルの形は `seqrun.py` の冒頭）。別マシンで打つだけの `seq worker` があり、vast.ai で回す配管は `libra-cloud/libra_cloud/scale_bridge.py`（libra-cloud/README.md）。
 - **表（version 1）**: build の表に、`verify`（組ごとの局数・区間・打ち切りの理由）、`choose`（選ぶ側の手番）、`forced`（後手玉が四段目の組は先手）、`symmetric`（対称な組の要約）を足す。
 
 ## scale.json

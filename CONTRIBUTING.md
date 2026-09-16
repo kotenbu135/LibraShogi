@@ -25,10 +25,16 @@ CLA は無い。将来ライセンスを変える（例: Apache-2.0 → 別ラ�
 ## 進めかた
 
 - 1 タスク 1 ブランチ。テストが通ってから `main` へマージ
-- テストを先に書く。C++ と Python のテストは変更のたびに全部通す（コマンドは [README.md](README.md) の「ビルドと実行」、CI と同じ）
+- テストを先に書く。C++ と Python のテストは変更のたびに全部通す（コマンドは [docs/getting-started.md](docs/getting-started.md) §3、CI と同じ）
 - コミットは小さく、メッセージは「何を・なぜ」
 - 決定は `docs/decisions.md` に 1 行、実測値は `docs/measurements.md` に追記
-- SPDX 識別子をソースのヘッダに付ける: `// SPDX-License-Identifier: Apache-2.0`（シェル・Python は `#`）
+- SPDX 識別子をソースのヘッダに付ける: `// SPDX-License-Identifier: Apache-2.0`（シェル・Python・CMake は `#`）
+- 文書の置き場: 手順は docs/getting-started.md（入門）と docs/runbook.md（運用）、GUI との接続は docs/protocol.md、ルールは docs/rules.md。計画書（docs/libra-design.md・docs/libra-local.md）は書き換えず、差異は decisions.md に書く
+
+## 質問・不具合・提案
+
+[Issues](https://github.com/kotenbu135/LibraShogi/issues) へ。ルールの解釈は docs/rules.md の節を示す（天秤将棋のルールそのものの変更はルール設計者の判断）。
+手法や設定値の変更の提案は、採用の経緯（docs/decisions.md、docs/method-evidence.md）を読んだうえで、根拠（文献・計測）を添える。
 
 ## Pull Request
 

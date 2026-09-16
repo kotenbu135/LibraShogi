@@ -31,5 +31,6 @@
 | `test_exploiter.py` | 搾取者モード（相手の手のマスク）と布石 |
 | `test_league_pool.py` | 過去の搾取者のプールと PFSP |
 | `test_workers.py` | 対局ファイルの書式と検査、重みの配布、inbox の取り込み |
+| `test_trainer.py` | 学習の torch.compile（CPU では eager のまま、state_dict の鍵が変わらない、CUDA では compile と eager の勾配が一致） |
 | `test_infer.py` | 自己対局の推論の写し（重みの更新、形が変わったときの作り直し） |
 | `test_harness.py` | 計測ハーネス（`random_usi.py` のランダム USI エンジンと対局） |

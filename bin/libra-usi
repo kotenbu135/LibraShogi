@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # Libra の USI 拡張エンジン（C++ 版 libra、ONNX Runtime）。desktop やハーネスから起動する。
 # モデルは環境変数 LIBRA_MODEL（既定 ~/libra-run/ls/checkpoints/latest.onnx。`bin/libra export` で作る）。
 # C++ 版が未ビルドなら Python 版（bin/libra-usi-py）にフォールバックする。

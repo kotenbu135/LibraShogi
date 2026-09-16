@@ -11,6 +11,7 @@ vast.ai で自己対局ワーカー（`libra worker`、libra-league/libra_league
 | `bench/host_setup.sh` | ホスト（`pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime`）で librashogi / librasearch だけをビルドし、GPU と CPU を記録 |
 | `bench/host_bench.sh` | ホストでワーカーを `--detached` で N 分回し、`/root/out/report.json` に局/日 |
 | `vast_bench.py` | GPU を 1 台オンデマンドで借りて上の 2 つを回し、結果を持ち帰る。失敗・中断でも必ずインスタンスを消す |
+| `libra_cloud/scale_bridge.py`, `bench/host_scale.sh` | 玉配置表の全組の検証対局（`libra-scale seq`）を vast.ai のホストで打たせるための同期ループとホスト側の常駐スクリプト（`libra-scale seq worker`）。手元の `active.json` を送り、棋譜を回収する |
 
 ## 実測の手順
 
@@ -63,3 +64,14 @@ PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-clo
 検査で確かめるのは記録の骨格（玉の配置と全手の合法性、終局の判定と手数、sfen41、方策の添字が合法手であること）まで。探索の出力（方策の確率・価値）の改ざんは検出できない。
 
 束は git の HEAD から作るので、libra-league や libra-cloud を変えたらコミットしてから作り直す。局/日は起動 300 秒後以降に書かれた対局ファイルの間隔で出す（512 局を同時に始めるので、最初の終局はまとまって遅れる）。借りた時間と見積もり費用は `result.json`。終わったら `show_instances` が空であることを確かめる。
+
+## テスト（`tests/`）
+
+| ファイル | 内容 |
+|---|---|
+| `test_bench.py` | オファーの選別と落ちた理由、入札の実効単価、局/日の計算、束の作成、ホストのスクリプトの構文、ssh の経路 |
+| `test_bridge.py` | ブリッジ（重みと布石の送信、対局ファイルの回収と検査、送信の失敗と再試行、停止と回収） |
+| `test_scale_bridge.py` | 検証対局のブリッジ（往復、ワーカーの死亡と回収の打ち切り） |
+| `test_vast_cli.py` | `bin/libra-vast` の各サブコマンド（学習側の確認、二重起動の拒否、費用の見積もり、履歴） |
+
+vast.ai の API には触れない（すべて偽の SDK・ssh で回す）。

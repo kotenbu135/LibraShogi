@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # libra-vast コマンド。vast.ai の自己対局ワーカーを起動・停止・確認する（libra-cloud/libra_cloud/vast_cli.py）。
 # vastai の SDK を入れた ~/.venvs/vastai の Python で動かす（libra-cloud/README.md）。
 set -euo pipefail

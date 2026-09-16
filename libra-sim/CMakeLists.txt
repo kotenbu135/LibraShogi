@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 cmake_minimum_required(VERSION 3.20)
 project(libra_sim LANGUAGES CXX)
 
@@ -36,9 +37,6 @@ if(LIBRA_BUILD_PYTHON)
   endif()
   pybind11_add_module(_sim python/bindings.cpp)
   target_link_libraries(_sim PRIVATE libra_sim)
-  if(SKBUILD)
-    install(TARGETS _sim DESTINATION librashogi)
-  else()
-    set_target_properties(_sim PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/python/librashogi)
-  endif()
+  # pip install はしない（PYTHONPATH で読む。docs/getting-started.md §1）。モジュールはソース側の python/librashogi に置く
+  set_target_properties(_sim PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/python/librashogi)
 endif()

@@ -8,4 +8,4 @@
 - [ ] 既存の将棋 AI のコード・評価関数・重み・棋譜・評価値を含んでいない（クリーンルーム方針）
 - [ ] 秘密情報（API キー、SSH 鍵、ホストの IP）を含んでいない
 - [ ] コミットに `git commit -s`（DCO）の Signed-off-by を付けた
-- [ ] C++ と Python のテストが通る（README.md の「ビルドと実行」のテストのコマンド）
+- [ ] C++ と Python のテストが通る（docs/getting-started.md §3 のコマンド）

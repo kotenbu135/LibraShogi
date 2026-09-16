@@ -6,6 +6,7 @@ description: Build, run, test, and drive LibraShogi (天秤将棋 AI「Libra」)
 LibraShogi は 天秤将棋の AI。動かす対象は 3 つ: (1) C++ の USI エンジン `build/libra-engine/libra`（標準入出力で USI を話す）、
 (2) 自己対局＋学習ランナー `bin/libra run`（状態は `~/libra-run/<run-id>/`）、(3) Python バインディング `librashogi` / `librasearch`。
 エージェントは `.claude/skills/run-librashogi/driver.py` で 3 つとも駆動できる。パスはすべてリポジトリ root からの相対。
+人向けの手順は `docs/getting-started.md`（Prerequisites / Build / Test はそれと同じコマンド。変えるときは両方を直す）。
 
 ## Prerequisites
 
