@@ -116,6 +116,9 @@ ProofResult DfPn::solve(Position& pos, Problem& prob, bool or_node, std::uint64_
     for (Entry& e : tt_) e = Entry();
     gen_ = 1;
   }
+  // 年齢は同じ solve の項どうしでしか比べないので、solve ごとに数え直しても入れ替えは同じ。
+  // 表をスレッドで共有すると clock_ の進みが速く、数え続けると solve の途中で一周して入れ替えを誤る
+  clock_ = 0;
   mid(pos, prob, or_node, INF - 1, INF - 1, 0);
   Entry& r = look(node_key(pos));
   ProofResult res = r.pn == 0 ? PROOF_PROVEN : r.dn == 0 ? PROOF_DISPROVEN : PROOF_UNKNOWN;

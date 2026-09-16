@@ -69,6 +69,13 @@ Node make_node(std::uint64_t key) {
   return n;
 }
 
+// 証明探索の置換表はスレッドごとに 1 つ持つ。solve は前の solve の項を空として扱うので、対局ごとに持つのと結果は同じ。
+// 対局ごと（512 局で約 190 MiB）だと毎回離れた冷たいメモリを触るので、同じスレッドが続けて解く問題で同じ表を使い回す
+DfPn& thread_dfpn() {
+  thread_local DfPn d{12};
+  return d;
+}
+
 float gumbel_noise(std::mt19937_64& rng) {
   std::uniform_real_distribution<float> u(1e-7f, 1.0f - 1e-7f);
   return -std::log(-std::log(u(rng)));
@@ -103,7 +110,6 @@ struct SelfPlay::Game {
   SearchResult result;
   std::vector<GameRecord> done;  // 終局した記録（gather で集める）
   SelfPlayStats st;              // この対局の統計（gather で集める）
-  DfPn dfpn{12};
   MateProblem mate_prob;
   Ruling41Problem ruling_prob;
   Mate41Problem mate41_prob;
@@ -455,9 +461,9 @@ static bool fuseki_proof(SelfPlay::Game& g, Position& pos, const SearchConfig& c
   // 先手の裁定（後手玉が当たったまま 40 手完了）
   {
     Move m = MOVE_NONE;
-    ProofResult r = g.dfpn.solve(pos, g.ruling_prob, mover == BLACK, cfg.proof_nodes, &m);
+    ProofResult r = thread_dfpn().solve(pos, g.ruling_prob, mover == BLACK, cfg.proof_nodes, &m);
     g.st.proof_calls++;
-    g.st.proof_nodes += g.dfpn.nodes();
+    g.st.proof_nodes += thread_dfpn().nodes();
     if (r == PROOF_PROVEN) {
       v = mover == BLACK ? 1.0f : -1.0f;
       if (best && mover == BLACK) *best = m;
@@ -466,9 +472,9 @@ static bool fuseki_proof(SelfPlay::Game& g, Position& pos, const SearchConfig& c
   // 41 手目に先手に合法手なし（後手の勝ち）
   if (v == 0.0f) {
     Move m = MOVE_NONE;
-    ProofResult r = g.dfpn.solve(pos, g.mate41_prob, mover == WHITE, cfg.proof_nodes, &m);
+    ProofResult r = thread_dfpn().solve(pos, g.mate41_prob, mover == WHITE, cfg.proof_nodes, &m);
     g.st.proof_calls++;
-    g.st.proof_nodes += g.dfpn.nodes();
+    g.st.proof_nodes += thread_dfpn().nodes();
     if (r == PROOF_PROVEN) {
       v = mover == WHITE ? 1.0f : -1.0f;
       if (best && mover == WHITE) *best = m;
@@ -529,7 +535,7 @@ Move SelfPlay::root_proof(Game& g, float& value) {
   value = 0.0f;
   if (g.pos.phase() == PHASE_NORMAL && cfg_.mate_nodes_root > 0) {
     Move m = MOVE_NONE;
-    if (g.dfpn.solve(g.pos, g.mate_prob, true, cfg_.mate_nodes_root, &m) == PROOF_PROVEN && m != MOVE_NONE) {
+    if (thread_dfpn().solve(g.pos, g.mate_prob, true, cfg_.mate_nodes_root, &m) == PROOF_PROVEN && m != MOVE_NONE) {
       g.st.mate_found++;
       value = 1.0f;
       return m;
@@ -899,8 +905,8 @@ int SelfPlay::use_cached(Game& g, std::uint64_t h, std::uint32_t aux) {
   if (it == g.eval_cache.end() || it->second.key != g.nodes[g.leaf].key || it->second.aux != aux) return 0;
   g.st.cache_hits++;
   if (g.proof_state == 1 && g.pos.phase() == PHASE_FUSEKI) {
-    // 布石の根の証明探索は、木の中の証明探索と df-pn の置換表を共有するので、先に木を進めると結果が変わりうる。
-    // 評価に出さないのでここで解く（proof() を呼ばなかった apply と同じ順序）
+    // 布石の根の証明探索は、評価に出さないのでここで解く（proof() を呼ばなかった apply と同じ順序）。先に木を進めると、
+    // 証明できて読みを捨てたときに対局の乱数（Gumbel ノイズ・全読みの抽選）を余分に使って棋譜が変わる
     g.proof_move = root_proof(g, g.proof_value);
     g.proof_state = 0;
     if (g.proof_move != MOVE_NONE) {
