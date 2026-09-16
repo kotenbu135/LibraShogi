@@ -65,5 +65,11 @@ bin/libra-usi        # USI エンジン（モデルは ~/libra-run/ls/checkpoint
 
 ## ライセンス
 
-コード Apache-2.0（[LICENSE](LICENSE)）／文書 CC BY 4.0／自己対局データ CC0 1.0／重み Apache-2.0。
+| 範囲 | ライセンス | 全文 |
+|---|---|---|
+| コード（`libra-*/`、`bin/`、`tools/`、`cmake/`） | Apache-2.0 | [LICENSE](LICENSE) |
+| 文書（`docs/` 配下と各 `*.md`） | CC BY 4.0 | [LICENSES/CC-BY-4.0.txt](LICENSES/CC-BY-4.0.txt) |
+| 自己対局データ（棋譜 JSONL）・玉配置表（`scale.json`） | CC0 1.0 | [LICENSES/CC0-1.0.txt](LICENSES/CC0-1.0.txt) |
+| 学習済みの重み（`.pt`・`.onnx`） | Apache-2.0（モデルカード付き） | [LICENSE](LICENSE) |
+
 依存物は [LICENSES/README.md](LICENSES/README.md)。貢献は [CONTRIBUTING.md](CONTRIBUTING.md)（DCO、クリーンルーム方針）。

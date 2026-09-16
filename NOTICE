@@ -8,10 +8,10 @@ fuseki-shogi-ai, fuseki-shogi-web, etc.).
 
 Licenses:
   - Source code:               Apache License 2.0 (see LICENSE)
-  - Documentation (docs/):     CC BY 4.0
-  - Self-play game data:       CC0 1.0
+  - Documentation (docs/):     CC BY 4.0 (see LICENSES/CC-BY-4.0.txt)
+  - Self-play game data:       CC0 1.0 (see LICENSES/CC0-1.0.txt)
   - Trained weights:           Apache License 2.0 (with model card)
-  - King-placement table JSON: CC0 1.0
+  - King-placement table JSON: CC0 1.0 (see LICENSES/CC0-1.0.txt)
 
 Third-party components and their licenses are listed in LICENSES/README.md.
 If any code is adapted from KataGo (MIT), the attribution is recorded below.

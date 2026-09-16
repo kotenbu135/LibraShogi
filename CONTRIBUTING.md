@@ -13,6 +13,10 @@ LibraShogi は天秤将棋の AI をゼロから作るプロジェクトで、�
 手法・論文の参照は自由。KataGo（MIT）のコードを参考にした場合は `NOTICE` に著作権表示を足す。
 依存を追加するときは `LICENSES/README.md` に 1 行足し、全文を `LICENSES/` に置く。
 
+外部から取得したファイルをリポジトリに入れないのが原則（依存物の取得は `tools/` のスクリプトでハッシュを固定し、
+`third_party/` は gitignore する）。唯一の例外が `LICENSES/` に置くライセンスの全文で、法文は改変せずそのまま
+配る必要があるため、取得元 URL と SHA-256 を `LICENSES/README.md` に記したうえでコミットする。
+
 ## DCO（Developer Certificate of Origin）
 
 コミットには `git commit -s` で Signed-off-by を付ける。これは https://developercertificate.org/ の DCO 1.1 に同意したことを意味する。
