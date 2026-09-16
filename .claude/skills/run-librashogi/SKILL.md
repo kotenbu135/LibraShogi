@@ -94,7 +94,7 @@ WinForms の GUI。人はデスクトップの `libra-console.bat` で開く。�
 
 ```bash
 tools/windows/install.sh
-WINUSER=$(powershell.exe -NoProfile -Command '$env:USERNAME' | tr -d '\r')   # この開発機では sakis
+WINUSER=$(powershell.exe -NoProfile -Command '$env:USERNAME' | tr -d '\r')   # Windows のユーザー名
 WIN="C:\\Users\\$WINUSER\\libra"; S="$WIN\\libra-console.ps1"; SHOT="$WIN\\console-shot.png"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot "$SHOT"   # 1 回更新して PNG 保存、要約を表示して終了（約 5 秒）
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -Do 'ls:status'     # ボタンと同じ呼び出しだけ実行（status/stop/eval-now/match-now。起動は含まない。本番の run に stop を送らない）

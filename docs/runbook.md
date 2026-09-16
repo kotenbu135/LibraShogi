@@ -39,7 +39,7 @@ docs/libra-local.md §7〜8 の実装。状態はすべて `~/libra-run/<run-id>
 `--run <id>` で run-id、`--root <dir>` で親ディレクトリを変えられる（既定 `~/libra-run/ls`）。
 `run --config path.toml` は初回だけ有効。
 
-Windows 側: `%USERPROFILE%\libra\`（この開発機では `C:\Users\sakis\libra\`）に `libra-run.bat`（本体 ls）/ `libra-run-lx.bat`（搾取者 lx）と、**ls と lx の両方に効く** `libra-stop.bat` / `libra-status.bat`。デスクトップに status / stop の写し（`install.sh` は前に写した libra-pause.bat / libra-resume.bat を消す）。**bat / vbs は `tools/windows/*.in` から `install.sh` が生成する**（ディストロ名と WSL 内の `bin/libra` の場所を埋める）。リポジトリを別の場所に置いたときや、ディストロを入れ替えたときは `install.sh` を回し直す。
+Windows 側: `%USERPROFILE%\libra\` に `libra-run.bat`（本体 ls）/ `libra-run-lx.bat`（搾取者 lx）と、**ls と lx の両方に効く** `libra-stop.bat` / `libra-status.bat`。デスクトップに status / stop の写し（`install.sh` は前に写した libra-pause.bat / libra-resume.bat を消す）。**bat / vbs は `tools/windows/*.in` から `install.sh` が生成する**（ディストロ名と WSL 内の `bin/libra` の場所を埋める）。リポジトリを別の場所に置いたときや、ディストロを入れ替えたときは `install.sh` を回し直す。
 
 ## 3. Windows Update で再起動しても続くようにする
 
@@ -104,7 +104,7 @@ desktop（天秤将棋GUI 0.10.3、`%LOCALAPPDATA%\天秤将棋GUI\tenbin-shogi-
 
 最新のネットで指すには管理コンソールの「desktop で対局」を押す。WSL の `~/libra-run/ls/checkpoints/latest.onnx` をそのフォルダの `libra.onnx` に写し（`libra.onnx.json` に step と時刻を残す）、desktop を起動する。desktop が既に起動しているときはモデルだけ更新するので、エンジンを立て直す（desktop を開き直す）と新しいネットになる。対局画面でエンジンに「LibraShogi」を選ぶ。無人で行うには `powershell -File libra-console.ps1 -UpdateDesktopModel`。
 
-GPU（CUDA）で読ませたいときは「エンジン」→「実行ファイルを選んで追加」で `C:\Windows\System32\wsl.exe` を選び、引数に `-d <ディストロ> -- <repo>/bin/libra-usi` を入れる（この開発機では `-d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra-usi`。モデルは常に latest.onnx、学習中の GPU と共有）。
+GPU（CUDA）で読ませたいときは「エンジン」→「実行ファイルを選んで追加」で `C:\Windows\System32\wsl.exe` を選び、引数に `-d <ディストロ> -- <repo>/bin/libra-usi` を入れる（例: `-d Ubuntu-24.04 -- /home/<user>/LibraShogi/bin/libra-usi`。モデルは常に latest.onnx、学習中の GPU と共有）。
 
 ## 玉配置表（libra-scale）
 

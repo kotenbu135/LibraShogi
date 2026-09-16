@@ -43,7 +43,7 @@ libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX �
 - WSL2 Ubuntu-24.04（ディストリ名は `Ubuntu-24.04`）、RAM 32 GB、RTX 5070 Ti、Ryzen 9 9950X3D。データは WSL 内の ext4。
 - **sudo が使えない**（apt 不可）。cmake / ninja / pybind11 / pytest / torch / onnxruntime は `.venv` の pip、node は `~/.nvm`。apt が要るものはユーザーに依頼する（mingw-w64 は導入済み）。
 - Python パッケージは pip install しない。`PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-scale`（bin/ のスクリプトと driver は自分で通す）。
-- Windows 版 libra.exe は WSL の mingw クロスビルド（CI も ubuntu-latest で同じ mingw-w64 posix のクロスビルドを確かめる）。置き場所は `C:\Users\sakis\libra\engine\`。
+- Windows 版 libra.exe は WSL の mingw クロスビルド（CI も ubuntu-latest で同じ mingw-w64 posix のクロスビルドを確かめる）。置き場所は `%USERPROFILE%\libra\engine\`。
 - 相手側の資産の所在とハッシュは docs/protocol.md §5。desktop の clone は `~/tenbin-shogi-desktop`（wasm は GPL、黒箱テストの相手としてだけ実行）。
 - 一時ファイルはセッションの scratchpad に置き、リポジトリや `~/libra-run` を汚さない。
 
