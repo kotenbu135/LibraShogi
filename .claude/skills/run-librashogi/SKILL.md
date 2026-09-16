@@ -89,22 +89,23 @@ bin/libra-scale show             # 玉配置表 ~/libra-run/ls/scale/scale.json
 
 ### Windows の管理コンソール（tools/windows/libra-console.ps1）
 
-WinForms の GUI。人はデスクトップの `libra-console.bat` で開く。エージェントは WSL から `powershell.exe` で無人実行できる（`tools/windows/install.sh` で `C:\Users\sakis\libra\` に写してから。UNC パスからは実行しない）:
+WinForms の GUI。人はデスクトップの `libra-console.bat` で開く。エージェントは WSL から `powershell.exe` で無人実行できる（`tools/windows/install.sh` で `%USERPROFILE%\libra\` に写してから。UNC パスからは実行しない）。bat / vbs はこのとき `tools/windows/*.in` から生成され、ディストロ名と WSL 内の `bin/libra` の場所は `libra-paths.json` に書かれる:
 
 ```bash
 tools/windows/install.sh
-S='C:\Users\sakis\libra\libra-console.ps1'
-powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot 'C:\Users\sakis\libra\console-shot.png'   # 1 回更新して PNG 保存、要約を表示して終了（約 5 秒）
+WINUSER=$(powershell.exe -NoProfile -Command '$env:USERNAME' | tr -d '\r')   # この開発機では sakis
+WIN="C:\\Users\\$WINUSER\\libra"; S="$WIN\\libra-console.ps1"; SHOT="$WIN\\console-shot.png"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot "$SHOT"   # 1 回更新して PNG 保存、要約を表示して終了（約 5 秒）
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -Do 'ls:status'     # ボタンと同じ呼び出しだけ実行（status/stop/eval-now/match-now。起動は含まない。本番の run に stop を送らない）
-powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot 'C:\Users\sakis\libra\console-shot.png' -Tab 'lx,Elo'   # タブを選ぶ（上: ls, lx, クラウド, クラウド履歴 / グラフ: 局/日, Elo, 対外対局, 学習, 終局内訳, 手数, ログ）。カンマで両方
-powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot 'C:\Users\sakis\libra\console-shot.png' -Size 540x900   # 大きさを指定（最小 540x900。-Screenshot のときは前回の配置を戻さない）
+powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot "$SHOT" -Tab 'lx,Elo'   # タブを選ぶ（上: ls, lx, クラウド, クラウド履歴 / グラフ: 局/日, Elo, 対外対局, 学習, 終局内訳, 手数, ログ）。カンマで両方
+powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot "$SHOT" -Size 540x900   # 大きさを指定（最小 540x900。-Screenshot のときは前回の配置を戻さない）
 ```
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -UpdateDesktopModel   # desktop に登録した libra.exe の libra.onnx を latest.onnx に置き換える（desktop は起動しない）
 
 要約行には `metrics=`（metrics.jsonl の点数）`evals=` `matches=` `archives=` も出る。自動計測は `bin/libra eval-now` / `match-now`（次のチェックポイントで実行、`~/libra-run/ls/auto.log`）。
 
-PNG は `/mnt/c/Users/sakis/libra/console-shot.png` を Read で見る。`-Do` の出力は `bin/libra` の出力そのもの（`STOP set` など）。
+PNG は `/mnt/c/Users/$WINUSER/libra/console-shot.png` を Read で見る。`-Do` の出力は `bin/libra` の出力そのもの（`STOP set` など）。無人実行（`-Screenshot` / `-Do` / `-UpdateDesktopModel`）の失敗は stderr に出て終わる（GUI ではメッセージボックス）。
 
 ## Test
 
@@ -139,4 +140,4 @@ PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-sca
 - **`LIBRA_ORT_DIR に ONNX Runtime の展開先を指定してください`**: `tools/fetch_onnxruntime.sh linux-gpu`（または `linux-cpu`）を先に実行し、`-DLIBRA_ORT_DIR` にその展開先を渡す。
 - **`ONNX Runtime library not found`**: `build/libra-engine/` に `libonnxruntime.so.1` が写っていない。`cmake --build build` をやり直す（POST_BUILD で写す）。
 - **driver の `wait()` が毎回同じ `bestmove` を返す**: 受信行の走査位置を保持していなかった（修正済み、`self.cursor`）。
-- **Windows の bat が動かない**: bat は ASCII のみにする（UTF-8 の日本語コメントは cmd の Shift-JIS 解釈で改行を壊す）。WSL から試すときは `cmd.exe /c "C:\Users\sakis\libra\libra-status.bat"` のように絶対パスで。
+- **Windows の bat が動かない**: bat は ASCII のみにする（UTF-8 の日本語コメントは cmd の Shift-JIS 解釈で改行を壊す）。WSL から試すときは `cmd.exe /c "C:\Users\$WINUSER\libra\libra-status.bat"` のように絶対パスで。bat / vbs は生成物なので、直すのは `tools/windows/*.in` のひな形。

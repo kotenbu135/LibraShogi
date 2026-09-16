@@ -6,6 +6,8 @@
 # クラウド タブ: bin/libra-vast で vast.ai の自己対局ワーカーを起動 / 停止し、段階・回収局数・費用・残高を表示する。
 # クラウド履歴 タブ: bin/libra-vast history で過去のセッションごとの費用・有効局・100 万局あたりの費用と今月の合計を表示する。
 # 起動: libra-console.bat（powershell -ExecutionPolicy Bypass -File libra-console.ps1）
+# 置き場所（ディストロ名・WSL 内の bin/libra・run の置き場）は同じフォルダの libra-paths.json から読む。
+# これは tools/windows/install.sh が書く。コマンド行の -Distro / -Libra などを渡せばそちらが優先される。
 # 自動テスト: -Screenshot C:\path\shot.png で 1 回更新して画面を PNG に保存し終了する（要約を stdout に出す）。
 #             -Tab <名前>[,<名前>] で保存時に表示するタブを選ぶ（上のタブ: ls, lx, クラウド, クラウド履歴。グラフ: 局/日, Elo, 対外対局, 学習, 終局内訳, 手数, ログ）。
 #             -Size 600x1200 でウィンドウの大きさを指定する（-Screenshot のときは前回の位置と大きさを復元しない）。
@@ -13,8 +15,8 @@
 #             -Do "vast:status" で bin/libra-vast を呼ぶ（例: vast:offers --gpu RTX_5070_Ti）。
 #             -UpdateDesktopModel で desktop（天秤将棋GUI）に登録した libra.exe のモデルを最新の latest.onnx に置き換えて終了する。
 param(
-    [string]$Distro = "Ubuntu-24.04",
-    [string]$Libra = "/home/sakis/LibraShogi/bin/libra",
+    [string]$Distro = "",        # 空なら wsl.exe の既定のディストロ（libra-paths.json で埋まる）
+    [string]$Libra = "",         # WSL 内の bin/libra（libra-paths.json で埋まる）
     [string[]]$Runs = @("ls", "lx"),
     [int]$IntervalSec = 15,
     [int]$HistorySec = 300,
@@ -23,24 +25,60 @@ param(
     [string]$Tab = "",
     [string]$Size = "",
     [string]$Do = "",
-    [string]$RunRoot = "/home/sakis/libra-run",
+    [string]$RunRoot = "",       # WSL 内の run の置き場（libra-paths.json で埋まる）
     [string]$ModelRun = "ls",
-    [string]$LibraVast = "/home/sakis/LibraShogi/bin/libra-vast",
+    [string]$LibraVast = "",     # WSL 内の bin/libra-vast（libra-paths.json で埋まる）
     [int]$VastAccountSec = 300,
     [double]$UsdJpy = 150,        # クラウド履歴の月の費用を円に直す目安
     [int]$BudgetJpy = 10000,      # 追加の計算費用の月の上限（docs/decisions.md 2026-09-13 のユーザーの決定）
-    [string]$DesktopExe = "C:\Users\sakis\AppData\Local\天秤将棋GUI\tenbin-shogi-gui.exe",
+    [string]$DesktopExe = "",    # 天秤将棋GUI の exe（libra-paths.json か %LOCALAPPDATA% から）
     [string]$DesktopEngineDir = (Join-Path $env:APPDATA "com.fusekishogi.tenbin\engines\libra\engine"),
     [switch]$UpdateDesktopModel
 )
 $ErrorActionPreference = "Stop"
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
-# 非表示の PowerShell で起動されるので、途中の例外はメッセージボックスで見せる
+# 非表示の PowerShell で起動されるので、途中の例外はメッセージボックスで見せる。
+# ただし無人実行（-Screenshot / -Do / -UpdateDesktopModel）では誰も押せないので stderr に出して終わる
+$script:Headless = [bool]($Screenshot -or $Do -or $UpdateDesktopModel)
 trap {
+    if ($script:Headless) {
+        [Console]::Error.WriteLine($_.ToString())
+        [Console]::Error.WriteLine($_.ScriptStackTrace)
+        exit 1
+    }
     [System.Windows.Forms.MessageBox]::Show(($_.ToString() + "`r`n" + $_.ScriptStackTrace), "Libra 管理コンソール エラー", "OK", "Error") | Out-Null
     exit 1
+}
+
+# ---- 置き場所の解決（コマンド行 > libra-paths.json > その場の既定） ----
+$script:PathsFile = Join-Path $PSScriptRoot "libra-paths.json"
+if (Test-Path $script:PathsFile) {
+    $cfg = Get-Content $script:PathsFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($k in @("Distro", "Libra", "RunRoot", "LibraVast", "DesktopExe")) {
+        if (-not $PSBoundParameters.ContainsKey($k) -and $cfg.PSObject.Properties.Name -contains $k -and $cfg.$k) {
+            Set-Variable -Name $k -Value ([string]$cfg.$k) -Scope Script
+        }
+    }
+}
+if (-not $DesktopExe) { $DesktopExe = Join-Path $env:LOCALAPPDATA "天秤将棋GUI\tenbin-shogi-gui.exe" }
+if (-not $Libra) {
+    throw "bin/libra の場所が分かりません。WSL から tools/windows/install.sh を実行して libra-paths.json を作るか、-Libra <WSL 内のパス> を渡してください。"
+}
+if (-not $RunRoot) { $RunRoot = (Split-Path (Split-Path $Libra -Parent) -Parent) -replace "\\", "/" }
+if (-not $LibraVast) { $LibraVast = ($Libra + "-vast") }
+# wsl.exe に渡すディストロの指定。$Distro が空なら既定のディストロを使う
+function Get-WslDistroArgs { if ($Distro) { return @("-d", $Distro) } else { return @() } }
+# \\wsl.localhost\<ディストロ> のためにディストロ名が要る場面では、空のときだけ既定の名前を引く
+function Get-DistroName {
+    if ($Distro) { return $Distro }
+    if (-not $script:DefaultDistro) {
+        $out = & wsl.exe -l -q 2>$null
+        $script:DefaultDistro = ($out | Where-Object { $_.Trim() } | Select-Object -First 1).Trim()
+    }
+    return $script:DefaultDistro
 }
 
 $script:TabTitles = @{ ls = "ls 本体"; lx = "lx 搾取者"; cloud = "クラウド"; history = "クラウド履歴" }
@@ -103,7 +141,7 @@ function Ci-Val($ci, [int]$i) {
 
 # ---- WSL 呼び出し ----
 function Get-LibraArgs([string]$run, [string[]]$cmd) {
-    return (@("-d", $Distro, "--", $Libra, "--run", $run) + $cmd) -join " "
+    return ((Get-WslDistroArgs) + @("--", $Libra, "--run", $run) + $cmd) -join " "
 }
 function New-LibraProcess([string]$run, [string[]]$cmd) {
     $p = New-Object System.Diagnostics.Process
@@ -139,7 +177,7 @@ function Invoke-Libra([string]$run, [string[]]$cmd, [int]$TimeoutMs = 20000) {
 function New-VastProcess([string[]]$cmd) {
     # 引数は wsl.exe のコマンド行になるので空白を含めない（GPU 名は RTX_5070_Ti のように _ でつなぐ）
     $p = New-LibraProcess "" @()
-    $p.StartInfo.Arguments = (@("-d", $Distro, "--", $LibraVast) + $cmd) -join " "
+    $p.StartInfo.Arguments = ((Get-WslDistroArgs) + @("--", $LibraVast) + $cmd) -join " "
     return $p
 }
 function Invoke-Vast([string[]]$cmd, [int]$TimeoutMs = 60000) {
@@ -399,7 +437,7 @@ function Update-DesktopModelLabel {
 function Update-DesktopModel {
     # WSL 側の latest.onnx を desktop に登録した libra.exe の横（libra.onnx）へ写す。手順は一時名 → 置き換え。
     if (-not (Test-Path $DesktopEngineDir)) { throw "desktop のエンジン フォルダがありません: $DesktopEngineDir（desktop で libra.exe を登録してください。runbook §8）" }
-    $src = "\\wsl.localhost\$Distro\" + ($RunRoot.TrimStart("/") -replace "/", "\") + "\$ModelRun\checkpoints\latest.onnx"
+    $src = "\\wsl.localhost\" + (Get-DistroName) + "\" + ($RunRoot.TrimStart("/") -replace "/", "\") + "\$ModelRun\checkpoints\latest.onnx"
     if (-not (Test-Path $src)) { throw "latest.onnx が見つかりません: $src（WSL が起動していて run が動いているか確認）" }
     $srcItem = Get-Item $src
     $dst = Join-Path $DesktopEngineDir "libra.onnx"

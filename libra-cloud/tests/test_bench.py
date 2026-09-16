@@ -152,7 +152,7 @@ def test_scan_inbox(tmp_path: Path):
 
 def test_bench_config_is_standalone():
     cfg = load_config(None)
-    cfg["selfplay"]["openings"] = "/home/sakis/libra-run/lx/openings.json"
+    cfg["selfplay"]["openings"] = "/x/openings.json"  # bench_config が空にすることだけを見る（読まない）
     cfg["exploiter"]["main_ckpt"] = "/x/main.pt"
     cfg["auto"]["enabled"] = True
     cfg["workers"]["enabled"] = True

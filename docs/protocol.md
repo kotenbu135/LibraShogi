@@ -76,7 +76,7 @@ usiok
 - `Declare_Win`: 本将棋で宣言法の条件を満たしたとき `bestmove win` を出す。既定は false だが、**GUI は `Declare_Win` を名乗るエンジンに、登録の設定で値を持っていなければ本将棋の毎 `go` の前に `setoption name Declare_Win value true` を送る**（0.10.0、`play.ts` 384）。利用者が登録の設定で明示した値があればそちらが優先される。ハーネスは true にして起動する。
 - `Mate_Nodes`: 各手の根で行う df-pn 詰み探索の節点数。
 - C++ 版エンジン `libra` / `libra.exe`（`libra-engine/`、ONNX Runtime）と Python 版 `bin/libra-usi-py`（`libra_league/usi_engine.py`）がこの申告を実装している。`bin/libra-usi` は C++ 版を起動する（未ビルドなら Python 版）。desktop には
-  実行ファイル `C:\Windows\System32\wsl.exe`、引数 `-d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra-usi` で登録する（`DNN_Model` を申告するので GPU 扱い、`Fuseki_Mode` を申告するので「布石にも対応」に自動判定される）。
+  実行ファイル `C:\Windows\System32\wsl.exe`、引数 `-d <ディストロ> -- <repo>/bin/libra-usi` で登録する（ディストロが 1 つなら `-d <ディストロ>` は省ける。この開発機では `-d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra-usi`。`DNN_Model` を申告するので GPU 扱い、`Fuseki_Mode` を申告するので「布石にも対応」に自動判定される）。
 
 - `Fuseki_Mode=tenbin`: 手数 0・1 の合法手は玉打ちだけ。`fuseki`: 布石将棋（玉もいつでも打てる）。
 - `info` 行: `info depth D seldepth S multipv K score cp X winrate W nodes N nps P time T pv M ...`、末尾に `info string phase fuseki|normal ply N method mcgs|mcts|proof|scale`。

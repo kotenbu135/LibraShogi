@@ -4,7 +4,7 @@
   python -m libra_league.usi_engine            # 標準入出力で USI
 
 公開版の libra.exe（ONNX Runtime）ができるまでの暫定。desktop には
-`wsl.exe -d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra-usi` を登録して使える。
+`wsl.exe -d <ディストロ> -- <repo>/bin/libra-usi` を登録して使える（ディストロが 1 つなら `-d` は省ける）。
 """
 from __future__ import annotations
 

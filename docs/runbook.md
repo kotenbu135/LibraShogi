@@ -39,11 +39,11 @@ docs/libra-local.md §7〜8 の実装。状態はすべて `~/libra-run/<run-id>
 `--run <id>` で run-id、`--root <dir>` で親ディレクトリを変えられる（既定 `~/libra-run/ls`）。
 `run --config path.toml` は初回だけ有効。
 
-Windows 側: `C:\Users\sakis\libra\` に `libra-run.bat`（本体 ls）/ `libra-run-lx.bat`（搾取者 lx）と、**ls と lx の両方に効く** `libra-stop.bat` / `libra-status.bat`。デスクトップに status / stop の写し（`install.sh` は前に写した libra-pause.bat / libra-resume.bat を消す）。
+Windows 側: `%USERPROFILE%\libra\`（この開発機では `C:\Users\sakis\libra\`）に `libra-run.bat`（本体 ls）/ `libra-run-lx.bat`（搾取者 lx）と、**ls と lx の両方に効く** `libra-stop.bat` / `libra-status.bat`。デスクトップに status / stop の写し（`install.sh` は前に写した libra-pause.bat / libra-resume.bat を消す）。**bat / vbs は `tools/windows/*.in` から `install.sh` が生成する**（ディストロ名と WSL 内の `bin/libra` の場所を埋める）。リポジトリを別の場所に置いたときや、ディストロを入れ替えたときは `install.sh` を回し直す。
 
 ## 3. Windows Update で再起動しても続くようにする
 
-1. タスク スケジューラに「LibraShogi run」（本体 ls、ログオン 1 分後）と「LibraShogi run lx」（搾取者 lx、ログオン 2 分後）を登録済み（`C:\Users\sakis\libra\LibraShogi-run.xml` / `LibraShogi-run-lx.xml`）。それぞれ `wscript.exe libra-run-hidden.vbs` / `libra-run-lx-hidden.vbs` → `wsl.exe -d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra [--run lx] run` を非表示で起動する。実行時間の上限なし。タスクの「失敗時に 1 分後に再起動（999 回まで）」は起動後の異常終了には効かない（9/13 に lx が CUDA の abort で落ちたまま 4.7 h 止まった）。
+1. タスク スケジューラに「LibraShogi run」（本体 ls、ログオン 1 分後）と「LibraShogi run lx」（搾取者 lx、ログオン 2 分後）を登録済み（`%USERPROFILE%\libra\LibraShogi-run.xml` / `LibraShogi-run-lx.xml`）。それぞれ `wscript.exe libra-run-hidden.vbs` / `libra-run-lx-hidden.vbs` → `wsl.exe -d <ディストロ> -- <repo>/bin/libra [--run lx] run` を非表示で起動する（vbs は `install.sh` が生成する。ファイル名は変わらないので、タスクの登録はそのままでよい）。実行時間の上限なし。タスクの「失敗時に 1 分後に再起動（999 回まで）」は起動後の異常終了には効かない（9/13 に lx が CUDA の abort で落ちたまま 4.7 h 止まった）。
    **`libra run` は監視役**で、ランナー本体（子の `run --no-supervise`）が異常終了したら 60 秒後に起動し直す。起動し直さないのは、停止（STOP フラグ、終了コード 0）、二重起動（終了コード 3）、Ctrl+C・kill・`wsl --shutdown`（SIGINT/SIGTERM/SIGHUP）、待機中に STOP が置かれたとき。15 分未満で落ちるのが 5 回続いたら諦めて止まる。記録は log.txt の `supervisor:` 行と `stdout.log`。待機中（最大 60 秒）は status が `not running` と出る。
 2. **自動ログオンは利用者が設定する**（`netplwiz`）。設定しないと再起動後にログオンするまで止まる。
 3. 再起動後の損失はチェックポイント間隔（10 分）＋進行中の対局分。
@@ -53,13 +53,13 @@ Windows 側: `C:\Users\sakis\libra\` に `libra-run.bat`（本体 ls）/ `libra-
 再登録するとき:
 
 ```powershell
-schtasks /Create /TN "LibraShogi run" /XML "C:\Users\sakis\libra\LibraShogi-run.xml" /F
-schtasks /Create /TN "LibraShogi run lx" /XML "C:\Users\sakis\libra\LibraShogi-run-lx.xml" /F
+schtasks /Create /TN "LibraShogi run" /XML "%USERPROFILE%\libra\LibraShogi-run.xml" /F
+schtasks /Create /TN "LibraShogi run lx" /XML "%USERPROFILE%\libra\LibraShogi-run-lx.xml" /F
 ```
 
 Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\Users\<user>\libra` とデスクトップへ写す）。
 
-**管理コンソール（GUI）**: デスクトップの `libra-console.bat`（`tools/windows/libra-console.ps1`、PowerShell 5.1 + WinForms、ビルド不要）。本体 ls と搾取者 lx の状態（稼働中 / 停止処理中 / 停止、step・世代・総局数、局/日の 1 時間平均と実測、終局内訳、loss、GPU メモリ、最終チェックポイント、搾取者の対本体勝率、log.txt の末尾）を 15 秒ごとに `wsl.exe -d Ubuntu-24.04 -- bin/libra --run <run> status --json --tail 40` で取り、局/日の推移を折れ線で出す。**縦長のウィンドウが前提**で、上のタブで **ls / lx / クラウド / クラウド履歴** を切り替える。タブの見出しに稼働状態（● 稼働中 / 停止処理中 / 停止、クラウドは段階、履歴は今月の費用）が色付きで出るので、裏のタブの run が止まっても分かる。run のタブは上から状態の表・ボタン・グラフ（局/日、Elo、対外対局、学習、終局内訳、手数、ログ。学習・終局内訳・手数・ログはそのタブの run）。Elo と対外対局は 1 日 1 回の計測なので「グラフの期間」にかかわらず全期間を描く。Elo の実線（点と 95% 区間の縦線）が主の基準比、薄い点線が補助の鎖で、同じ step を別の方法で測るので同じ時刻に 2 つの値が並ぶ（鎖が上でも基準比が下がったわけではない）。位置・大きさ・選んだタブは `%LOCALAPPDATA%\LibraShogi\console-layout.json` に残り、次に開いたときに戻る。ボタンは「起動」「停止」（run ごとと「全部 起動」「全部 停止」）と自動計測の前倒しだけ。稼働中は「起動」、止まっているときは「停止」を押せなくする。停止処理中は「起動」を押してよい（止まってから起動する）。「起動」はタスク スケジューラの「LibraShogi run [lx]」を `schtasks /Run` で起動し（無ければ wsl.exe を直接起動）、5 分以内に稼働を確かめられなければステータスバーに赤で出す。操作の結果はステータスバーに 1〜15 分残る。局/日の履歴は `%LOCALAPPDATA%\LibraShogi\console-history.csv` に追記（7 日分を表示）。**クラウド** タブは vast.ai の自己対局ワーカーの起動 / 停止 / 候補 / 後始末と、段階・費用・回収局数・残高を出す（`bin/libra-vast`。§「自己対局ワーカー」の 4）。起動の確認には同じ GPU の過去の実績（借りた 1 時間あたりの有効局、100 万局あたりの費用、見込みの局数）も出る。**クラウド履歴** タブは `bin/libra-vast history --json` でセッションごとの GPU・$/h・借りた時間・費用（借りた時間 × $/h ＋ 転送料。転送料は送った・取ってきたバイト数 × ホストの単価で、記録の無い古いセッションは見積もり）・有効局（回収局 − 学習側が古すぎて捨てた局。捨てた局は学習側の log.txt の `workers: dropped` の行をセッションの期間で数える）・局/日（ブリッジの時間で換算）・100 万局あたりの費用を一覧と棒グラフで出し、合計と今月の費用（1 ドル 150 円で円に直し、月 1 万円の上限との比）を出す。コンソールを直したら `tools/windows/install.sh` で写し直す。
+**管理コンソール（GUI）**: デスクトップの `libra-console.bat`（`tools/windows/libra-console.ps1`、PowerShell 5.1 + WinForms、ビルド不要）。本体 ls と搾取者 lx の状態（稼働中 / 停止処理中 / 停止、step・世代・総局数、局/日の 1 時間平均と実測、終局内訳、loss、GPU メモリ、最終チェックポイント、搾取者の対本体勝率、log.txt の末尾）を 15 秒ごとに `wsl.exe -d <ディストロ> -- <repo>/bin/libra --run <run> status --json --tail 40` で取り、局/日の推移を折れ線で出す。**縦長のウィンドウが前提**で、上のタブで **ls / lx / クラウド / クラウド履歴** を切り替える。タブの見出しに稼働状態（● 稼働中 / 停止処理中 / 停止、クラウドは段階、履歴は今月の費用）が色付きで出るので、裏のタブの run が止まっても分かる。run のタブは上から状態の表・ボタン・グラフ（局/日、Elo、対外対局、学習、終局内訳、手数、ログ。学習・終局内訳・手数・ログはそのタブの run）。Elo と対外対局は 1 日 1 回の計測なので「グラフの期間」にかかわらず全期間を描く。Elo の実線（点と 95% 区間の縦線）が主の基準比、薄い点線が補助の鎖で、同じ step を別の方法で測るので同じ時刻に 2 つの値が並ぶ（鎖が上でも基準比が下がったわけではない）。位置・大きさ・選んだタブは `%LOCALAPPDATA%\LibraShogi\console-layout.json` に残り、次に開いたときに戻る。ボタンは「起動」「停止」（run ごとと「全部 起動」「全部 停止」）と自動計測の前倒しだけ。稼働中は「起動」、止まっているときは「停止」を押せなくする。停止処理中は「起動」を押してよい（止まってから起動する）。「起動」はタスク スケジューラの「LibraShogi run [lx]」を `schtasks /Run` で起動し（無ければ wsl.exe を直接起動）、5 分以内に稼働を確かめられなければステータスバーに赤で出す。操作の結果はステータスバーに 1〜15 分残る。局/日の履歴は `%LOCALAPPDATA%\LibraShogi\console-history.csv` に追記（7 日分を表示）。**クラウド** タブは vast.ai の自己対局ワーカーの起動 / 停止 / 候補 / 後始末と、段階・費用・回収局数・残高を出す（`bin/libra-vast`。§「自己対局ワーカー」の 4）。起動の確認には同じ GPU の過去の実績（借りた 1 時間あたりの有効局、100 万局あたりの費用、見込みの局数）も出る。**クラウド履歴** タブは `bin/libra-vast history --json` でセッションごとの GPU・$/h・借りた時間・費用（借りた時間 × $/h ＋ 転送料。転送料は送った・取ってきたバイト数 × ホストの単価で、記録の無い古いセッションは見積もり）・有効局（回収局 − 学習側が古すぎて捨てた局。捨てた局は学習側の log.txt の `workers: dropped` の行をセッションの期間で数える）・局/日（ブリッジの時間で換算）・100 万局あたりの費用を一覧と棒グラフで出し、合計と今月の費用（1 ドル 150 円で円に直し、月 1 万円の上限との比）を出す。コンソールを直したら `tools/windows/install.sh` で写し直す。ディストロ名・`bin/libra`・run の置き場・desktop の exe は、`install.sh` が同じフォルダに書く `libra-paths.json` から読む（コマンド行の `-Distro` / `-Libra` などを渡せばそちらが優先。どちらも無ければ起動時に案内を出して終わる）。
 
 再起動の手順（bat 版）: PC を再起動するときは `libra-stop.bat` で両 run を止めて（`libra-status.bat` で `not running` を確認）から再起動し、ログオン後に両タスクが自動で再開する。搾取者を止めたままにしたいときは WSL で `bin/libra --run lx stop` だけ実行する（本体は openings を読むだけなので影響しない）。
 
@@ -99,11 +99,11 @@ GPU を L-S と共有するので、計測中は ls・lx を停止するか、�
 
 ## 8. desktop で Libra と指す（自分で体感する）
 
-desktop（天秤将棋GUI 0.10.3、`C:\Users\sakis\AppData\Local\天秤将棋GUI\tenbin-shogi-gui.exe`）には Windows 版 `libra.exe` を「LibraShogi 0.0.2」として登録済み（`%APPDATA%\com.fusekishogi.tenbin\engines\libra\engine\`。モデルは同じフォルダの `libra.onnx`）。2026-09-14 から DirectML 版の DLL（`onnxruntime.dll` 1.24.4・`DirectML.dll`）に差し替え、GPU で読む（`isready` で `info string … provider dml`）。以前の CPU 版は同じフォルダの `*.cpu-prev`、以前の exe は `libra.exe.prev`。学習中の ls・lx と GPU を共有するので、desktop で読ませている間は局/日が少し落ちる。 desktop 0.10.0 から、布石に対応したエンジンは本将棋（41 手目以降）の席にも選べるので、**1 回の登録で 1 手目から終局まで指せる**（布石と本将棋の両方に「LibraShogi」を選ぶ。同じ id なので 1 本のプロセスが続けて指す）。GUI が終局（千日手・入玉宣言・手数上限）を裁き、宣言できるエンジンには毎手 `Declare_Win=true` を送る（docs/protocol.md §1）。天秤将棋の両玉と先後の選択も Libra の `scale.json` と `winrate` で決まる（同 §2）。
+desktop（天秤将棋GUI 0.10.3、`%LOCALAPPDATA%\天秤将棋GUI\tenbin-shogi-gui.exe`）には Windows 版 `libra.exe` を「LibraShogi 0.0.2」として登録済み（`%APPDATA%\com.fusekishogi.tenbin\engines\libra\engine\`。モデルは同じフォルダの `libra.onnx`）。2026-09-14 から DirectML 版の DLL（`onnxruntime.dll` 1.24.4・`DirectML.dll`）に差し替え、GPU で読む（`isready` で `info string … provider dml`）。以前の CPU 版は同じフォルダの `*.cpu-prev`、以前の exe は `libra.exe.prev`。学習中の ls・lx と GPU を共有するので、desktop で読ませている間は局/日が少し落ちる。 desktop 0.10.0 から、布石に対応したエンジンは本将棋（41 手目以降）の席にも選べるので、**1 回の登録で 1 手目から終局まで指せる**（布石と本将棋の両方に「LibraShogi」を選ぶ。同じ id なので 1 本のプロセスが続けて指す）。GUI が終局（千日手・入玉宣言・手数上限）を裁き、宣言できるエンジンには毎手 `Declare_Win=true` を送る（docs/protocol.md §1）。天秤将棋の両玉と先後の選択も Libra の `scale.json` と `winrate` で決まる（同 §2）。
 
 最新のネットで指すには管理コンソールの「desktop で対局」を押す。WSL の `~/libra-run/ls/checkpoints/latest.onnx` をそのフォルダの `libra.onnx` に写し（`libra.onnx.json` に step と時刻を残す）、desktop を起動する。desktop が既に起動しているときはモデルだけ更新するので、エンジンを立て直す（desktop を開き直す）と新しいネットになる。対局画面でエンジンに「LibraShogi」を選ぶ。無人で行うには `powershell -File libra-console.ps1 -UpdateDesktopModel`。
 
-GPU（CUDA）で読ませたいときは「エンジン」→「実行ファイルを選んで追加」で `C:\Windows\System32\wsl.exe` を選び、引数に `-d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra-usi` を入れる（モデルは常に latest.onnx、学習中の GPU と共有）。
+GPU（CUDA）で読ませたいときは「エンジン」→「実行ファイルを選んで追加」で `C:\Windows\System32\wsl.exe` を選び、引数に `-d <ディストロ> -- <repo>/bin/libra-usi` を入れる（この開発機では `-d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra-usi`。モデルは常に latest.onnx、学習中の GPU と共有）。
 
 ## 玉配置表（libra-scale）
 
