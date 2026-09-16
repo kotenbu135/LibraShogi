@@ -54,12 +54,36 @@ extern Bitboard StepAttacks[COLOR_NB][PT_NB][SQ_NB];  // 歩・桂・銀・金�
 extern Bitboard OrthoStep[SQ_NB];  // 馬の追加利き（縦横 1 マス）
 extern Bitboard DiagStep[SQ_NB];   // 竜の追加利き（斜め 1 マス）
 
-Bitboard ray_attacks(Dir d, int sq, Bitboard occ);
-Bitboard lance_attacks(Color c, int sq, Bitboard occ);
-Bitboard bishop_attacks(int sq, Bitboard occ);
-Bitboard rook_attacks(int sq, Bitboard occ);
+// 利きの計算は合法手生成・詰み探索・特徴量の内側で呼ばれるので、ヘッダに置いて呼び出し側で展開できるようにする
+inline Bitboard ray_attacks(Dir d, int sq, Bitboard occ) {
+  Bitboard ray = Ray[d][sq];
+  Bitboard blockers = ray & occ;
+  if (blockers.none()) return ray;
+  int first = d < 4 ? blockers.lsb() : blockers.msb();
+  return ray ^ Ray[d][first];
+}
+
+inline Bitboard lance_attacks(Color c, int sq, Bitboard occ) { return ray_attacks(c == BLACK ? DIR_N : DIR_S, sq, occ); }
+
+inline Bitboard bishop_attacks(int sq, Bitboard occ) {
+  return ray_attacks(DIR_NW, sq, occ) | ray_attacks(DIR_SW, sq, occ) | ray_attacks(DIR_NE, sq, occ) | ray_attacks(DIR_SE, sq, occ);
+}
+
+inline Bitboard rook_attacks(int sq, Bitboard occ) {
+  return ray_attacks(DIR_S, sq, occ) | ray_attacks(DIR_W, sq, occ) | ray_attacks(DIR_N, sq, occ) | ray_attacks(DIR_E, sq, occ);
+}
+
 // 駒種ごとの利き（駒の色 c、位置 sq、盤上の占有 occ）
-Bitboard attacks(Color c, PieceType pt, int sq, Bitboard occ);
+inline Bitboard attacks(Color c, PieceType pt, int sq, Bitboard occ) {
+  switch (pt) {
+    case LANCE: return lance_attacks(c, sq, occ);
+    case BISHOP: return bishop_attacks(sq, occ);
+    case ROOK: return rook_attacks(sq, occ);
+    case HORSE: return bishop_attacks(sq, occ) | OrthoStep[sq];
+    case DRAGON: return rook_attacks(sq, occ) | DiagStep[sq];
+    default: return StepAttacks[c][pt][sq];
+  }
+}
 
 }  // namespace bb
 }  // namespace libra

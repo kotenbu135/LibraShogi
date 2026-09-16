@@ -73,6 +73,9 @@ class Position {
   Move last_move() const { return st_.empty() ? MOVE_NONE : st_.back().move; }
 
   bool in_check() const;                      // 手番の玉に王手（布石中は常に false）
+  // m を指した後に相手玉が当たっているか（手番側の手 m で、指さずに判定する）。
+  // 本将棋では do_move(m) の後の in_check()、布石では king_attacked(~turn()) と同じ値
+  bool gives_check(Move m) const;
   bool king_attacked(Color c) const;          // c の玉が相手の利きに当たっている（布石の判定にも使う）
   Bitboard attackers_to(int sq, Color by, Bitboard occ) const;
   bool ruling41_pending();                    // 39 手目直後で遮断不能（40 手目の制限が外れている）
@@ -119,7 +122,7 @@ class Position {
   void add_hand(Color c, PieceType pt, int d);
   void set_turn(Color c);
   void fuseki_moves(MoveList& out);
-  void normal_moves(MoveList& out, bool check_uchifuzume);
+  void normal_moves(MoveList& out, bool check_uchifuzume, bool first_only = false);  // first_only: 1 手見つけたら止める
   bool has_legal_move(bool check_uchifuzume);
   bool attacked_after(int ksq, Color by, Bitboard occ2, Bitboard exclude) const;
   void after_move();

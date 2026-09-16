@@ -6,6 +6,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include "libra/encoding.h"
 #include "libra/position.h"
 
 using namespace libra;
@@ -541,6 +542,108 @@ static void test_full_game() {
   CHECK_EQ(p.sfen(), "9/9/9/9/9/9/9/9/9 b KRB2G2S2N2L9Pkrb2g2s2n2l9p 1");
 }
 
+// 速くした経路が素朴な判定と同じ結果になること（乱数の対局で王手・ピン・両王手・打ち歩詰めの局面を通る）:
+// 合法手（利きの判定を省いた生成）は、候補の手を全部指してみて自玉が当たらないものと集合が一致する。
+// gives_check は指した後の王手（布石では相手玉の当たり）と一致する。特徴量の利きの数は attackers_to の数と一致する。
+// outcome の合法手の有無（1 手で止める生成）は合法手の数と一致する
+static std::set<Move> reference_moves(Position& p) {
+  std::set<Move> out;
+  Color us = p.turn();
+  auto safe = [&](Move m) {
+    p.do_move(m);
+    bool ok = !p.king_attacked(us);
+    p.undo_move();
+    return ok;
+  };
+  Bitboard own = p.pieces(us);
+  for (int from = 0; from < SQ_NB; ++from) {
+    if (!own.test(from)) continue;
+    PieceType pt = type_of(p.piece_on(from));
+    for (int to = 0; to < SQ_NB; ++to) {
+      if (own.test(to) || !bb::attacks(us, pt, from, p.pieces()).test(to)) continue;
+      bool zone = bb::PromoZoneBB[us].test(from) || bb::PromoZoneBB[us].test(to);
+      int rr = rel_rank(us, to);
+      bool must = (pt == PAWN || pt == LANCE) ? rr == 0 : (pt == KNIGHT ? rr <= 1 : false);
+      if (is_promotable(pt) && zone && safe(make_move(from, to, true))) out.insert(make_move(from, to, true));
+      if (!must && safe(make_move(from, to, false))) out.insert(make_move(from, to, false));
+    }
+  }
+  for (int pt = PAWN; pt <= GOLD; ++pt) {
+    if (p.hand(us, PieceType(pt)) == 0) continue;
+    for (int to = 0; to < SQ_NB; ++to) {
+      if (p.pieces().test(to)) continue;
+      int rr = rel_rank(us, to);
+      if ((pt == PAWN || pt == LANCE) && rr == 0) continue;
+      if (pt == KNIGHT && rr <= 1) continue;
+      if (pt == PAWN && (p.pieces(us, PAWN) & bb::FileBB[file_of(to)]).any()) continue;
+      Move m = make_drop(PieceType(pt), to);
+      if (!safe(m)) continue;
+      if (pt == PAWN) {
+        p.do_move(m);
+        bool mate = p.in_check() && p.outcome().reason == R_NO_LEGAL_MOVE;
+        p.undo_move();
+        if (mate) continue;  // 打ち歩詰め
+      }
+      out.insert(m);
+    }
+  }
+  return out;
+}
+
+static void test_fast_paths_match_reference() {
+  std::uint64_t x = 0x5eed;
+  auto rnd = [&]() {
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    return x;
+  };
+  float sq[SQ_NB * SQ_FEATS], glob[GLOB_FEATS];
+  int positions = 0, checks = 0, mismatches = 0;
+  for (int game = 0; game < 60; ++game) {
+    Position p;
+    p.reset(MODE_TENBIN);
+    for (int ply = 0; ply < 160; ++ply) {
+      MoveList ml;
+      p.legal_moves(ml);
+      Outcome o = p.outcome();
+      if (o.result != ONGOING) {
+        CHECK(p.phase() == PHASE_FUSEKI || o.reason != R_NO_LEGAL_MOVE || ml.n == 0);
+        break;
+      }
+      ++positions;
+      if (p.phase() == PHASE_NORMAL) {
+        CHECK(ml.n > 0);
+        checks += p.in_check();
+        std::set<Move> got(ml.begin(), ml.end());
+        if (got != reference_moves(p)) ++mismatches;
+      }
+      Color us = p.turn();
+      for (bool mirror : {false, true}) {  // 学習の標本は半分が鏡映
+        write_features(p, sq, glob, mirror);
+        for (int s = 0; s < SQ_NB; ++s) {
+          int t = to_mover_frame(us, s);
+          const float* f = sq + (mirror ? mirror_sq(t) : t) * SQ_FEATS;
+          int a_us = p.attackers_to(s, us, p.pieces()).count(), a_them = p.attackers_to(s, ~us, p.pieces()).count();
+          if (f[28] != (a_us > 4 ? 1.0f : a_us / 4.0f) || f[29] != (a_them > 4 ? 1.0f : a_them / 4.0f)) ++mismatches;
+        }
+      }
+      for (Move m : ml) {
+        bool fast = p.gives_check(m);
+        Phase before = p.phase();
+        p.do_move(m);
+        bool slow = before == PHASE_NORMAL ? p.in_check() : p.king_attacked(p.turn());
+        p.undo_move();
+        if (fast != slow) ++mismatches;
+      }
+      p.do_move(ml.m[rnd() % ml.n]);
+    }
+  }
+  CHECK(positions > 3000);
+  CHECK(checks > 50);
+  CHECK_EQ(mismatches, 0);
+}
+
 int main() {
   test_usi_sfen();
   test_zobrist();
@@ -556,6 +659,7 @@ int main() {
   test_max_ply();
   test_harness_results();
   test_full_game();
+  test_fast_paths_match_reference();
   std::printf("%d passed, %d failed\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

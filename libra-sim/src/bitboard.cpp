@@ -101,34 +101,5 @@ void init() {
   }
 }
 
-Bitboard ray_attacks(Dir d, int sq, Bitboard occ) {
-  Bitboard ray = Ray[d][sq];
-  Bitboard blockers = ray & occ;
-  if (blockers.none()) return ray;
-  int first = d < 4 ? blockers.lsb() : blockers.msb();
-  return ray ^ Ray[d][first];
-}
-
-Bitboard lance_attacks(Color c, int sq, Bitboard occ) { return ray_attacks(c == BLACK ? DIR_N : DIR_S, sq, occ); }
-
-Bitboard bishop_attacks(int sq, Bitboard occ) {
-  return ray_attacks(DIR_NW, sq, occ) | ray_attacks(DIR_SW, sq, occ) | ray_attacks(DIR_NE, sq, occ) | ray_attacks(DIR_SE, sq, occ);
-}
-
-Bitboard rook_attacks(int sq, Bitboard occ) {
-  return ray_attacks(DIR_S, sq, occ) | ray_attacks(DIR_W, sq, occ) | ray_attacks(DIR_N, sq, occ) | ray_attacks(DIR_E, sq, occ);
-}
-
-Bitboard attacks(Color c, PieceType pt, int sq, Bitboard occ) {
-  switch (pt) {
-    case LANCE: return lance_attacks(c, sq, occ);
-    case BISHOP: return bishop_attacks(sq, occ);
-    case ROOK: return rook_attacks(sq, occ);
-    case HORSE: return bishop_attacks(sq, occ) | OrthoStep[sq];
-    case DRAGON: return rook_attacks(sq, occ) | DiagStep[sq];
-    default: return StepAttacks[c][pt][sq];
-  }
-}
-
 }  // namespace bb
 }  // namespace libra

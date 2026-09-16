@@ -178,6 +178,37 @@ bool Position::king_attacked(Color c) const {
 
 bool Position::in_check() const { return phase_ == PHASE_NORMAL && king_attacked(turn_); }
 
+bool Position::gives_check(Move m) const {
+  // 本将棋で 40 手完了になることは無く、布石の手は打つ手だけなので、指した後の段階の違いで値は変わらない
+  Color us = turn_, them = ~us;
+  int ek = king_sq(them);
+  if (ek == SQ_NONE) return false;
+  int to = to_sq(m);
+  Bitboard to_bb = Bitboard::sq(to);
+  PieceType npt;
+  Bitboard from_bb, occ2;
+  if (is_drop(m)) {
+    npt = drop_type(m);
+    occ2 = occ_ | to_bb;
+  } else {
+    int from = from_sq(m);
+    from_bb = Bitboard::sq(from);
+    PieceType pt = type_of(board_[from]);
+    npt = is_promo(m) ? promoted(pt) : pt;
+    occ2 = (occ_ ^ from_bb) | to_bb;
+  }
+  if (bb::attacks(us, npt, to, occ2).test(ek)) return true;  // 動かした駒の利き
+  // ほかの自駒の利き。いま利いていなければ、駒を置くのは遮るだけなので、動かした元のマスが相手玉から見た線上に無ければ増えない
+  if (attackers_to(ek, us, occ_).none()) {
+    if (from_bb.none()) return false;
+    int from = from_sq(m);
+    bool aligned = false;
+    for (int d = 0; d < bb::DIR_NB && !aligned; ++d) aligned = bb::Ray[d][ek].test(from);
+    if (!aligned) return false;
+  }
+  return (attackers_to(ek, us, occ2) & ~from_bb).any();
+}
+
 // ---- 布石の合法手 ----
 
 void Position::fuseki_moves(MoveList& out) {
@@ -239,30 +270,69 @@ bool Position::ruling41_pending() {
 
 // ---- 本将棋の合法手 ----
 
-void Position::normal_moves(MoveList& out, bool check_uchifuzume) {
+void Position::normal_moves(MoveList& out, bool check_uchifuzume, bool first_only) {
   out.n = 0;
   Color us = turn_, them = ~us;
   Bitboard own = pieces(us);
   int ksq = king_sq(us);
   Bitboard promo_zone = bb::PromoZoneBB[us];
+  // 手ごとの自玉の利きの判定（attacked_after）を省ける手を先に分ける。王手が掛かっていなければ、
+  // 打つ手は遮るだけなので常に自玉に利かず、玉以外の駒の移動は、玉から見た線の最初の遮り駒で、その先に相手の走り駒が
+  // あるとき（ピンの候補）だけ自玉を空けうる。省けない手は従来どおり判定する（生成する手と順序は変わらない）
+  Bitboard checkers = ksq != SQ_NONE ? attackers_to(ksq, them, occ_) : Bitboard();
+  bool checked = checkers.any();
+  // 王手が掛かっているとき、玉以外の手は王手している駒を取るか、走り駒との間に入る手でなければ王手が残る（判定しても外れる手）。
+  // 両王手なら玉以外は全部外れる
+  Bitboard evasion_to = ALL_BB;
+  if (checked) {
+    evasion_to = Bitboard();
+    if (checkers.count() == 1) {
+      int c = checkers.lsb();
+      evasion_to = checkers;
+      for (int d = 0; d < bb::DIR_NB; ++d)
+        if (bb::Ray[d][ksq].test(c)) evasion_to |= bb::Ray[d][ksq] & ~bb::Ray[d][c] & ~checkers;
+    }
+  }
+  Bitboard pin_cand;
+  if (ksq != SQ_NONE && !checked) {
+    Bitboard runners = pieces(them, LANCE) | pieces(them, BISHOP) | pieces(them, ROOK) | pieces(them, HORSE) | pieces(them, DRAGON);
+    for (int d = 0; d < bb::DIR_NB; ++d) {
+      Bitboard blockers = bb::Ray[d][ksq] & occ_;
+      if (blockers.none()) continue;
+      int b1 = d < 4 ? blockers.lsb() : blockers.msb();
+      if (!own.test(b1)) continue;
+      Bitboard beyond = bb::Ray[d][b1] & occ_;
+      if (beyond.none()) continue;
+      int b2 = d < 4 ? beyond.lsb() : beyond.msb();
+      if (runners.test(b2)) pin_cand.set(b1);
+    }
+  }
 
   Bitboard src = own;
   while (src.any()) {
     int from = src.pop();
     PieceType pt = type_of(board_[from]);
     Bitboard targets = bb::attacks(us, pt, from, occ_) & ~own;
+    if (pt != KING) targets &= evasion_to;
     Bitboard from_bb = Bitboard::sq(from);
     while (targets.any()) {
       int to = targets.pop();
       Bitboard to_bb = Bitboard::sq(to);
       int k2 = pt == KING ? to : ksq;
       Bitboard occ2 = (occ_ ^ from_bb) | to_bb;
-      if (k2 != SQ_NONE && attacked_after(k2, them, occ2, to_bb)) continue;
+      bool test = pt == KING || checked || pin_cand.test(from);
+      if (test && k2 != SQ_NONE && attacked_after(k2, them, occ2, to_bb)) continue;
       bool can_promo = is_promotable(pt) && (promo_zone.test(from) || promo_zone.test(to));
       int rr = rel_rank(us, to);
       bool must_promo = (pt == PAWN || pt == LANCE) ? rr == 0 : (pt == KNIGHT ? rr <= 1 : false);
-      if (can_promo) out.add(make_move(from, to, true));
-      if (!must_promo) out.add(make_move(from, to, false));
+      if (can_promo) {
+        out.add(make_move(from, to, true));
+        if (first_only) return;
+      }
+      if (!must_promo) {
+        out.add(make_move(from, to, false));
+        if (first_only) return;
+      }
     }
   }
 
@@ -271,7 +341,7 @@ void Position::normal_moves(MoveList& out, bool check_uchifuzume) {
   Bitboard last2 = us == BLACK ? bb::RankBB[1] : bb::RankBB[7];
   for (int pt = PAWN; pt <= GOLD; ++pt) {
     if (hand_[us][pt] == 0) continue;
-    Bitboard targets = empty;
+    Bitboard targets = empty & evasion_to;
     if (pt == PAWN || pt == LANCE) targets &= ~last1;
     if (pt == KNIGHT) targets &= ~(last1 | last2);
     if (pt == PAWN) {
@@ -282,7 +352,7 @@ void Position::normal_moves(MoveList& out, bool check_uchifuzume) {
     while (targets.any()) {
       int to = targets.pop();
       Bitboard occ2 = occ_ | Bitboard::sq(to);
-      if (ksq != SQ_NONE && attacked_after(ksq, them, occ2, Bitboard())) continue;
+      if (checked && attacked_after(ksq, them, occ2, Bitboard())) continue;
       Move m = make_drop(PieceType(pt), to);
       if (pt == PAWN && check_uchifuzume) {
         // 打ち歩詰め: 打った歩が相手玉に王手で、相手に合法手が無ければ非合法
@@ -295,6 +365,7 @@ void Position::normal_moves(MoveList& out, bool check_uchifuzume) {
         }
       }
       out.add(m);
+      if (first_only) return;
     }
   }
 }
@@ -302,7 +373,7 @@ void Position::normal_moves(MoveList& out, bool check_uchifuzume) {
 bool Position::has_legal_move(bool check_uchifuzume) {
   MoveList ml;
   if (phase_ == PHASE_FUSEKI) fuseki_moves(ml);
-  else normal_moves(ml, check_uchifuzume);
+  else normal_moves(ml, check_uchifuzume, true);  // 有無だけ見るので 1 手見つけたら止める
   return ml.n > 0;
 }
 

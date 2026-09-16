@@ -83,13 +83,24 @@ void write_features(const Position& pos, float* sq_out, float* glob_out, bool mi
   std::memset(glob_out, 0, sizeof(float) * GLOB_FEATS);
   Color us = pos.turn(), them = ~us;
   Bitboard occ = pos.pieces();
+  // マスごとの利きの数。マスから attackers_to を 81×2 回引く代わりに、駒ごとに利きを 1 回引いて行き先に数える
+  // （駒の利きは左右対称なので、sq に利く駒の数と同じ）
+  std::uint8_t attacks[COLOR_NB][SQ_NB] = {};
+  for (int c = 0; c < COLOR_NB; ++c) {
+    Bitboard src = pos.pieces(Color(c));
+    while (src.any()) {
+      int from = src.pop();
+      Bitboard a = bb::attacks(Color(c), type_of(pos.piece_on(from)), from, occ);
+      while (a.any()) ++attacks[c][a.pop()];
+    }
+  }
   for (int sq = 0; sq < SQ_NB; ++sq) {
     int t = to_mover_frame(us, sq);
     float* f = sq_out + (mirror ? mirror_sq(t) : t) * SQ_FEATS;
     Piece p = pos.piece_on(sq);
     if (p != NO_PIECE) f[(color_of(p) == us ? 0 : 14) + type_of(p) - 1] = 1.0f;
-    int a_us = pos.attackers_to(sq, us, occ).count();
-    int a_them = pos.attackers_to(sq, them, occ).count();
+    int a_us = attacks[us][sq];
+    int a_them = attacks[them][sq];
     f[28] = a_us > 4 ? 1.0f : a_us / 4.0f;
     f[29] = a_them > 4 ? 1.0f : a_them / 4.0f;
     f[30] = bb::ZoneBB[us].test(sq) ? 1.0f : 0.0f;
