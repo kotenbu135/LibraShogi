@@ -78,6 +78,7 @@ DEFAULTS: dict[str, Any] = {
         "lambda_z": 0.5,
         "mirror_prob": 0.5,
         "grad_clip": 1.0,
+        "compile": "max-autotune",  # 学習の forward・逆伝播の torch.compile: none | default | max-autotune（CUDA のときだけ効く。2026-09-16）
     },
     # 自己対局ワーカー（libra worker、libra_league/workers.py）: 学習側は重みを <run>/weights/latest.pt に配り（学習のたび）、
     # <run>/inbox/ に届いた局を ingest_seconds ごとに手元の自己対局と同じようにリプレイへ足す。既定は無効（今の 1 プロセスのまま）。

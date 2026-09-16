@@ -50,6 +50,7 @@ class Runner:
         self.session_elapsed_offset = 0.0
         self.rate_hist: list[tuple[float, int]] = []
         self.last_train: dict = {}
+        self.train_mode = ""  # 学習の compile の状態（変わったらログに出す）
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.exploiter_stats = {"games": 0, "wins": 0, "draws": 0, "losses": 0}
         self.opponent_step: int | None = None
@@ -539,6 +540,9 @@ class Runner:
                     self.last_train = self.trainer.step(batch)
                 fut.result()
                 self.last_train["steps"] = steps
+                if self.trainer.mode_used != self.train_mode:
+                    self.train_mode = self.trainer.mode_used
+                    self.log(f"train: model={self.train_mode}")
                 self.last_train["sec"] = round(time.time() - t0, 1)
                 self.last_train["target"] = summarize_target_stats(target_acc)  # 学習目標と結果の差（metrics.jsonl・コンソール）
                 self.loop.set_model(self.model)

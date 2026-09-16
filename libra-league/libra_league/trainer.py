@@ -10,6 +10,8 @@ import torch.nn.functional as F
 
 from libra_net.model import LibraNet
 
+COMPILE_MODES = ("none", "default", "max-autotune")
+
 
 def soft_ce(logits: torch.Tensor, target: torch.Tensor, weight: torch.Tensor | None = None) -> torch.Tensor:
     logp = F.log_softmax(logits.float(), dim=-1)
@@ -20,10 +22,27 @@ def soft_ce(logits: torch.Tensor, target: torch.Tensor, weight: torch.Tensor | N
 
 
 class Trainer:
+    """compile が none 以外で CUDA なら、学習の forward（と AOTAutograd で逆伝播）を torch.compile する。損失・目標・最適化・ステップ数は
+    同じで、変わるのはカーネルの選び方による浮動小数点の最下位の桁だけ（GPU 単独の実測で max-autotune は eager の 1.30 倍、
+    docs/measurements.md 2026-09-16）。max-autotune は推論と同じく CUDA Graphs を使わない形にする。最初のステップで失敗したら eager に落として続ける。
+    self.model は compile しない（state_dict の鍵・推論用の写し・ONNX の書き出しはそのまま使う）。"""
+
     def __init__(self, model: LibraNet, cfg: dict, device: torch.device):
         self.model = model
         self.cfg = cfg
         self.device = device
+        mode = cfg.get("compile", "none")
+        if mode not in COMPILE_MODES:
+            raise ValueError(f"train.compile must be one of {COMPILE_MODES}: {mode!r}")
+        self.forward = model
+        self.mode_used = "eager"
+        self._fallback_ok = False  # 1 ステップでも compile で通ったら、それ以降の例外は落とさずに上げる
+        if device.type == "cuda" and mode != "none":
+            from .selfplay import _quiet_inductor
+
+            _quiet_inductor()
+            self.forward = torch.compile(model, mode="max-autotune-no-cudagraphs" if mode == "max-autotune" else "default", fullgraph=True, dynamic=False)
+            self.mode_used = f"compile({mode})"
         decay, no_decay = [], []
         for n, p in model.named_parameters():
             (no_decay if p.ndim < 2 or n.endswith("bias") else decay).append(p)
@@ -38,6 +57,18 @@ class Trainer:
         return self.cfg["lr"] * min(1.0, (step + 1) / w)
 
     def step(self, batch: dict) -> dict:
+        if self.forward is self.model or self._fallback_ok:
+            return self._step(batch, self.forward)
+        try:
+            out = self._step(batch, self.forward)
+        except Exception as e:  # noqa: BLE001  compile できない環境では eager に落として学習を続ける（zero_grad から同じバッチでやり直す）
+            print(f"train: compile failed, falling back to eager: {type(e).__name__}: {str(e)[:300]}", flush=True)
+            self.forward, self.mode_used = self.model, "eager"
+            return self._step(batch, self.forward)
+        self._fallback_ok = True
+        return out
+
+    def _step(self, batch: dict, fwd) -> dict:
         m = self.model
         m.train()
         dev = self.device
@@ -52,7 +83,7 @@ class Trainer:
         for g in self.opt.param_groups:
             g["lr"] = self.lr_at(self.step_count)
         with torch.autocast(device_type=dev.type, dtype=torch.bfloat16, enabled=dev.type == "cuda"):
-            policy, wdl, v41 = m(sq, glob)
+            policy, wdl, v41 = fwd(sq, glob)
         logp = F.log_softmax(policy.float(), dim=-1)
         gathered = logp.gather(1, pidx.clamp(min=0))
         ce = -(gathered * pp).sum(dim=1)

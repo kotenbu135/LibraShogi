@@ -69,6 +69,7 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 - CPU だけ使う作業: そのままで良い（ワーカーは `nice 10`）
 - 数日止めても再開時のコストはゼロ（損失は最後のチェックポイント以降の進行中の対局だけ）
 - 推論は CUDA Graphs で捕獲している（`[selfplay] compile`、decisions.md 2026-09-14）。起動直後の最初のラウンドで捕獲するので、起動時は torch.compile の autotune に 5〜25 秒ほど掛かる（WSL の再起動で `/tmp` のキャッシュが消えた後は長め）。`log.txt` に `selfplay: inference model=compile(max-autotune)+cudagraph` が出れば有効、`eager` なら捕獲に失敗していて理由は `stdout.log`
+- 学習も torch.compile している（`[train] compile`、既定 max-autotune、decisions.md 2026-09-16）。起動後の最初の学習で compile と autotune に十数秒掛かり、その回の `train.sec` が長く出る。`log.txt` に `train: model=compile(max-autotune)` が出れば有効、`eager` なら失敗していて理由は `stdout.log`
 
 ## 5. 設定を変えるとき
 
