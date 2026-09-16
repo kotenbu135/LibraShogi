@@ -8,6 +8,7 @@
 - desktop との接続仕様: [docs/protocol.md](docs/protocol.md)
 - 決定の記録: [docs/decisions.md](docs/decisions.md) ／ 実測値: [docs/measurements.md](docs/measurements.md)
 - 運用（停止・再開、Task Scheduler）: [docs/runbook.md](docs/runbook.md)
+- 配布した重みの説明: [docs/model-card-v0.1.md](docs/model-card-v0.1.md)（モデルカード）
 
 ## 構成
 
@@ -62,6 +63,15 @@ PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-sca
 bin/libra run        # 自己対局と学習（状態は ~/libra-run/ls）。stop / status。運用は docs/runbook.md
 bin/libra-usi        # USI エンジン（モデルは ~/libra-run/ls/checkpoints/latest.onnx）
 ```
+
+## リリース
+
+| 版 | 中身 | 取得 |
+|---|---|---|
+| v0.1（step 477,636、2026-09-15） | `libra-v0.1.onnx`（fp32、opset 17）・`libra-v0.1.pt`・`SHA256SUMS`、玉配置表 `scale-v0.1.json`（CC0）、Windows 版 `libra.exe` の zip | [Releases](https://github.com/kotenbu135/LibraShogi/releases) |
+
+重みの中身・学習のしかた・計測・既知の限界は [モデルカード](docs/model-card-v0.1.md) を読む。
+自己対局だけで学習しており、既存の将棋 AI のコード・重み・棋譜・評価値は内部にも学習信号にも使っていない。
 
 ## ライセンス
 

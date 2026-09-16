@@ -40,7 +40,7 @@ desktop 0.10.0（`play.ts think` / `engineChoose`）から、**`Fuseki_Mode` を
 | 選択（先後） | `position fuseki moves K*xx K*yy` ＋ `go`。時計があるときは選ぶ側の枠の残りを `btime` と `wtime` の**両方**に入れる | `multipv 1`（または multipv 無し）の `info` に `winrate`（手番＝先手の勝率）。GUI は**最後の**その値を見て 0.5 以上なら先手を持つ（§1 の勝率の優先順位で読む）。返った `bestmove` は 3 手目の候補なので GUI は指さない |
 
 - 評価の行が 1 つも来なければ GUI は同梱の両玉の表に落とす（`engineChoose` が `null` を返す）。
-- **GUI 上の天秤将棋でも Libra の `Scale_Table`（`scale.json`）が使われる。** 表に載っていない局面では探索で置く。
+- **GUI 上の天秤将棋でも Libra の `Scale_Table`（`scale.json`）が使われる。** ただし `Scale_Table` の既定は空なので、GUI の登録でこのオプションに表の場所を入れておくこと（入れなければ表を使わず探索で置く。§3）。表に載っていない局面でも探索で置く。
 - 時計の語（`btime/wtime/byoyomi`）が来ても、表に当たる 1〜2 手目は読まずに即座に返す（`libra-engine/tests/test_usi.py::test_scale_table_answers_with_clock_words`）。
 - 選択の `winrate` は `multipv 1` の行に必ず出す（同 `::test_choose_reports_winrate_on_multipv1`）。
 - ルールの版を持つエンジン（`Fuseki_Rules` を名乗るもの）には `position` より先に `setoption name Fuseki_Rules` が来る。Libra は名乗らない（§4 の 9）。
@@ -59,7 +59,7 @@ option name DNN_Provider type combo default auto var auto var cuda var dml var c
 option name DNN_Batch_Size type spin default 64 min 1 max 1024
 option name Sims_Fuseki type spin default 400 min 1 max 1000000
 option name Sims_Normal type spin default 800 min 1 max 1000000
-option name Scale_Table type string default scale.json
+option name Scale_Table type string default <empty>
 option name USI_Ponder type check default false
 option name Declare_Win type check default false
 option name Mate_Nodes type spin default 2000 min 0 max 10000000
@@ -74,6 +74,7 @@ usiok
   （例: CUDA 版の DLL に差し替えて cuDNN が無いと `provider cpu` の後に `provider fallback cuda: … cudnn64_9.dll …`）。
   使えない実行プロバイダ（DLL に含まれないもの）を飛ばしただけのときは出さない。
 - `Declare_Win`: 本将棋で宣言法の条件を満たしたとき `bestmove win` を出す。既定は false だが、**GUI は `Declare_Win` を名乗るエンジンに、登録の設定で値を持っていなければ本将棋の毎 `go` の前に `setoption name Declare_Win value true` を送る**（0.10.0、`play.ts` 384）。利用者が登録の設定で明示した値があればそちらが優先される。ハーネスは true にして起動する。
+- `Scale_Table`: 天秤将棋の 1〜2 手目に両玉を置く玉配置表（`scale.json`）。**既定は空で、置かないと表を使わず探索で置く**（`DNN_Model` と違い、実行ファイルの隣を自動では見ない）。配布物の zip は隣に `scale.json` を同梱するので、GUI の登録でこのオプションにその場所を入れる。
 - `Mate_Nodes`: 各手の根で行う df-pn 詰み探索の節点数。
 - C++ 版エンジン `libra` / `libra.exe`（`libra-engine/`、ONNX Runtime）と Python 版 `bin/libra-usi-py`（`libra_league/usi_engine.py`）がこの申告を実装している。`bin/libra-usi` は C++ 版を起動する（未ビルドなら Python 版）。desktop には
   実行ファイル `C:\Windows\System32\wsl.exe`、引数 `-d <ディストロ> -- <repo>/bin/libra-usi` で登録する（ディストロが 1 つなら `-d <ディストロ>` は省ける。この開発機では `-d Ubuntu-24.04 -- /home/sakis/LibraShogi/bin/libra-usi`。`DNN_Model` を申告するので GPU 扱い、`Fuseki_Mode` を申告するので「布石にも対応」に自動判定される）。
