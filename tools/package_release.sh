@@ -7,7 +7,12 @@
 # 出す先は <重みの置き場>/dist/:
 #   libra-<版>.onnx / libra-<版>.pt / scale-<版>.json … 重みの置き場から写す（あるものだけ）
 #   libra-<版>-windows-x64.zip                        … libra.exe ＋ DirectML 版の DLL ＋ モデル ＋ 表 ＋ ライセンス
+#   libra-<版>-selfplay-sample.jsonl.gz               … 第 3 引数を渡したときだけ（CC0 の自己対局の標本）
 #   SHA256SUMS                                        … dist/ の全ファイル
+#
+# 第 3 引数 <中心の時刻> を渡すと、run の games/ からその前後 1 時間の chunk を 1 本にまとめる。
+#   例: tools/package_release.sh v0.1 ~/libra-run/releases/v0.1 '2026-09-15 12:25:25'
+# 選別はしない（搾取者の布石から始まる局・リーグの局・Gumbel ノイズの手が混ざる。data/README.md）。
 #
 # Windows 版 libra.exe は先に libra-engine/README.md の mingw クロスビルドで build-win/ に作っておく。
 set -euo pipefail
@@ -56,5 +61,23 @@ TXT
 
 ( cd "$STAGE" && python3 -c "import shutil,sys; shutil.make_archive(sys.argv[1], \"zip\", \".\", sys.argv[2])" "$DIST/libra-$VER-windows-x64" "libra-$VER-windows-x64" )
 for f in "$SRC/libra-$VER.onnx" "$SRC/libra-$VER.pt" $SCALE; do [ -f "$f" ] && cp "$f" "$DIST/"; done
+if [ "${3:-}" != "" ]; then
+  GAMES="$(dirname "$(dirname "$SRC")")/ls/games"
+  [ -d "$GAMES" ] || GAMES="$HOME/libra-run/ls/games"
+  python3 - "$GAMES" "$3" "$DIST/libra-$VER-selfplay-sample.jsonl.gz" <<'PY'
+import datetime, glob, gzip, os, sys
+games, center, out = sys.argv[1:4]
+t = datetime.datetime.strptime(center, "%Y-%m-%d %H:%M:%S").timestamp()
+fs = sorted(f for f in glob.glob(os.path.join(games, "games_*.jsonl")) if abs(os.path.getmtime(f) - t) < 3600)
+n = 0
+with gzip.open(out, "wt", encoding="utf-8") as w:
+    for f in fs:
+        for line in open(f, encoding="utf-8"):
+            if line.strip():
+                w.write(line); n += 1
+print(f"selfplay sample: {len(fs)} chunks, {n} games, {os.path.getsize(out)/1e6:.1f} MB "
+      f"({os.path.basename(fs[0])}..{os.path.basename(fs[-1])})")
+PY
+fi
 ( cd "$DIST" && sha256sum * > SHA256SUMS )
 echo "→ $DIST"; ls -la "$DIST"
