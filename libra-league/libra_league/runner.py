@@ -17,6 +17,7 @@ from libra_net.model import LibraNet, NetConfig
 from .auto import AutoJobs, append_metrics
 from .config import dump_toml, load_config
 from .league import add_result, list_pool, main_winrate, pfsp_pick, pool_name, prune_pool, tag_league_game
+from .looptime import LoopTimer
 from .replay import ReplayBuffer, add_target_stats, summarize_target_stats
 from .selfplay import SelfPlayLoop
 from .state import StateDir, write_json_atomic
@@ -50,6 +51,8 @@ class Runner:
         self.session_elapsed_offset = 0.0
         self.rate_hist: list[tuple[float, int]] = []
         self.last_train: dict = {}
+        self.timer = LoopTimer()  # ループの処理時間の内訳（metrics の 1 行ごとに閉じる。looptime.py）
+        self.last_timing: dict | None = None
         self.train_mode = ""  # 学習の compile の状態（変わったらログに出す）
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.exploiter_stats = {"games": 0, "wins": 0, "draws": 0, "losses": 0}
@@ -411,6 +414,16 @@ class Runner:
         self.openings_mtime = mt
         self.log(f"openings: {len(ops)} lines from {p} (prob {sp.get('openings_prob', 0.0)})")
 
+    def take_timing(self) -> dict:
+        """処理時間の窓を閉じる（自己対局とリーグのループの段ごとの累計も取って空にする）。"""
+        sp = self.loop.timing if self.loop is not None else None
+        lg = self.league_loop.timing if self.league_loop is not None else None
+        out = self.timer.take(sp, lg)
+        for loop in (self.loop, self.league_loop):
+            if loop is not None:
+                loop.timing = {}
+        return out
+
     def write_status(self) -> None:
         now = time.time()
         self.rate_hist.append((now, self.replay.total_games))
@@ -451,8 +464,13 @@ class Runner:
             status["exploiter"] = es
         if self.league_loop is not None:
             status["league"] = self.league_status()
+        take_timing = now - self.last_metrics >= float(self.cfg["run"].get("metrics_minutes", 5)) * 60 and self.loop is not None
+        if take_timing:
+            self.last_timing = self.take_timing()
+        if self.last_timing is not None:
+            status["timing"] = self.last_timing
         write_json_atomic(self.sd.status_json, status)
-        if now - self.last_metrics >= float(self.cfg["run"].get("metrics_minutes", 5)) * 60 and self.loop is not None:
+        if take_timing:
             append_metrics(self.sd, status)
             self.last_metrics = now
         self.maybe_write_calib(now)
@@ -482,11 +500,15 @@ class Runner:
         self.loop = SelfPlayLoop(self.cfg["search"], sp["n_games"], sp["threads"], int(self.rng.integers(0, 2**63)), self.device, sp["infer_dtype"],
                                  sp.get("compile", "none"))
         self.loop.set_model(self.model)
+        self.loop.timing = {}
         self.load_opponent()
         self.ensure_pool_snapshot()
         self.reload_openings(force=True)
         if self.league_enabled:
             self.start_league()
+            if self.league_loop is not None:
+                self.league_loop.timing = {}
+        self.timer = LoopTimer()  # 立ち上げ（読み込み・compile の前段）は窓に入れない
         tr, rr = self.cfg["train"], self.cfg["run"]
         last_ck = time.time()
         last_status = 0.0
@@ -514,11 +536,13 @@ class Runner:
             # 自己対局
             modes = self.infer_modes()
             finished = self.loop.round()
-            league_games = self.league_round()  # 対 lx（[league] enabled のときだけ。自己対局と同じ回数だけ進める）
+            with self.timer.phase("league"):
+                league_games = self.league_round()  # 対 lx（[league] enabled のときだけ。自己対局と同じ回数だけ進める）
             if self.infer_modes() != modes:
                 self.log(f"selfplay: inference {self.infer_modes()}")
             if league_games:
-                self.replay.add_games(league_games)
+                with self.timer.phase("replay"):
+                    self.replay.add_games(league_games)
                 new_games += len(league_games)
                 self.session_games += len(league_games)
                 self.state["games_total"] = self.replay.total_games
@@ -529,13 +553,15 @@ class Runner:
                         r = int(g["exploiter_result"])
                         self.exploiter_stats["games"] += 1
                         self.exploiter_stats["wins" if r > 0 else "draws" if r == 0 else "losses"] += 1
-                self.replay.add_games(finished)
+                with self.timer.phase("replay"):
+                    self.replay.add_games(finished)
                 new_games += len(finished)
                 self.session_games += len(finished)
                 self.state["games_total"] = self.replay.total_games
                 self.state["chunk_index"] = self.replay.chunk_index
             if self.inbox is not None and time.time() - last_ingest >= float(self.cfg["workers"].get("ingest_seconds", 10)):
-                n = self.ingest_workers()
+                with self.timer.phase("ingest"):
+                    n = self.ingest_workers()
                 new_games += n
                 self.session_games += n  # games_session と局/日（total_games から数える）を揃える
                 last_ingest = time.time()
@@ -549,34 +575,42 @@ class Runner:
                 fut = self.pool.submit(sample)
                 target_acc: dict = {}
                 for _ in range(steps):
-                    batch = fut.result()
+                    with self.timer.phase("train_sample"):
+                        batch = fut.result()
                     fut = self.pool.submit(sample)
                     add_target_stats(target_acc, batch["target_stats"])
-                    self.last_train = self.trainer.step(batch)
-                fut.result()
+                    with self.timer.phase("train_step"):
+                        self.last_train = self.trainer.step(batch)
+                with self.timer.phase("train_sample"):
+                    fut.result()
+                self.timer.count("train_steps", steps)
                 self.last_train["steps"] = steps
                 if self.trainer.mode_used != self.train_mode:
                     self.train_mode = self.trainer.mode_used
                     self.log(f"train: model={self.train_mode}")
                 self.last_train["sec"] = round(time.time() - t0, 1)
                 self.last_train["target"] = summarize_target_stats(target_acc)  # 学習目標と結果の差（metrics.jsonl・コンソール）
-                self.loop.set_model(self.model)
-                if self.league_loop is not None:
-                    self.league_loop.set_model(self.model)
-                self.publish_weights()
+                with self.timer.phase("train_publish"):
+                    self.loop.set_model(self.model)
+                    if self.league_loop is not None:
+                        self.league_loop.set_model(self.model)
+                    self.publish_weights()
                 self.state["step"] = self.trainer.step_count
                 new_games = 0
             now = time.time()
-            self.maybe_refresh_main()
-            self.maybe_write_openings()
-            self.reload_openings()
+            with self.timer.phase("housekeeping"):
+                self.maybe_refresh_main()
+                self.maybe_write_openings()
+                self.reload_openings()
             if now - last_status > rr["status_seconds"]:
-                self.write_status()
-                if self.auto.poll():
-                    self.sd.write_state(self.state)  # コンソールの「自動計測」欄が実行中/待機を追えるように
+                with self.timer.phase("status"):
+                    self.write_status()
+                    if self.auto.poll():
+                        self.sd.write_state(self.state)  # コンソールの「自動計測」欄が実行中/待機を追えるように
                 last_status = now
             if now - last_ck > rr["checkpoint_minutes"] * 60:
-                self.checkpoint()
+                with self.timer.phase("checkpoint"):
+                    self.checkpoint()
                 last_ck = time.time()
 
 

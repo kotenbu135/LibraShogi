@@ -72,6 +72,7 @@ def metrics_row(status: dict) -> dict:
         "engine": {k: eng.get(k) for k in METRIC_ENGINE_KEYS} if eng else None,
         "exploiter": {k: status["exploiter"].get(k) for k in ("games", "wins", "draws", "losses")} if status.get("exploiter") else None,
         "gpu_mb": (status.get("gpu") or {}).get("mem_reserved_mb"),
+        "timing": status.get("timing"),  # 処理時間の内訳（looptime.py。この行までの窓）
     }
     return row
 

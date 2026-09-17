@@ -11,6 +11,7 @@ import json
 import sys
 from pathlib import Path
 
+from .looptime import format_timing
 from .state import DEFAULT_ROOT, StateDir, read_json
 
 
@@ -271,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
                       f"perpetual {eng.get('perpetual_check')}  max_ply {eng.get('max_ply')}  sims/move {eng.get('sims', 0) / max(1, eng.get('moves', 1)):.1f}")
             if st.get("train"):
                 print("train:", json.dumps(st["train"]))
+            if st.get("timing"):
+                print("timing:", format_timing(st["timing"]))
             if st.get("workers"):
                 wk = st["workers"]
                 print(f"workers: games {wk.get('games')} files {wk.get('files')} stale {wk.get('stale_games')} rejected {wk.get('rejected_files')}  "

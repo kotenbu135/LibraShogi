@@ -105,7 +105,7 @@ def test_runner_league_smoke(tmp_path):
     cfg["selfplay"].update({"n_games": 4, "threads": 2, "infer_dtype": "float32"})
     cfg["league"].update({"enabled": True, "pool": str(pool), "n_games": 4, "threads": 2, "switch_games": 2})
     cfg["train"].update({"batch_size": 8, "min_window_games": 4, "train_every_games": 4, "window_games": 100})
-    cfg["run"].update({"status_seconds": 0.5, "checkpoint_minutes": 100, "chunk_games": 4, "export_onnx": False})
+    cfg["run"].update({"status_seconds": 0.5, "checkpoint_minutes": 100, "chunk_games": 4, "export_onnx": False, "metrics_minutes": 0.02})
     sd = StateDir(tmp_path / "ls")
     sd.create()
     r = Runner(sd, cfg, device=torch.device("cpu"))
@@ -114,7 +114,9 @@ def test_runner_league_smoke(tmp_path):
     t0 = time.time()
     while time.time() - t0 < 120:
         st = read_json(sd.status_json, {})
-        if st.get("league", {}).get("games", 0) >= 4 and st.get("step", 0) >= 1:
+        mp = sd.root / "metrics.jsonl"
+        trained = mp.exists() and any((json.loads(x).get("timing") or {}).get("train_steps") for x in mp.read_text().splitlines() if x.endswith("}"))
+        if st.get("league", {}).get("games", 0) >= 4 and st.get("step", 0) >= 1 and trained:
             break
         time.sleep(0.5)
     sd.set_flag("STOP")
@@ -126,3 +128,12 @@ def test_runner_league_smoke(tmp_path):
     rows = [json.loads(x) for p in sd.games.glob("games_*.jsonl") for x in p.read_text(encoding="utf-8").splitlines()]
     assert any(x.get("league", {}).get("opponent_step") == 7 for x in rows) and any("league" not in x for x in rows)
     assert any("league: opponent lx step 7" in line for line in (sd.root / "log.txt").read_text().splitlines())
+    # 処理時間の内訳: 段の合計が窓の長さに揃い、自己対局・リーグ・学習の段が入る（looptime.py）
+    rows = [json.loads(x) for x in (sd.root / "metrics.jsonl").read_text().splitlines()]
+    tms = [x["timing"] for x in rows if x.get("timing")]
+    assert tms and st["timing"]["sec"]
+    for tm in tms:
+        assert abs(sum(tm["sec"].values()) - tm["window_s"]) < 0.2
+    assert sum(tm["rounds"] for tm in tms) > 0 and sum(tm["league_rounds"] for tm in tms) > 0
+    assert sum(tm["sec"]["sp_eval"] for tm in tms) > 0 and sum(tm["sec"]["lg_eval"] for tm in tms) > 0
+    assert sum(tm["train_steps"] for tm in tms) >= 1 and sum(tm["sec"]["train_step"] for tm in tms) > 0
