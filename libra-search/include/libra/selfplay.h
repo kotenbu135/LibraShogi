@@ -35,7 +35,8 @@ struct SearchConfig {
   bool external = false;         // 外部駆動（USI エンジン用）: 局面は set_position で与え、手は指さず結果を返す
   bool defer_root_proof = false; // 根の証明探索を proof() の段に回す（根の評価を先に出す。棋譜は変わらない。external では無視）
   // 対局ごとに直近の手の探索で評価した局面のネットの出力を持ち、特徴量が同じ葉は評価に出さずに collect の中で展開する
-  // （棋譜は変わらない。ネットの重みを替えたら clear_eval_cache を呼ぶ。手番ごとに別のネットで評価する使い方では切る。external では無視）
+  // （棋譜は変わらない。ネットの重みを替えたら clear_eval_cache を呼ぶ。2 つのネットで打つときは set_two_nets で両方の出力を持つ。
+  // external では無視）
   bool eval_cache = false;
   // 根の Gumbel ノイズ。false なら候補の絞り込みと最終選択を log π + σ(q̂) だけで行う（手が乱数に依らない。評価・計測用。
   // 自己対局は true のまま。玉配置と布石は乱数で選ぶ）
@@ -113,6 +114,14 @@ class SelfPlay {
     ++eval_gen_;
   }
   bool eval_cache() const { return cfg_.eval_cache; }
+  // 2 つのネットで打つ（搾取者・リーグ）: 偶数枠は net 0 が先手、奇数枠は net 1 が先手。根の手番の側のネットで価値と方策を取り、
+  // opponent_prior なら net 0 の根の木の中の net 1 の手番の葉だけ方策を net 1 から取る（価値は net 0）。
+  // 評価は apply2 で両方のネットの全行を受け取り、行ごとに選ぶ。eval_cache は両方の出力を持つので、手番でネットが替わっても使える。
+  // collect/apply の外で呼ぶ（持っている評価を捨てる）
+  void set_two_nets(bool on, bool opponent_prior);
+  bool two_nets() const { return two_nets_; }
+  // set_two_nets のときの apply。logits0/wdl0 は net 0、logits1/wdl1 は net 1 の全行（形は apply と同じ）
+  void apply2(const float* logits0, const float* wdl0, const float* logits1, const float* wdl1);
   int active() const { return active_; }
   // 各対局のルート（いま考えている手番）の色を書く（0 先手、1 後手）。評価対局で「どちらのネットで読むか」を決めるのに使う
   void root_turns(std::int8_t* out) const;
@@ -142,10 +151,16 @@ class SelfPlay {
   int threads_;
   std::mt19937_64 rng_;
   std::uint64_t eval_gen_ = 1;  // clear_eval_cache のたびに進める。対局のキャッシュの世代と違えば捨てる
+  bool two_nets_ = false;       // set_two_nets
+  bool opponent_prior_ = false;
   // 対局ごとの処理はその対局のデータだけを触る（並列に呼べる）。統計と終局記録は対局側に貯め、あとで集める
   void step_game(Game& g);  // 次の葉まで進める（終局・着手・新規対局を含む）
   int descend(Game& g);     // ルートから 1 回選ぶ（selfplay.cpp の戻り値の説明）
   void apply_game(Game& g, const float* logits, const float* wdl);
+  void apply_game2(Game& g, const float* logits0, const float* wdl0, const float* logits1, const float* wdl1);
+  void apply_all(const std::function<void(Game&, int)>& eval_row);  // apply / apply2 の共通部分（eval_row が行 i の評価を入れる）
+  // set_two_nets のとき、対局の今の葉の (価値を取るネット, 方策を取るネット)。0 か 1
+  std::pair<int, int> nets_for(const Game& g) const;
   // 葉の鍵（h, aux）がキャッシュにあれば展開する。0 = 無い、1 = 展開した（次の葉へ進める）、2 = 本将棋の根を展開して証明探索の結果を待つ
   int use_cached(Game& g, std::uint64_t h, std::uint32_t aux);
   void finish_move(Game& g);

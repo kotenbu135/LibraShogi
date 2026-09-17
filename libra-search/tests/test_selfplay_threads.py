@@ -4,6 +4,7 @@
 import hashlib
 
 import numpy as np
+import pytest
 
 import librasearch
 import librashogi as ls
@@ -141,6 +142,77 @@ def test_eval_cache_keeps_records_and_saves_evals():
         assert st["cache_hits"] > 0.05 * (st["evals"] + st["cache_hits"]), st
         assert st["moves"] > ref_st["moves"] and len(got_list) >= len(ref_list), (st["moves"], ref_st["moves"])
         assert st["mate_found"] > 0 and st["proof_found"] > 0
+
+
+def fake_net2(sq, glob, net):
+    """2 つのネットの疑似ネット: 特徴量とネットの番号で決まる。"""
+    return fake_net(np.concatenate([sq, np.full_like(sq[:, :1], net)], axis=1), glob)
+
+
+def play_two_nets(opponent_prior, how, threads=1, call_proof=True, clear_every=0, n_games=40, rounds=2000):
+    """how: "python" は行の選び分けを外（旧来の搾取者のループと同じ式）で行って apply、"apply2" は set_two_nets と apply2。"""
+    cache = how == "apply2+cache"
+    sp = librasearch.SelfPlay({**CFG, "defer_root_proof": True, "eval_cache": cache}, n_games, seed=7, threads=threads)
+    if how != "python":
+        sp.set_two_nets(True, opponent_prior)
+    sq = np.zeros((n_games, 81, ls.SQ_FEATS), np.float32)
+    glob = np.zeros((n_games, ls.GLOB_FEATS), np.float32)
+    swap = (np.arange(n_games) % 2).astype(np.int8)
+    done = []
+    for r in range(rounds):
+        sp.collect(sq, glob)
+        (l0, w0), (l1, w1) = fake_net2(sq, glob, 0), fake_net2(sq, glob, 1)
+        if call_proof:
+            sp.proof()
+        if how == "python":
+            who = sp.root_turns() ^ swap
+            prior_who = who | (sp.leaf_turns() ^ swap) if opponent_prior else who
+            sp.apply(np.where(prior_who[:, None] != 0, l1, l0), np.where(who[:, None] != 0, w1, w0))
+        else:
+            sp.apply2(l0, w0, l1, w1)
+        done += sp.take_finished()
+        if clear_every and r % clear_every == clear_every - 1:
+            sp.clear_eval_cache()
+    return done, sp.stats()
+
+
+@pytest.mark.parametrize("opponent_prior", [True, False])
+def test_two_nets_select_rows_like_the_exploiter_loop_and_cache_keeps_records(opponent_prior):
+    """set_two_nets + apply2 は、外で根の手番（と葉の手番）から行ごとにネットを選んで apply したのと同じ棋譜になる。
+    eval_cache は両方のネットの出力を持つので、手番でネットが替わっても棋譜は変わらず、当たった分だけ先へ進む。"""
+    ref_list, ref_st = play_two_nets(opponent_prior, "python")
+    got_list, st = play_two_nets(opponent_prior, "apply2")
+    assert by_slot(got_list) == by_slot(ref_list) and st == ref_st
+    ref = by_slot(ref_list)
+    for threads, call_proof, clear_every in ((1, True, 0), (8, False, 37)):
+        got_list, st = play_two_nets(opponent_prior, "apply2+cache", threads, call_proof, clear_every)
+        got = by_slot(got_list)
+        compared = 0
+        for slot in set(ref) | set(got):
+            g, r = got.get(slot, []), ref.get(slot, [])
+            k = min(len(g), len(r))
+            assert g[:k] == r[:k], (threads, call_proof, clear_every, slot)
+            compared += k
+        assert compared >= len(ref_list) - len(ref), (threads, compared)
+        assert st["cache_hits"] > 0.03 * (st["evals"] + st["cache_hits"]), st
+        assert st["moves"] > ref_st["moves"], (st["moves"], ref_st["moves"])
+
+
+def test_apply_and_apply2_match_the_two_nets_mode():
+    sp = librasearch.SelfPlay(CFG, 4, seed=1, threads=1)
+    sq = np.zeros((4, 81, ls.SQ_FEATS), np.float32)
+    glob = np.zeros((4, ls.GLOB_FEATS), np.float32)
+    sp.collect(sq, glob)
+    l, w = fake_net(sq, glob)
+    with pytest.raises(ValueError):
+        sp.apply2(l, w, l, w)
+    sp.set_two_nets(True)
+    assert sp.two_nets()
+    with pytest.raises(RuntimeError):
+        sp.apply(l, w)
+    sp.apply2(l, w, l, w)
+    sp.set_two_nets(False)
+    assert not sp.two_nets()
 
 
 def test_gumbel_noise_off_makes_moves_independent_of_seed():

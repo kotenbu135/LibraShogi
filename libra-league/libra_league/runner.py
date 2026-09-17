@@ -324,7 +324,9 @@ class Runner:
 
     def start_league(self) -> None:
         lg, sp = self.cfg["league"], self.cfg["selfplay"]
-        self.league_loop = SelfPlayLoop(self.cfg["search"], int(lg["n_games"]), int(lg["threads"]), int(self.rng.integers(0, 2**63)), self.device,
+        # eval_cache は切る: 1 ラウンドで進む手数が増えると、自己対局と同じラウンド数だけ進めるリーグの局の割合が変わるため
+        # （2026-09-17、割合を変えるかはユーザーの判断待ち。それまでの搾取者モードのキャッシュ無しと同じ）
+        self.league_loop = SelfPlayLoop({**self.cfg["search"], "eval_cache": False}, int(lg["n_games"]), int(lg["threads"]), int(self.rng.integers(0, 2**63)), self.device,
                                         sp["infer_dtype"], sp.get("compile", "none"))
         self.league_loop.set_model(self.model)
         self.state.setdefault("league", {}).setdefault("stats", {})

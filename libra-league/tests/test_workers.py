@@ -352,7 +352,7 @@ def test_selfplay_round_timing():
 
 
 def test_selfplay_loop_eval_cache_on_for_self_play_and_off_for_exploiter():
-    """自己対局のループはネットの出力のキャッシュを使い（重みを替えるたびに捨てる）、搾取者モード（手番でネットが替わる）では切る。"""
+    """自己対局のループはネットの出力のキャッシュを使い（重みを替えるたびに捨てる）、搾取者モード（手番でネットが替わる）でも使う。"""
     from libra_league.selfplay import SelfPlayLoop
 
     torch.manual_seed(0)
@@ -364,8 +364,12 @@ def test_selfplay_loop_eval_cache_on_for_self_play_and_off_for_exploiter():
     for _ in range(200):
         loop.round()
     assert loop.stats()["cache_hits"] > 0
-    loop.set_opponent(LibraNet(NetConfig.from_dict(NET)))
-    assert not loop.engine.eval_cache_enabled()
+    loop.set_opponent(LibraNet(NetConfig.from_dict(NET)))  # 両方のネットの出力を持つので切らない
+    assert loop.engine.eval_cache_enabled() and loop.engine.two_nets()
+    hits = loop.stats()["cache_hits"]
+    for _ in range(200):
+        loop.round()
+    assert loop.stats()["cache_hits"] > hits
     off = SelfPlayLoop({**cfg["search"], "eval_cache": False}, 4, 1, 3, torch.device("cpu"), "float32")
     assert not off.engine.eval_cache_enabled()
 

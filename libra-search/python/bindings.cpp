@@ -160,6 +160,21 @@ PYBIND11_MODULE(_search, m) {
              s.apply(logits.data(), wdl.data());
            },
            py::arg("logits"), py::arg("wdl"))
+      .def("apply2",
+           [](SelfPlay& s, py::array_t<float, py::array::c_style | py::array::forcecast> logits0,
+              py::array_t<float, py::array::c_style | py::array::forcecast> wdl0,
+              py::array_t<float, py::array::c_style | py::array::forcecast> logits1,
+              py::array_t<float, py::array::c_style | py::array::forcecast> wdl1) {
+             for (const auto* a : {&logits0, &logits1})
+               if (a->ndim() != 2 || a->shape(0) != s.n_games() || a->shape(1) != POLICY_SIZE)
+                 throw py::value_error("logits must be [n_games, POLICY_SIZE]");
+             for (const auto* a : {&wdl0, &wdl1})
+               if (a->ndim() != 2 || a->shape(0) != s.n_games() || a->shape(1) != 3) throw py::value_error("wdl must be [n_games, 3]");
+             if (!s.two_nets()) throw py::value_error("apply2 needs set_two_nets(True)");
+             py::gil_scoped_release nogil;
+             s.apply2(logits0.data(), wdl0.data(), logits1.data(), wdl1.data());
+           },
+           py::arg("logits0"), py::arg("wdl0"), py::arg("logits1"), py::arg("wdl1"))
       .def("proof",
            [](SelfPlay& s) {
              py::gil_scoped_release nogil;
@@ -176,6 +191,8 @@ PYBIND11_MODULE(_search, m) {
       .def("clear_eval_cache", &SelfPlay::clear_eval_cache)
       .def("set_eval_cache", &SelfPlay::set_eval_cache, py::arg("on"))
       .def("eval_cache_enabled", &SelfPlay::eval_cache)
+      .def("set_two_nets", &SelfPlay::set_two_nets, py::arg("on"), py::arg("opponent_prior") = true)
+      .def("two_nets", &SelfPlay::two_nets)
       .def("set_position", [](SelfPlay& s, int slot, const std::string& line, int sims, bool full, const std::string& mode) { return s.set_position(slot, line, sims, full, mode == "fuseki" ? MODE_FUSEKI : MODE_TENBIN); }, py::arg("slot"), py::arg("usi_line"), py::arg("sims"), py::arg("full") = true, py::arg("mode") = "tenbin")
       .def("collect_batch",
            [](SelfPlay& s, int slot, py::array_t<float, py::array::c_style> sq, py::array_t<float, py::array::c_style> glob) {

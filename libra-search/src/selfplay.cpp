@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <functional>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 
 namespace libra {
@@ -132,6 +133,9 @@ struct SelfPlay::Game {
     int move_no = 0;        // 評価したときの moves_made
     float net_value = 0;
     std::vector<Edge> edges;  // 事前確率まで入れた辺（訪問数・子は空）
+    // set_two_nets のとき: net_value と edges の事前確率は net 0、こちらは net 1 の出力（edges と同じ順）
+    float net_value1 = 0;
+    std::vector<float> prior1;
   };
   std::unordered_map<std::uint64_t, CachedEval> eval_cache;
   std::uint64_t eval_cache_gen = 0;
@@ -917,8 +921,15 @@ int SelfPlay::use_cached(Game& g, std::uint64_t h, std::uint32_t aux) {
     }
   }
   Node& leaf = g.nodes[g.leaf];
-  leaf.edges = it->second.edges;
-  leaf.net_value = it->second.net_value;
+  const Game::CachedEval& c = it->second;
+  leaf.edges = c.edges;
+  leaf.net_value = c.net_value;
+  if (two_nets_) {
+    const auto [value_net, prior_net] = nets_for(g);
+    if (value_net == 1) leaf.net_value = c.net_value1;
+    if (prior_net == 1)
+      for (size_t k = 0; k < leaf.edges.size(); ++k) leaf.edges[k].prior = c.prior1[k];
+  }
   finish_leaf(g, leaf);
   // 本将棋の根の詰み探索（proof_state 1）はそのまま proof()（GPU の評価中）に残し、根を展開したところで止まる。
   // 先に探索を進めると、証明できて読みを捨てたときに対局の乱数（Gumbel ノイズ・全読みの抽選）を余分に使って棋譜が変わるため。
@@ -926,44 +937,109 @@ int SelfPlay::use_cached(Game& g, std::uint64_t h, std::uint32_t aux) {
   return g.proof_state == 1 ? 2 : 1;
 }
 
-void SelfPlay::apply_game(Game& g, const float* logits, const float* wdl) {
-  Node& leaf = g.nodes[g.leaf];
-  Position& sp = g.sp;
+// 葉の合法手の辺を作る（事前確率は set_priors で入れる）
+static void make_edges(Position& sp, std::vector<Edge>& edges) {
   MoveList ml;
   sp.legal_moves(ml);
-  leaf.edges.clear();
-  leaf.edges.reserve(ml.n);
+  edges.clear();
+  edges.reserve(ml.n);
+  for (Move m : ml) edges.push_back(Edge{m, std::uint16_t(move_index(sp, m)), 0, 0.0f});
+}
+
+// 辺の事前確率を、合法手の上でのロジットの softmax にする（下限 1e-8）
+static void set_priors(std::vector<Edge>& edges, const float* logits) {
   float mx = -1e30f;
-  for (Move m : ml) {
-    int idx = move_index(sp, m);
-    leaf.edges.push_back(Edge{m, std::uint16_t(idx), 0, logits[idx]});
-    mx = std::max(mx, logits[idx]);
+  for (Edge& e : edges) {
+    e.prior = logits[e.index];
+    mx = std::max(mx, e.prior);
   }
   float z = 0;
-  for (Edge& e : leaf.edges) {
+  for (Edge& e : edges) {
     e.prior = std::exp(e.prior - mx);
     z += e.prior;
   }
-  for (Edge& e : leaf.edges) e.prior = std::max(e.prior / z, 1e-8f);
+  for (Edge& e : edges) e.prior = std::max(e.prior / z, 1e-8f);
+}
+
+// eval_cache に書く項（重みが替わっていれば先に捨てる）。書かない葉なら nullptr
+static SelfPlay::Game::CachedEval* cache_slot(SelfPlay::Game& g, bool enabled, std::uint64_t gen) {
+  if (g.leaf_hash == 0 || !enabled) return nullptr;
+  if (g.eval_cache_gen != gen) {
+    g.eval_cache.clear();
+    g.eval_cache_gen = gen;
+  }
+  SelfPlay::Game::CachedEval& c = g.eval_cache[g.leaf_hash];
+  c.key = g.nodes[g.leaf].key;
+  c.aux = g.leaf_aux;
+  c.move_no = g.moves_made;
+  return &c;
+}
+
+void SelfPlay::apply_game(Game& g, const float* logits, const float* wdl) {
+  Node& leaf = g.nodes[g.leaf];
+  make_edges(g.sp, leaf.edges);
+  set_priors(leaf.edges, logits);
   leaf.net_value = wdl_value(wdl);
-  if (g.leaf_hash != 0 && cfg_.eval_cache && !cfg_.external) {
-    if (g.eval_cache_gen != eval_gen_) {
-      g.eval_cache.clear();
-      g.eval_cache_gen = eval_gen_;
-    }
-    Game::CachedEval& c = g.eval_cache[g.leaf_hash];
-    c.key = leaf.key;
-    c.aux = g.leaf_aux;
-    c.move_no = g.moves_made;
-    c.net_value = leaf.net_value;
-    c.edges = leaf.edges;
+  if (Game::CachedEval* c = cache_slot(g, cfg_.eval_cache && !cfg_.external, eval_gen_)) {
+    c->net_value = leaf.net_value;
+    c->edges = leaf.edges;
   }
   g.leaf_hash = 0;
   finish_leaf(g, leaf);
   g.st.evals++;
 }
 
+std::pair<int, int> SelfPlay::nets_for(const Game& g) const {
+  // 偶数枠は net 0 が先手。行の持ち主 = 手番（0 先手、1 後手）と枠の偶奇の排他的論理和
+  const int swap = g.slot & 1;
+  const int value_net = (g.pos.turn() == BLACK ? 0 : 1) ^ swap;
+  const int leaf_owner = (g.sp.turn() == BLACK ? 0 : 1) ^ swap;
+  return {value_net, opponent_prior_ ? (value_net | leaf_owner) : value_net};
+}
+
+void SelfPlay::apply_game2(Game& g, const float* logits0, const float* wdl0, const float* logits1, const float* wdl1) {
+  Node& leaf = g.nodes[g.leaf];
+  const auto [value_net, prior_net] = nets_for(g);
+  make_edges(g.sp, leaf.edges);
+  Game::CachedEval* c = cache_slot(g, cfg_.eval_cache && !cfg_.external, eval_gen_);
+  if (c != nullptr) {
+    set_priors(leaf.edges, logits1);
+    c->prior1.resize(leaf.edges.size());
+    for (size_t k = 0; k < leaf.edges.size(); ++k) c->prior1[k] = leaf.edges[k].prior;
+    set_priors(leaf.edges, logits0);
+    c->edges = leaf.edges;
+    c->net_value = wdl_value(wdl0);
+    c->net_value1 = wdl_value(wdl1);
+    if (prior_net == 1)
+      for (size_t k = 0; k < leaf.edges.size(); ++k) leaf.edges[k].prior = c->prior1[k];
+  } else {
+    set_priors(leaf.edges, prior_net == 1 ? logits1 : logits0);
+  }
+  leaf.net_value = wdl_value(value_net == 1 ? wdl1 : wdl0);
+  g.leaf_hash = 0;
+  finish_leaf(g, leaf);
+  g.st.evals++;
+}
+
+void SelfPlay::set_two_nets(bool on, bool opponent_prior) {
+  two_nets_ = on;
+  opponent_prior_ = on && opponent_prior;
+  ++eval_gen_;
+}
+
 void SelfPlay::apply(const float* logits, const float* wdl) {
+  if (two_nets_) throw std::logic_error("SelfPlay::apply: set_two_nets のときは apply2 を使う");
+  apply_all([&](Game& g, int i) { apply_game(g, logits + size_t(i) * POLICY_SIZE, wdl + size_t(i) * 3); });
+}
+
+void SelfPlay::apply2(const float* logits0, const float* wdl0, const float* logits1, const float* wdl1) {
+  if (!two_nets_) throw std::logic_error("SelfPlay::apply2: set_two_nets(true) の後で使う");
+  apply_all([&](Game& g, int i) {
+    apply_game2(g, logits0 + size_t(i) * POLICY_SIZE, wdl0 + size_t(i) * 3, logits1 + size_t(i) * POLICY_SIZE, wdl1 + size_t(i) * 3);
+  });
+}
+
+void SelfPlay::apply_all(const std::function<void(Game&, int)>& eval_row) {
   int n = std::min(active_, int(games_.size()));
   parallel_for(n, [&](int i) {
     Game& g = *games_[i];
@@ -987,7 +1063,7 @@ void SelfPlay::apply(const float* logits, const float* wdl) {
       step_game(g);
       return;
     }
-    apply_game(g, logits + size_t(i) * POLICY_SIZE, wdl + size_t(i) * 3);
+    eval_row(g, i);
     step_game(g);  // 次の葉まで進める（終局・着手を含む）
   });
   gather();

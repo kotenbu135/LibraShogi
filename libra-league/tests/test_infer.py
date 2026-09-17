@@ -55,88 +55,50 @@ def test_set_model_keeps_one_copy():
     assert loop.model is not first
 
 
-def test_exploiter_rows_come_from_the_right_net():
-    torch.manual_seed(0)
-    n = 6
-    me, opp = LibraNet(SMALL), LibraNet(NetConfig(d_model=48, n_layers=2, n_heads=4, d_ff=96))
-    loop = SelfPlayLoop(DEFAULTS["search"], n, 1, 0, torch.device("cpu"), "float32")
-    loop.set_model(me)
-    loop.set_opponent(opp)
-    sq, glob = _inputs(n, 2)
-    loop.sq.copy_(sq)
-    loop.glob.copy_(glob)
-    who = np.array([0, 1, 1, 0, 1, 0], np.int8)  # 1 なら凍結した本体
-    logits, wdl = loop.evaluate(who)
-    mp, mw = _eager(me, sq, glob)
-    op, ow = _eager(opp, sq, glob)
-    for i in range(n):
-        src_p, src_w = (op, ow) if who[i] else (mp, mw)
-        torch.testing.assert_close(logits[i], src_p[i])
-        torch.testing.assert_close(wdl[i], src_w[i])
-
-
-def test_exploiter_prior_and_value_can_come_from_different_nets():
-    """prior_who の行は方策を凍結した本体から、who の行は価値を凍結した本体から取る。"""
-    torch.manual_seed(0)
-    n = 6
-    me, opp = LibraNet(SMALL), LibraNet(NetConfig(d_model=48, n_layers=2, n_heads=4, d_ff=96))
-    loop = SelfPlayLoop(DEFAULTS["search"], n, 1, 0, torch.device("cpu"), "float32")
-    loop.set_model(me)
-    loop.set_opponent(opp)
-    sq, glob = _inputs(n, 3)
-    loop.sq.copy_(sq)
-    loop.glob.copy_(glob)
-    who = np.array([0, 1, 0, 0, 1, 0], np.int8)
-    prior_who = np.array([0, 1, 1, 0, 1, 1], np.int8)
-    logits, wdl = loop.evaluate(who, prior_who)
-    mp, mw = _eager(me, sq, glob)
-    op, ow = _eager(opp, sq, glob)
-    for i in range(n):
-        torch.testing.assert_close(logits[i], (op if prior_who[i] else mp)[i])
-        torch.testing.assert_close(wdl[i], (ow if who[i] else mw)[i])
-
-
 @pytest.mark.parametrize("opponent_prior", [True, False])
-def test_exploiter_round_takes_opponent_prior_only_inside_exploiter_trees(opponent_prior):
-    """round: 根の手番が本体の行は方策も価値も本体。根の手番が搾取者の行は価値は搾取者、
-    方策は葉の手番が本体のときだけ本体（opponent_prior）。偶数枠は搾取者が先手。"""
+def test_exploiter_round_passes_both_nets_to_the_engine(opponent_prior):
+    """搾取者モードの round: 自分のネットと凍結した本体の全行の出力をそのまま apply2 に渡す（行の選び分けはエンジン。
+    libra-search の test_two_nets_select_rows_like_the_exploiter_loop_and_cache_keeps_records）。"""
+    torch.manual_seed(0)
     n = 6
+    me, opp = LibraNet(SMALL), LibraNet(NetConfig(d_model=48, n_layers=2, n_heads=4, d_ff=96))
     loop = SelfPlayLoop(DEFAULTS["search"], n, 1, 0, torch.device("cpu"), "float32")
-    loop.set_model(LibraNet(SMALL))
-    loop.set_opponent(LibraNet(SMALL), opponent_prior=opponent_prior)
+    loop.set_model(me)
+    loop.set_opponent(opp, opponent_prior=opponent_prior)
+    assert loop.engine.two_nets() and loop.engine.eval_cache_enabled()
+    sq, glob = _inputs(n, 2)
+    seen = {}
 
     class Engine:
-        def collect(self, sq, glob):
-            pass
-
-        def root_turns(self):
-            return np.array([0, 0, 1, 1, 0, 1], np.int8)
-
-        def leaf_turns(self):
-            return np.array([0, 1, 1, 0, 1, 1], np.int8)
+        def collect(self, s, g):
+            s[...] = sq.numpy()
+            g[...] = glob.numpy()
 
         def proof(self):
             pass
 
-        def apply(self, logits, wdl):
-            pass
+        def apply2(self, l0, w0, l1, w1):
+            seen.update(l0=l0.copy(), w0=w0.copy(), l1=l1.copy(), w1=w1.copy())
 
         def take_finished(self):
             return []
 
-    seen = {}
-
-    def evaluate(who, prior_who=None):
-        seen.update(who=who, prior_who=prior_who)
-        return torch.zeros(n, ls.POLICY_SIZE), torch.zeros(n, 3)
-
     loop.engine = Engine()
-    loop.evaluate = evaluate
     loop.round()
-    # 枠: 0 搾取者先手・根は搾取者・葉は搾取者 / 1 本体先手・根は本体 / 2 搾取者先手・根は本体 / 3 本体先手・根は搾取者・葉は本体 /
-    #     4 搾取者先手・根は搾取者・葉は本体 / 5 本体先手・根は搾取者・葉は搾取者
-    assert seen["who"].tolist() == [0, 1, 1, 0, 0, 0]
-    assert (seen["prior_who"].tolist() if opponent_prior else seen["prior_who"]) == ([0, 1, 1, 1, 1, 0] if opponent_prior else None)
+    mp, mw = _eager(me, sq, glob)
+    op, ow = _eager(opp, sq, glob)
+    for got, want in (("l0", mp), ("w0", mw), ("l1", op), ("w1", ow)):
+        torch.testing.assert_close(torch.from_numpy(seen[got]), want)
+
+
+def test_set_opponent_none_returns_to_one_net():
+    loop = SelfPlayLoop(DEFAULTS["search"], 4, 1, 0, torch.device("cpu"), "float32")
+    loop.set_model(LibraNet(SMALL))
+    loop.set_opponent(LibraNet(SMALL))
+    assert loop.engine.two_nets()
+    loop.set_opponent(None)
+    assert not loop.engine.two_nets()
+    loop.round()
 
 
 def test_bad_compile_mode():
