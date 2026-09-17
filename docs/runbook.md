@@ -128,6 +128,8 @@ verify の最後のログ `v_hat - verify winrate`（scale.json の `verify.v_ha
 
 **本体と過去の搾取者の対局**（`[league]`、2026-09-14 から）: 本体 ls は自己対局（512 局）とは別のエンジンで `n_games`（64）局を過去の lx と打ち、自分の手だけを方策の学習に使う（価値は結果から。lx の手は学習しない）。lx は起動時（プールが空のとき）と凍結相手を作り直すたびに、作り直す前の自分を `[exploiter] pool_out`（`~/libra-run/lx/pool/lx-<step>.pt`、新しい `pool_keep` 30 個）に保存する。ls は `[league] pool` の新しい `recent`（30。保存している全部）体から、本体が勝てていない相手ほど多く選び（PFSP、(1 − 勝率)²）、`switch_games`（256）局ごとに選び直す。成績は `status.json` の `league`（`pool` に相手ごとの本体の勝敗と勝率）と `log.txt` の `league: opponent lx step ...`。プールが空なら `pool_check_minutes`（10）ごとに見に行く。止めるときは ls の `[league] enabled = false` にして停止・起動する。
 
+**過去の自分から始め直す**（`restart-exploiter`、2026-09-17）: lx を止めた状態で `bin/libra --run lx restart-exploiter --from ~/libra-run/lx/pool/lx-<step>.pt` を実行すると何をするかが出て、`--apply` を付けると実行する。latest.pt の重みをそのスナップショットに置き換え（step の数えと乱数は引き継ぎ、最適化の内部状態は捨てる）、今の重みをプールに `lx-<今の step>.pt` で残し、リプレイのチャンクを `replay/pre-restart-<step>/` に移して窓を空から数え直し、対本体の成績を履歴に移して布石を空にする。置き換える前の latest.pt・state.json・openings.json は `backup-<時刻>/` に写す（何も消さない）。起動後はリプレイが `min_window_games`（500 局）たまるまで学習しない。戻すときは backup の 3 つを元の場所に写し、`replay/pre-restart-<step>/` のチャンクを `replay/` に戻す。
+
 状態は `bin/libra --run lx status`（`exploiter` に勝率、`main_step`、`refreshed_at`）。管理コンソールの「対本体 勝率」行にも出る。
 
 ## 自己対局ワーカー（既定は無効。GPU を足すときの配管）

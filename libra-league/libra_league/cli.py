@@ -72,6 +72,9 @@ def main(argv: list[str] | None = None) -> int:
     p_op.add_argument("--chunks", type=int, default=50, help="新しい側から何チャンク（100 局単位）見るか")
     p_op.add_argument("--moves", type=int, default=12, help="玉 2 手のあとに残す布石の手数")
     p_op.add_argument("--out", default=None, help="既定: <run>/openings.json")
+    p_rs = sub.add_parser("restart-exploiter", help="止まっている搾取者の run を、プールの過去の自分（lx-<step>.pt）の重みから始め直す（何も消さない）")
+    p_rs.add_argument("--from", dest="snapshot", required=True, help="プールのスナップショット（例: ~/libra-run/lx/pool/lx-000116230.pt）")
+    p_rs.add_argument("--apply", action="store_true", help="付けないと何をするかだけ出す")
     p_ca = sub.add_parser("calib", help="同じネットの自己対局の較正（探索値と結果の信頼度曲線・ECE・Brier）を、最新の対局から出す")
     p_ca.add_argument("--games", type=int, default=20000, help="新しい側から何局使うか（書き出し済みのチャンクから）")
     p_ca.add_argument("--bins", type=int, default=10)
@@ -150,6 +153,12 @@ def main(argv: list[str] | None = None) -> int:
         name = "EVAL_NOW" if a.cmd == "eval-now" else "MATCH_NOW"
         sd.set_flag(name)
         print(f"{name} set")
+        return 0
+    if a.cmd == "restart-exploiter":
+        from .config import load_config
+        from .restart import restart_exploiter
+
+        restart_exploiter(sd, load_config(sd.config_toml), Path(a.snapshot).expanduser(), a.apply)
         return 0
     if a.cmd == "eval":
         import time
