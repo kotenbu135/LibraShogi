@@ -86,6 +86,9 @@ def main(argv: list[str] | None = None) -> int:
     p_gp.add_argument("--positions", type=int, default=2000)
     p_gp.add_argument("--seed", type=int, default=0)
     p_gp.add_argument("--json", action="store_true")
+    p_rv = sub.add_parser("review", help="物差し M1〜M4（gen・最強比・基準比・参照・局/日）の保存済みの値から「続ける／注意／見直し」を出す（docs/restart-plan.md §3 M6）")
+    p_rv.add_argument("--set", action="append", default=[], help="閾値の上書き（name=value。gen_hours, gen_min_rise, gen_max_gap, best_stall_alert, reference_hours, gpd_min）")
+    p_rv.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     sd = StateDir(Path(a.root) / a.run)
     if a.cmd == "run":
@@ -151,6 +154,16 @@ def main(argv: list[str] | None = None) -> int:
         state = sd.read_state() if sd.state_json.exists() else {}
         row = make_row(newest_games(sd.replay, a.games), state.get("step"), state.get("generation"), a.bins)
         print(json.dumps(row, ensure_ascii=False) if a.json else format_table(row))
+        return 0
+    if a.cmd == "review":
+        from .review import format_review, review
+
+        th = {}
+        for kv in a.set:
+            k, v = kv.split("=", 1)
+            th[k] = float(v)
+        r = review(sd, th)
+        print(json.dumps(r, ensure_ascii=False) if a.json else format_review(r))
         return 0
     if a.cmd == "genprof":
         import torch
