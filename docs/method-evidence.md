@@ -91,7 +91,7 @@ decisions.md 2026-09-15 の同名の行。claude.ai の設計案の 1 行「分�
 | 引き分けの値 | 0 | 9/11 の実装 | AlphaZero と同じ | 裏取りあり |
 | 詰み・証明の上限 | 根の詰み 200 節点、布石の証明 1,000 節点・36 手目から | 計画 §3.1「ノード上限を小さく」。200 は 9/14 に効果を測った上で変えない決定 | — | 一部 |
 | 自己対局の玉配置 | 36×36 一様 | decisions 9/11「当面」 | 設計の 3 種の混合のうち一様だけ | 一部 |
-| 搾取者・リーグ・openings | opponent_prior、PFSP、recent 5、openings 10% など | docs/exploiter-literature.md、decisions 9/14 | 原典と差異を記録済み | 裏取りあり |
+| 搾取者・リーグ・openings | opponent_prior、PFSP、recent 30（保存している全部。2026-09-17 に 5 から）、openings 10% など | docs/exploiter-literature.md、decisions 9/14・9/17 | AlphaStar の本体はリーグ全体に PFSP（[Han20] と検索の要約。原典の割合は二次資料で食い違う）。recent 5 だった理由の記録はなく、9/17 の 200 局で本体が 79% 負ける古い lx が選ばれない状態だった | 一部 |
 
 ### 2.4 計画にあって未実装（やめた記録なし）
 

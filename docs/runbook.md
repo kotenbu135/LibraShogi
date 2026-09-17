@@ -126,7 +126,7 @@ verify の最後のログ `v_hat - verify winrate`（scale.json の `verify.v_ha
 
 **布石**: `openings_minutes`（60）ごとに、作り直してからのチャンクだけから搾取者が勝った布石を `openings_out` に書く。本体 ls は `[selfplay] openings` でこれを読み、新規対局の 10%（`openings_prob`）をそこから始める。相手を作り直した時点で布石は空にする（古い相手の穴なので本体に渡さない）。手動で書き出すときは `bin/libra --run lx openings`。
 
-**本体と過去の搾取者の対局**（`[league]`、2026-09-14 から）: 本体 ls は自己対局（512 局）とは別のエンジンで `n_games`（64）局を過去の lx と打ち、自分の手だけを方策の学習に使う（価値は結果から。lx の手は学習しない）。lx は起動時（プールが空のとき）と凍結相手を作り直すたびに、作り直す前の自分を `[exploiter] pool_out`（`~/libra-run/lx/pool/lx-<step>.pt`、新しい `pool_keep` 10 個）に保存する。ls は `[league] pool` の新しい `recent`（5）体から、本体が勝てていない相手ほど多く選び（PFSP、(1 − 勝率)²）、`switch_games`（256）局ごとに選び直す。成績は `status.json` の `league`（`pool` に相手ごとの本体の勝敗と勝率）と `log.txt` の `league: opponent lx step ...`。プールが空なら `pool_check_minutes`（10）ごとに見に行く。止めるときは ls の `[league] enabled = false` にして停止・起動する。
+**本体と過去の搾取者の対局**（`[league]`、2026-09-14 から）: 本体 ls は自己対局（512 局）とは別のエンジンで `n_games`（64）局を過去の lx と打ち、自分の手だけを方策の学習に使う（価値は結果から。lx の手は学習しない）。lx は起動時（プールが空のとき）と凍結相手を作り直すたびに、作り直す前の自分を `[exploiter] pool_out`（`~/libra-run/lx/pool/lx-<step>.pt`、新しい `pool_keep` 30 個）に保存する。ls は `[league] pool` の新しい `recent`（30。保存している全部）体から、本体が勝てていない相手ほど多く選び（PFSP、(1 − 勝率)²）、`switch_games`（256）局ごとに選び直す。成績は `status.json` の `league`（`pool` に相手ごとの本体の勝敗と勝率）と `log.txt` の `league: opponent lx step ...`。プールが空なら `pool_check_minutes`（10）ごとに見に行く。止めるときは ls の `[league] enabled = false` にして停止・起動する。
 
 状態は `bin/libra --run lx status`（`exploiter` に勝率、`main_step`、`refreshed_at`）。管理コンソールの「対本体 勝率」行にも出る。
 

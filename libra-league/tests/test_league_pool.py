@@ -137,3 +137,11 @@ def test_runner_league_smoke(tmp_path):
     assert sum(tm["rounds"] for tm in tms) > 0 and sum(tm["league_rounds"] for tm in tms) > 0
     assert sum(tm["sec"]["sp_eval"] for tm in tms) > 0 and sum(tm["sec"]["lg_eval"] for tm in tms) > 0
     assert sum(tm["train_steps"] for tm in tms) >= 1 and sum(tm["sec"]["train_step"] for tm in tms) > 0
+
+
+def test_defaults_let_the_main_meet_every_kept_snapshot():
+    """本体の相手はプールに残している全部（recent ≥ pool_keep）。2026-09-17 に古い lx（step 116,230）に本体が 79% 負けていたのに、
+    その lx が新しい 5 体に入っていなかったため。"""
+    from libra_league.config import DEFAULTS
+
+    assert DEFAULTS["league"]["recent"] >= DEFAULTS["exploiter"]["pool_keep"]
