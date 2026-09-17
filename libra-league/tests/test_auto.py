@@ -392,6 +392,14 @@ def test_every_games_triggers_by_games_not_time(tmp_path):
     assert [p.name for p in list_archives(sd)] == ["ckpt_000000100.pt", "ckpt_000000300.pt"]
     rows = collect_best(sd)
     assert rows[-1]["games"] == 1000 and rows[-1]["improved"]
+    # 区切りは every_games の倍数（1,000・2,000…）。前回が半端（1,870）でも次は 2,000 局で積む（2026-09-17 のユーザーの希望）
+    state["auto"]["last_archive_games"] = 1870
+    state["games_total"] = 1999
+    _archive(sd, jobs, 400, 1000.0 + 86400 + 2)
+    assert len(list_archives(sd)) == 2
+    state["games_total"] = 2003
+    _archive(sd, jobs, 500, 1000.0 + 86400 + 3, elo=-100.0, score=0.3)
+    assert len(list_archives(sd)) == 3 and state["auto"]["last_archive_games"] == 2003
     # every_hours だけの run は今までどおり時間で
     sd2, jobs2, state2 = _anchor_jobs(tmp_path / "h", anchor_games=0, best_games=100, every_hours=1.0)
     state2["games_total"] = 0
@@ -400,4 +408,9 @@ def test_every_games_triggers_by_games_not_time(tmp_path):
     assert len(list_archives(sd2)) == 1
     _archive(sd2, jobs2, 300, 1000.0 + 3600, elo=-100.0, score=0.3)
     assert len(list_archives(sd2)) == 2
+    # ランナーは倍数を越えたら 10 分を待たずにチェックポイントを取る（games_due）。前回が無い・時間区切りの run では見ない
+    assert not jobs.games_due(2999) and jobs.games_due(3000)
+    state["auto"]["last_archive_games"] = None
+    assert not jobs.games_due(3000)
+    assert not jobs2.games_due(10**6)
 

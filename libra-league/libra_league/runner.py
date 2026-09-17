@@ -14,7 +14,7 @@ import torch
 
 from libra_net.model import LibraNet, NetConfig
 
-from .auto import AutoJobs, append_metrics
+from .auto import AutoJobs, append_metrics, crossed_games_multiple
 from .config import dump_toml, load_config
 from .league import add_result, list_pool, main_winrate, pfsp_pick, pool_name, prune_pool, tag_league_game
 from .looptime import LoopTimer
@@ -493,7 +493,7 @@ class Runner:
         every_games = int(rc.get("gen_games", 0))
         games = self.replay.total_games
         if every_games > 0:  # 局数で（PC の利用状況で局/日が変わっても同じ局数ごと）
-            due = self.last_gen_games < 0 or games - self.last_gen_games >= every_games
+            due = crossed_games_multiple(self.last_gen_games, games, every_games)  # 倍数（2 万・4 万…）で
         else:
             due = minutes > 0 and now - self.last_gen >= minutes * 60
         if not due or self.replay.n_heldout() <= 0 or self.replay.n_games() < int(tr["min_window_games"]):
@@ -643,7 +643,7 @@ class Runner:
                     if self.auto.poll():
                         self.sd.write_state(self.state)  # コンソールの「自動計測」欄が実行中/待機を追えるように
                 last_status = now
-            if now - last_ck > rr["checkpoint_minutes"] * 60:
+            if now - last_ck > rr["checkpoint_minutes"] * 60 or self.auto.games_due(self.replay.total_games):  # 計測の区切り（10 万局など）は待たない
                 with self.timer.phase("checkpoint"):
                     self.checkpoint()
                 last_ck = time.time()

@@ -246,6 +246,14 @@ def collect_matches(sd: StateDir) -> list[dict]:
 
 
 # ---- 自動ジョブ ----
+def crossed_games_multiple(last_games: int | None, games: int, every_games: int) -> bool:
+    """局数の区切り: 前回から every_games の倍数（10 万・20 万…）を越えたか。前回が無い（None・負）なら True。
+    前回の差で数えると区切りが半端（118,700 など）になるので、倍数に揃える（2026-09-17 のユーザーの希望）。"""
+    if last_games is None or int(last_games) < 0:
+        return True
+    return games // every_games > int(last_games) // every_games
+
+
 class AutoJobs:
     """eval / match を順に 1 つずつ別プロセスで回す。状態は state["auto"] に持つ（再開しても続く）。"""
 
@@ -272,6 +280,13 @@ class AutoJobs:
     @property
     def enabled(self) -> bool:
         return bool(self.acfg.get("enabled", False))
+
+    def games_due(self, games: int) -> bool:
+        """局数区切りの run で、前回の archive から every_games の倍数を越えたか（ランナーが 10 分を待たずにチェックポイントを取る合図）。
+        前回が無い run（最初のチェックポイントで必ず積む）と時間区切りの run では False。"""
+        every_games = int(self.acfg.get("every_games", 0))
+        last = self._st().get("last_archive_games")
+        return self.enabled and every_games > 0 and last is not None and crossed_games_multiple(last, games, every_games)
 
     # -- 起票 --
     def on_checkpoint(self, ckpt: Path, now: float | None = None) -> None:
@@ -309,7 +324,7 @@ class AutoJobs:
         2026-09-17 のユーザーの指示）、そうでなければ every_hours で。両方 0 なら最初の 1 回と eval-now / match-now だけ。"""
         every_games = int(self.acfg.get("every_games", 0))
         if every_games > 0:
-            return last_games is None or games - int(last_games) >= every_games
+            return crossed_games_multiple(last_games, games, every_games)
         every = float(self.acfg.get("every_hours", 0.0)) * 3600
         return every > 0 and (last_t is None or now - float(last_t) >= every)
 

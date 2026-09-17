@@ -91,7 +91,7 @@ status §10.3 の確かめ方を実行した（measurements.md 同日 18:05 の�
 | 本番 | every_games 400,000 | 100 万局以上で最強比が 3 回続けて「続ける」→ 仮の設定値の比較と lx の追加（§5.2） |
 | 見直し | review の「見直し」か 200 万局ごと | M1〜M4 の値で決める |
 
-計測はすべて局数で区切る（`[auto] every_games`、`[run] gen_games`、review の窓 `gen_games`・`reference_games`）。PC の利用状況で局/日が変わっても、判断に要る局数がたまったときに測る。
+計測はすべて局数で区切る（`[auto] every_games`、`[run] gen_games`、review の窓 `gen_games`・`reference_games`）。PC の利用状況で局/日が変わっても、判断に要る局数がたまったときに測る。区切りは総局数の倍数（10 万・20 万…）で、前回からの差ではない（2026-09-17 のユーザーの希望）。
 
 ## 7. 別のセッションからの提案（2026-09-17 夜、TypeSafe/Jev の文書の読み込みから。Jev 自体は使わない）
 

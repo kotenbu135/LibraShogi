@@ -203,5 +203,12 @@ def test_runner_measures_gen_by_games(tmp_path: Path):
         rb.total_games = 1000
         Runner.maybe_measure_gen(fake, 1.0 + 7201)     # 1,000 局で測る
         assert len(calls) == 2 and fake.gen["games"] == 1000
+        fake.last_gen_games = 1870                     # 前回が半端でも、次は 1,000 の倍数（2,000 局）で測る
+        rb.total_games = 1999
+        Runner.maybe_measure_gen(fake, 1.0 + 7202)
+        assert len(calls) == 2
+        rb.total_games = 2001
+        Runner.maybe_measure_gen(fake, 1.0 + 7203)
+        assert len(calls) == 3
     finally:
         gp.generalization = orig
