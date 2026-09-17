@@ -92,7 +92,7 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 
 **自動計測（`[auto]`、本体 ls のみ有効）**: `every_games`（総局数がその倍数（10 万・20 万…）を越えるごと。越えたら 10 分を待たずにチェックポイントを取る。0 なら `every_hours` の時間ごと。2026-09-17 から局数が既定の運用）にチェックポイントを `checkpoints/archive/` に残し、`libra eval`（`eval_sims`=96）で 2 通りの対局をする。
 
-- **基準比（`anchor_games`=100、これが主）**: 固定の基準ネット（`state.json` の `auto.anchor`）と対局する。結果は `eval/anchor-*.json` と 1 行ずつの `eval/anchor.jsonl`（`elo` は基準の `offset` を足した値）。基準に `anchor_rebaseline`（0.85）以上勝ったら基準を新しい世代に置き換え、そこまでの差を `offset` に足す。連続世代どうしの差（1 日で +30 Elo 程度）は 100 局の測定幅 ±70 Elo に埋もれ、鎖にすると誤差が回数の平方根で積み上がるため、基準との大きな差で測る。
+- **基準比（`anchor_games`=100、これが主）**: 固定の基準ネット（`state.json` の `auto.anchor`）と対局する。結果は `eval/anchor-*.json` と 1 行ずつの `eval/anchor.jsonl`（`elo` は基準の `offset` を足した値）。基準に `anchor_rebaseline`（0.85）以上勝ったら基準を新しい世代に置き換え、そこまでの差を `offset` に足す。計測が積み上がって結果が出る前に基準が替わっても、各結果は実際に打った相手（積んだときの基準）の `offset` で数え、置き換えは今の基準と打った結果のときだけ行う。ランナーは起動時に `eval/anchor-*.json` から `anchor.jsonl` と今の基準を数え直し、違っていれば古いファイルを `anchor.jsonl.bak-<時刻>` に残して書き直す（2026-09-18 の誤りの修正）。最強と基準が同じ重みで `best_games` と `anchor_games` が同じなら、同じ組の対局になるので打たずに最強比の結果を写す（履歴に `reused`）。連続世代どうしの差（1 日で +30 Elo 程度）は 100 局の測定幅 ±70 Elo に埋もれ、鎖にすると誤差が回数の平方根で積み上がるため、基準との大きな差で測る。
 - **鎖（`chain_eval`、補助）**: 直前の archive との差を足した累積。基準が直前の archive と同じときは同じ対局になるので 1 回で兼ねる。
 
 - **最強比（`best_games`、docs/restart-plan.md §3 M2）**: これまでで最強の保存済み（`state.json` の `auto.best`）と対局する。結果は `eval/best-*.json` と `eval/best.jsonl`。新しい世代の 95% 区間の下限が 0 を超えたら最強を置き換え、そうでなければ足踏みを数え、`best_stall_alert`（3）回続いたら log.txt に WARNING を出す（見直しの合図）。

@@ -414,3 +414,76 @@ def test_every_games_triggers_by_games_not_time(tmp_path):
     assert not jobs.games_due(3000)
     assert not jobs2.games_due(10**6)
 
+
+
+def test_anchor_reuses_best_result_when_opponent_is_the_same(tmp_path):
+    """最強と基準が同じ重みで局数も同じなら、基準比は最強比の結果を写して打たない（2026-09-18 のユーザーの指示「重複を省く」）。"""
+    sd, jobs, state = _anchor_jobs(tmp_path, anchor_games=100, best_games=100)
+    _archive(sd, jobs, 1000, 1000.0)                                  # 最強・基準とも 1000
+    _archive(sd, jobs, 2000, 1000.0 + 3600, elo=-100.0, score=0.3)    # 最強比 1 回だけ打ち、基準比は写す
+    kinds = [(h["kind"], bool(h.get("reused"))) for h in state["auto"]["history"]]
+    assert kinds == [("best", False), ("anchor", True)]
+    assert (sd.root / "auto.log").read_text().count("anchor: eval") == 0
+    rows = collect_anchor(sd)
+    assert len(rows) == 1 and rows[0]["anchor_step"] == 1000 and rows[0]["elo"] == 100.0 and rows[0]["n"] == 100
+    assert len(list((sd.root / "eval").glob("anchor-*-1000-2000.json"))) == 1
+    # 最強は 2000 に替わり、基準は 1000 のまま → 次は相手が違うので両方打つ
+    _archive(sd, jobs, 3000, 1000.0 + 7200, elo=-150.0, score=0.28)
+    assert [(h["kind"], bool(h.get("reused"))) for h in state["auto"]["history"]][-2:] == [("best", False), ("anchor", False)]
+    # 局数が違えば写さない
+    sd2, jobs2, state2 = _anchor_jobs(tmp_path / "n", anchor_games=100, best_games=50)
+    _archive(sd2, jobs2, 1000, 1000.0)
+    _archive(sd2, jobs2, 2000, 1000.0 + 3600, elo=-100.0, score=0.3)
+    assert [h["kind"] for h in state2["auto"]["history"]] == ["best", "anchor"] and not state2["auto"]["history"][1].get("reused")
+
+
+def test_anchor_offset_uses_the_opponent_actually_played_when_jobs_back_up(tmp_path):
+    """計測が積み上がり、先の結果で基準が替わっても、後の結果は実際に打った相手（積んだときの基準）の offset で数える。
+    基準を置き換えるのは、今の基準と打った結果のときだけ（2026-09-18 に ls で累積 +965.9 と誤記録した不具合）。"""
+    sd, jobs, state = _anchor_jobs(tmp_path)
+    _archive(sd, jobs, 1000, 1000.0)                                   # 基準 1000
+    for step, now, elo, score in ((2000, 3600.0, -380.0, 0.1), (3000, 7200.0, -300.0, 0.12)):
+        p = sd.checkpoints / f"ckpt_{step:09d}.pt"
+        p.write_bytes(b"x" * 8)
+        (sd.checkpoints / "archive").mkdir(parents=True, exist_ok=True)
+        (sd.checkpoints / "archive" / f"ckpt_{step:09d}.pt.elo").write_text(str(elo))
+        (sd.checkpoints / "archive" / f"ckpt_{step:09d}.pt.score").write_text(str(score))
+        jobs.on_checkpoint(p, now=1000.0 + now)                        # 2 つとも基準 1000 で積む
+    for _ in range(400):
+        jobs.poll()
+        if not state["auto"]["queue"] and jobs.proc is None:
+            break
+        time.sleep(0.05)
+    rows = collect_anchor(sd)
+    assert [(r["step"], r["anchor_step"], r["offset"], r["elo"]) for r in rows] == [(2000, 1000, 0.0, 380.0), (3000, 1000, 0.0, 300.0)]
+    assert state["auto"]["anchor"]["step"] == 2000 and state["auto"]["anchor"]["offset"] == 380.0  # 3000 は古い基準との結果なので置き換えない
+
+
+def test_repair_anchor_chain_from_result_files(tmp_path):
+    """起動時に eval/anchor-*.json から基準比の行と今の基準を数え直し、違っていれば古い anchor.jsonl を残して書き直す。
+    値は 2026-09-17〜18 の ls の実際の 4 つの結果。"""
+    sd, jobs, state = _anchor_jobs(tmp_path, anchor_games=1000)
+    ev = sd.root / "eval"
+    ev.mkdir(parents=True, exist_ok=True)
+    arch = sd.checkpoints / "archive"
+    arch.mkdir(parents=True, exist_ok=True)
+    for s in (402, 1416, 8144, 13807, 21270):
+        (arch / f"ckpt_{s:09d}.pt").write_bytes(b"x")
+    for ts, a, b, elo, score in (("20260917-202955", 402, 1416, -273.0, 0.172), ("20260917-220428", 402, 8144, -354.5, 0.115),
+                                 ("20260917-224425", 402, 13807, -339.6, 0.124), ("20260917-232228", 8144, 21270, -271.8, 0.173)):
+        (ev / f"anchor-{ts}-{a}-{b}.json").write_text(json.dumps({"a": str(arch / f"ckpt_{a:09d}.pt"), "b": str(arch / f"ckpt_{b:09d}.pt"), "n": 1000,
+                                                                  "score_a": score, "elo_a_minus_b": elo, "elo_ci95": [elo - 30, elo + 30]}))
+    wrong = [{"t": 1.0, "step": 1416, "games": 91053, "n": 1000, "score_new": 0.828, "anchor_step": 402, "offset": 0.0, "elo_vs_anchor": 273.0, "elo": 273.0, "ci95": [243.0, 303.0]},
+             {"t": 2.0, "step": 8144, "games": 288985, "n": 1000, "score_new": 0.885, "anchor_step": 402, "offset": 0.0, "elo_vs_anchor": 354.5, "elo": 354.5, "ci95": [324.5, 384.5]},
+             {"t": 3.0, "step": 13807, "games": 414962, "n": 1000, "score_new": 0.876, "anchor_step": 8144, "offset": 354.5, "elo_vs_anchor": 339.6, "elo": 694.1, "ci95": [664.1, 724.1]},
+             {"t": 4.0, "step": 21270, "games": 440084, "n": 1000, "score_new": 0.827, "anchor_step": 13807, "offset": 694.1, "elo_vs_anchor": 271.8, "elo": 965.9, "ci95": [935.9, 995.9]}]
+    (ev / "anchor.jsonl").write_text("".join(json.dumps(r) + "\n" for r in wrong))
+    state.setdefault("auto", {})["anchor"] = {"file": str(arch / "ckpt_000013807.pt"), "step": 13807, "offset": 694.1, "since": 5.0}
+    assert jobs.repair_anchor_chain() is True
+    rows = collect_anchor(sd)
+    assert [(r["step"], r["anchor_step"], r["offset"], r["elo"]) for r in rows] == [(1416, 402, 0.0, 273.0), (8144, 402, 0.0, 354.5),
+                                                                                 (13807, 402, 0.0, 339.6), (21270, 8144, 354.5, 626.3)]
+    assert rows[3]["games"] == 440084 and rows[3]["t"] == 4.0 and rows[3]["ci95"] == [596.3, 656.3]
+    assert state["auto"]["anchor"]["step"] == 8144 and state["auto"]["anchor"]["offset"] == 354.5
+    assert len(list(ev.glob("anchor.jsonl.bak-*"))) == 1
+    assert jobs.repair_anchor_chain() is False                          # 2 回目は直すものが無い

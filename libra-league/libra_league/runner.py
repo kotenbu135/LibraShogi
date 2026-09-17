@@ -530,6 +530,7 @@ class Runner:
             self.sd.config_toml.write_text(dump_toml(self.cfg), encoding="utf-8")
         self.load()
         self.auto.recover()  # 前回が abort で終わっていれば、残った計測ジョブを止めて積み直す
+        self.auto.repair_anchor_chain()  # 基準比の行を結果のファイルから数え直す（2026-09-18 の offset の誤り）
         self.sd.write_state(self.state)
         sp = self.cfg["selfplay"]
         self.loop = SelfPlayLoop(self.cfg["search"], sp["n_games"], sp["threads"], int(self.rng.integers(0, 2**63)), self.device, sp["infer_dtype"],

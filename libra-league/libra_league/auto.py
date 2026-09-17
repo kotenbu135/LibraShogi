@@ -340,7 +340,7 @@ class AutoJobs:
     # -- 基準ネット（anchor） --
     def on_new_archive(self, new: Path) -> None:
         """基準が無ければこの世代を基準にし、あれば基準との対局を積む。最強比（best）と固定の参照（reference）も同じ節目で積む。"""
-        self.enqueue_best(new)
+        best_job = self.enqueue_best(new)
         self.enqueue_references(new)
         if int(self.acfg.get("anchor_games", 0)) <= 0:
             return
@@ -352,27 +352,34 @@ class AutoJobs:
             return
         if int(anc.get("step") or -1) == ckpt_step(new):
             return
-        self.enqueue_anchor(Path(anc["file"]), new)
+        # 最強と基準が同じ重みで局数も同じなら、同じ組の対局になるので最強比の結果を写す（2026-09-18 のユーザーの指示）
+        reuse = None
+        if best_job is not None and ckpt_step(best_job["a"]) == int(anc.get("step") or -1) \
+                and int(self.acfg.get("best_games", 0)) == int(self.acfg.get("anchor_games", 0)):
+            reuse = best_job["out"]
+        self.enqueue_anchor(Path(anc["file"]), new, anc, reuse=reuse)
 
     # -- 最強比（best、docs/restart-plan.md §3 M2）: これまでで最強の保存済みと打ち、有意に勝ったら最強を置き換える --
-    def enqueue_best(self, new: Path) -> None:
+    def enqueue_best(self, new: Path) -> dict | None:
+        """積んだら {"a": 最強のファイル, "out": 結果の JSON} を返す（基準比が同じ組なら結果を写すため）。"""
         games = int(self.acfg.get("best_games", 0))
         if games <= 0:
-            return
+            return None
         st = self._st()
         best = st.get("best")
         if not best or not Path(best.get("file", "")).exists():
             st["best"] = {"file": str(new), "step": ckpt_step(new), "since": time.time()}
             st["best_stall"] = 0
             self.log(f"auto: best = {new.name}")
-            return
+            return None
         if int(best.get("step") or -1) == ckpt_step(new):
-            return
+            return None
         a = Path(best["file"])
         ts = time.strftime("%Y%m%d-%H%M%S")
         out = self.sd.root / "eval" / f"best-{ts}-{ckpt_step(a)}-{ckpt_step(new)}.json"
         st["queue"].append({"kind": "best", "args": self._eval_args(a, new, games, out), "out": str(out)})
         self.log(f"auto: queued best {a.name} vs {new.name} ({games} games)")
+        return {"a": str(a), "out": str(out)}
 
     def _eval_args(self, a: Path, b: Path, games: int, out: Path) -> list[str]:
         return ["eval", "--a", str(a), "--b", str(b), "--games", str(games),
@@ -446,14 +453,22 @@ class AutoJobs:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
         self.log(f"auto: reference {ref.name} vs step {row['step']}: {row['elo']:+.1f} Elo (new wins {row['score_new']:.0%})")
 
-    def enqueue_anchor(self, a: Path, b: Path) -> None:
+    def enqueue_anchor(self, a: Path, b: Path, anc: dict | None = None, reuse: str | None = None) -> None:
+        """基準との対局を積む。積んだときの基準の step と offset をジョブに残す（結果が出る前に先の結果で基準が替わっても、
+        実際に打った相手の offset で数えるため）。reuse があれば、打たずにその結果（同じ組の最強比）を写す。"""
         ts = time.strftime("%Y%m%d-%H%M%S")
         out = self.sd.root / "eval" / f"anchor-{ts}-{ckpt_step(a)}-{ckpt_step(b)}.json"
         args = ["eval", "--a", str(a), "--b", str(b), "--games", str(self.acfg.get("anchor_games", 100)),
                 "--sims", str(self.acfg.get("eval_sims", 96)), "--concurrent", str(self.acfg.get("eval_concurrent", 64)),
                 "--threads", str(self.acfg.get("eval_threads", 4)), "--out", str(out)]
-        self._st()["queue"].append({"kind": "anchor", "args": args, "out": str(out)})
-        self.log(f"auto: queued anchor {a.name} vs {b.name}")
+        job = {"kind": "anchor", "args": args, "out": str(out)}
+        if anc is not None:
+            job["anchor_step"] = int(anc.get("step") or ckpt_step(a))
+            job["anchor_offset"] = float(anc.get("offset", 0.0))
+        if reuse:
+            job["reuse"] = reuse
+        self._st()["queue"].append(job)
+        self.log(f"auto: queued anchor {a.name} vs {b.name}" + (" (reuses the best result)" if reuse else ""))
 
     def record_anchor(self, job: dict) -> None:
         """基準との対局の結果を anchor.jsonl に 1 行足し、勝ちすぎていれば基準を置き換える。"""
@@ -470,20 +485,94 @@ class AutoJobs:
         ci = r.get("elo_ci95") or [None, None]
         lo = -float(ci[1]) if ci[1] is not None else None
         hi = -float(ci[0]) if ci[0] is not None else None
-        offset = float(anc.get("offset", 0.0))
-        step_b = ckpt_step(r.get("b", "")) 
+        step_a = ckpt_step(r.get("a", ""))
+        offset = self._anchor_offset(step_a, job)
+        step_b = ckpt_step(r.get("b", ""))
         row = {"t": time.time(), "step": step_b, "games": self.state.get("games_total"), "n": r.get("n"), "score_new": round(1 - float(r.get("score_a", 0.5)), 4),
-               "anchor_step": anc.get("step"), "offset": round(offset, 1), "elo_vs_anchor": round(elo, 1),
+               "anchor_step": step_a, "offset": round(offset, 1), "elo_vs_anchor": round(elo, 1),
                "elo": round(offset + elo, 1),
                "ci95": [round(offset + lo, 1) if lo is not None else None, round(offset + hi, 1) if hi is not None else None]}
         with open(self.sd.root / "eval" / "anchor.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        self.log(f"auto: anchor step {anc.get('step')} vs {step_b}: {elo:+.1f} Elo (total {row['elo']:+.1f}, new wins {row['score_new']:.0%})")
-        if row["score_new"] >= float(self.acfg.get("anchor_rebaseline", 0.85)):
+        self.log(f"auto: anchor step {step_a} vs {step_b}: {elo:+.1f} Elo (total {row['elo']:+.1f}, new wins {row['score_new']:.0%})")
+        # 置き換えるのは今の基準と打った結果のときだけ（積み上がった古い基準との結果では替えない）
+        if row["score_new"] >= float(self.acfg.get("anchor_rebaseline", 0.85)) and step_a == int(anc.get("step") or -1):
             new_file = str(r.get("b", ""))
             if Path(new_file).exists():
                 st["anchor"] = {"file": new_file, "step": step_b, "offset": round(offset + elo, 1), "since": time.time()}
                 self.log(f"auto: anchor -> step {step_b} (offset {st['anchor']['offset']:+.1f}; 基準に勝ちすぎたので置き換え)")
+
+    def _anchor_offset(self, step_a: int, job: dict | None = None) -> float:
+        """基準 step_a の offset。ジョブに積んだときの値があればそれ、今の基準ならその値、過去の基準なら anchor.jsonl のその step の行の累積、
+        どれも無ければ最初の基準として 0。"""
+        if job and "anchor_offset" in job and int(job.get("anchor_step", -1)) == step_a:
+            return float(job["anchor_offset"])
+        anc = self._st().get("anchor") or {}
+        if int(anc.get("step") or -1) == step_a:
+            return float(anc.get("offset", 0.0))
+        for row in reversed(collect_anchor(self.sd)):
+            if int(row.get("step") or -1) == step_a and row.get("elo") is not None:
+                return float(row["elo"])
+        return 0.0
+
+    def repair_anchor_chain(self) -> bool:
+        """eval/anchor-*.json（積んだ順）から基準比の行と今の基準を数え直し、anchor.jsonl・state と違えば、古い anchor.jsonl を
+        anchor.jsonl.bak-<時刻> に残して書き直す。直したら True。起動時に 1 回呼ぶ（2026-09-18 に、積み上がった計測の結果を
+        替わった後の基準の offset で数えた誤りを直すため）。"""
+        ev = self.sd.root / "eval"
+        files = sorted(p for p in ev.glob("anchor-*.json")) if ev.is_dir() else []
+        results = []
+        for p in files:
+            try:
+                r = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if r.get("elo_a_minus_b") is None or not r.get("a") or not r.get("b"):
+                continue
+            results.append((p, r))
+        if not results:
+            return False
+        thr = float(self.acfg.get("anchor_rebaseline", 0.85))
+        old = collect_anchor(self.sd)
+        by_step = {int(o.get("step") or -1): o for o in old}
+        first = results[0][1]
+        cur = {"file": str(first["a"]), "step": ckpt_step(first["a"]), "offset": 0.0}
+        offsets = {cur["step"]: 0.0}
+        rows = []
+        for p, r in results:
+            step_a, step_b = ckpt_step(r["a"]), ckpt_step(r["b"])
+            if step_a not in offsets:
+                self.log(f"auto: anchor chain not repaired: {p.name} was played against step {step_a}, which never was the anchor")
+                return False
+            off = offsets[step_a]
+            elo = -float(r["elo_a_minus_b"])
+            ci = r.get("elo_ci95") or [None, None]
+            score_new = round(1 - float(r.get("score_a", 0.5)), 4)
+            prev = by_step.get(step_b, {})
+            rows.append({"t": prev.get("t", p.stat().st_mtime), "step": step_b, "games": prev.get("games"), "n": r.get("n"), "score_new": score_new,
+                         "anchor_step": step_a, "offset": round(off, 1), "elo_vs_anchor": round(elo, 1), "elo": round(off + elo, 1),
+                         "ci95": [round(off - float(ci[1]), 1) if ci[1] is not None else None, round(off - float(ci[0]), 1) if ci[0] is not None else None]})
+            if score_new >= thr and step_a == cur["step"] and step_b > cur["step"]:
+                cur = {"file": str(r["b"]), "step": step_b, "offset": round(off + elo, 1)}
+                offsets[step_b] = cur["offset"]
+        st = self._st()
+        anc = st.get("anchor") or {}
+        key = lambda rs: [(x.get("step"), x.get("anchor_step"), x.get("offset"), x.get("elo"), x.get("ci95")) for x in rs]  # noqa: E731
+        same_rows = key(rows) == key(old)
+        same_anchor = int(anc.get("step") or -1) == cur["step"] and float(anc.get("offset", 0.0)) == cur["offset"]
+        if same_rows and same_anchor:
+            return False
+        path = ev / "anchor.jsonl"
+        if path.exists():
+            shutil.copy2(path, ev / f"anchor.jsonl.bak-{time.strftime('%Y%m%d-%H%M%S')}")
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in rows), encoding="utf-8")
+        os.replace(tmp, path)
+        if not same_anchor:
+            st["anchor"] = {**cur, "since": anc.get("since", time.time()) if int(anc.get("step") or -1) == cur["step"] else time.time()}
+        self.log(f"auto: anchor chain repaired from {len(rows)} result files (anchor step {cur['step']}, offset {cur['offset']:+.1f}; "
+                 f"old rows kept as a .bak)")
+        return True
 
     def enqueue_match(self) -> None:
         ts = time.strftime("%Y%m%d-%H%M%S")
@@ -524,6 +613,16 @@ class AutoJobs:
             return changed
         job = st["queue"].pop(0)
         job["started"] = time.time()
+        if job.get("reuse"):
+            src = Path(job["reuse"])
+            if src.exists():  # 同じ組の最強比の結果を写す（打たない）
+                shutil.copy2(src, job["out"])
+                job.update({"finished": time.time(), "rc": 0, "reused": True})
+                self.record_anchor(job)
+                st["history"] = (st["history"] + [job])[-20:]
+                self.log(f"auto: {job['kind']} reused {src.name} (same pair as the best eval)")
+                return True
+            self.log(f"auto: {job['kind']}: {src.name} is missing, playing the games instead")
         logf = open(self.sd.root / "auto.log", "a", encoding="utf-8")
         logf.write(f"\n==== {time.strftime('%Y-%m-%d %H:%M:%S')} {job['kind']}: {' '.join(job['args'])}\n")
         logf.flush()
@@ -573,7 +672,7 @@ class AutoJobs:
         if out.exists():
             out.replace(out.with_name(out.name + ".interrupted"))
         if not any(q.get("out") == job["out"] for q in st["queue"]):
-            st["queue"].insert(0, {k: job[k] for k in ("kind", "args", "out", "ref") if k in job})
+            st["queue"].insert(0, {k: job[k] for k in ("kind", "args", "out", "ref", "anchor_step", "anchor_offset", "reuse") if k in job})
 
     def recover(self) -> None:
         """前のランナーが stop() を通らずに終わった（abort など）ときに残った計測ジョブを止めて積み直す。load() の後に 1 回呼ぶ。
