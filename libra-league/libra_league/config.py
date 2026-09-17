@@ -101,6 +101,11 @@ DEFAULTS: dict[str, Any] = {
     # 基準に対する勝率が anchor_rebaseline を超えたら基準を新しい世代に置き換え、それまでの差を offset に足す。
     "auto": {"enabled": False, "every_hours": 24.0, "eval_games": 100, "eval_sims": 96, "eval_concurrent": 64, "eval_threads": 4,
              "chain_eval": True, "anchor_games": 100, "anchor_rebaseline": 0.85,
+             # 最強比（docs/restart-plan.md §3 M2）: これまでで最強の保存済みと best_games 局。95% 区間の下限が 0 を超えたら最強を置き換える。
+             # best_stall_alert 回続けて更新できなければログに WARNING。0 で無効
+             "best_games": 0, "best_stall_alert": 3,
+             # 固定の参照（同 M4）: run をまたいで同じ重み（例: 旧 ls の 646,699 と実験の win1m.pt）と reference_games 局ずつ打つ。空で無効
+             "reference_ckpts": [], "reference_games": 0,
              "match_games": 10, "match_go": "movetime 1000", "match_opponent_opt": "Threads=2"},
 }
 
@@ -128,6 +133,8 @@ def dump_toml(cfg: dict[str, Any]) -> str:
     lines: list[str] = []
 
     def fmt(v: Any) -> str:
+        if isinstance(v, list):
+            return "[" + ", ".join(fmt(x) for x in v) + "]"
         if isinstance(v, bool):
             return "true" if v else "false"
         if isinstance(v, (int, float)):

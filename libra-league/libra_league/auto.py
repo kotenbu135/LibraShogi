@@ -165,7 +165,7 @@ def collect_evals(sd: StateDir) -> list[dict]:
         out.append({
             "file": p.name, "time": p.stat().st_mtime, "step_a": sa, "step_b": sb, "n": r.get("n"),
             "elo": r.get("elo_a_minus_b"), "ci95": r.get("elo_ci95"), "score_a": r.get("score_a"),
-            "seconds": r.get("seconds"), "auto": p.name.startswith(("auto-", "anchor-")),
+            "seconds": r.get("seconds"), "auto": p.name.startswith(("auto-", "anchor-")),  # best-・reference- は鎖に入れない
         })
     out.sort(key=lambda e: (e["step_b"] if e["step_b"] is not None else -1, e["time"]))
     # 鎖: a→b の Elo（b − a = −elo_a_minus_b）を、a が直前の鎖の末尾と一致する限り足す
@@ -197,6 +197,30 @@ def collect_anchor(sd: StateDir) -> list[dict]:
             continue
     rows.sort(key=lambda r: r.get("t", 0))
     return rows
+
+
+def _collect_jsonl(sd: StateDir, name: str) -> list[dict]:
+    p = sd.root / "eval" / name
+    if not p.exists():
+        return []
+    rows = []
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    rows.sort(key=lambda r: r.get("t", 0))
+    return rows
+
+
+def collect_best(sd: StateDir) -> list[dict]:
+    """eval/best.jsonl（最強比の推移）。"""
+    return _collect_jsonl(sd, "best.jsonl")
+
+
+def collect_reference(sd: StateDir) -> list[dict]:
+    """eval/reference.jsonl（固定の参照との差の推移）。"""
+    return _collect_jsonl(sd, "reference.jsonl")
 
 
 def collect_matches(sd: StateDir) -> list[dict]:
@@ -240,7 +264,8 @@ class AutoJobs:
     def _st(self) -> dict:
         """state["auto"]（load() で state が置き換わっても欠けたキーを補う）。"""
         st = self.state.setdefault("auto", {})
-        for k, v in (("last_archive", None), ("last_match", None), ("queue", []), ("history", []), ("running", None), ("anchor", None)):
+        for k, v in (("last_archive", None), ("last_match", None), ("queue", []), ("history", []), ("running", None), ("anchor", None),
+                     ("best", None), ("best_stall", 0)):
             st.setdefault(k, v)
         return st
 
@@ -288,7 +313,9 @@ class AutoJobs:
 
     # -- 基準ネット（anchor） --
     def on_new_archive(self, new: Path) -> None:
-        """基準が無ければこの世代を基準にし、あれば基準との対局を積む。"""
+        """基準が無ければこの世代を基準にし、あれば基準との対局を積む。最強比（best）と固定の参照（reference）も同じ節目で積む。"""
+        self.enqueue_best(new)
+        self.enqueue_references(new)
         if int(self.acfg.get("anchor_games", 0)) <= 0:
             return
         st = self._st()
@@ -300,6 +327,98 @@ class AutoJobs:
         if int(anc.get("step") or -1) == ckpt_step(new):
             return
         self.enqueue_anchor(Path(anc["file"]), new)
+
+    # -- 最強比（best、docs/restart-plan.md §3 M2）: これまでで最強の保存済みと打ち、有意に勝ったら最強を置き換える --
+    def enqueue_best(self, new: Path) -> None:
+        games = int(self.acfg.get("best_games", 0))
+        if games <= 0:
+            return
+        st = self._st()
+        best = st.get("best")
+        if not best or not Path(best.get("file", "")).exists():
+            st["best"] = {"file": str(new), "step": ckpt_step(new), "since": time.time()}
+            st["best_stall"] = 0
+            self.log(f"auto: best = {new.name}")
+            return
+        if int(best.get("step") or -1) == ckpt_step(new):
+            return
+        a = Path(best["file"])
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        out = self.sd.root / "eval" / f"best-{ts}-{ckpt_step(a)}-{ckpt_step(new)}.json"
+        st["queue"].append({"kind": "best", "args": self._eval_args(a, new, games, out), "out": str(out)})
+        self.log(f"auto: queued best {a.name} vs {new.name} ({games} games)")
+
+    def _eval_args(self, a: Path, b: Path, games: int, out: Path) -> list[str]:
+        return ["eval", "--a", str(a), "--b", str(b), "--games", str(games),
+                "--sims", str(self.acfg.get("eval_sims", 96)), "--concurrent", str(self.acfg.get("eval_concurrent", 64)),
+                "--threads", str(self.acfg.get("eval_threads", 4)), "--out", str(out)]
+
+    def record_best(self, job: dict) -> None:
+        """最強比の結果を eval/best.jsonl に足す。95% 区間の下限が 0 を超えたら最強を置き換え、そうでなければ足踏みを数える。"""
+        st = self._st()
+        best = st.get("best") or {}
+        try:
+            r = json.loads(Path(job["out"]).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            self.log(f"auto: best result unreadable: {e}")
+            return
+        if r.get("elo_a_minus_b") is None:
+            return
+        elo = -float(r["elo_a_minus_b"])
+        ci = r.get("elo_ci95") or [None, None]
+        lo = -float(ci[1]) if ci[1] is not None else None
+        hi = -float(ci[0]) if ci[0] is not None else None
+        step_b = ckpt_step(r.get("b", ""))
+        improved = lo is not None and lo > 0
+        if improved:
+            st["best"] = {"file": str(r.get("b", "")), "step": step_b, "since": time.time()}
+            st["best_stall"] = 0
+        else:
+            st["best_stall"] = int(st.get("best_stall", 0)) + 1
+        row = {"t": time.time(), "step": step_b, "best_step": best.get("step"), "n": r.get("n"), "score_new": round(1 - float(r.get("score_a", 0.5)), 4),
+               "elo_vs_best": round(elo, 1), "ci95": [round(lo, 1) if lo is not None else None, round(hi, 1) if hi is not None else None],
+               "improved": improved, "stall": int(st["best_stall"])}
+        with open(self.sd.root / "eval" / "best.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        self.log(f"auto: best step {best.get('step')} vs {step_b}: {elo:+.1f} Elo [{row['ci95'][0]}, {row['ci95'][1]}] "
+                 + (f"-> best = step {step_b}" if improved else f"(best unchanged, stall {row['stall']})"))
+        alert = int(self.acfg.get("best_stall_alert", 3))
+        if not improved and alert > 0 and row["stall"] >= alert:
+            self.log(f"auto: WARNING best not updated for {row['stall']} evals (best step {best.get('step')}); docs/restart-plan.md §3 M2 の見直し")
+
+    # -- 固定の参照（reference、同 §3 M4）: run をまたいで同じ相手と打ち、絶対の物差しにする --
+    def enqueue_references(self, new: Path) -> None:
+        games = int(self.acfg.get("reference_games", 0))
+        refs = [str(x) for x in (self.acfg.get("reference_ckpts") or []) if str(x).strip()]
+        if games <= 0 or not refs:
+            return
+        st = self._st()
+        for ref in refs:
+            a = Path(ref).expanduser()
+            if not a.exists():
+                self.log(f"auto: reference not found: {a}")
+                continue
+            ts = time.strftime("%Y%m%d-%H%M%S")
+            out = self.sd.root / "eval" / f"reference-{ts}-{a.stem}-{ckpt_step(new)}.json"
+            st["queue"].append({"kind": "reference", "args": self._eval_args(a, new, games, out), "out": str(out), "ref": str(a)})
+            self.log(f"auto: queued reference {a.name} vs {new.name} ({games} games)")
+
+    def record_reference(self, job: dict) -> None:
+        try:
+            r = json.loads(Path(job["out"]).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            self.log(f"auto: reference result unreadable: {e}")
+            return
+        if r.get("elo_a_minus_b") is None:
+            return
+        ci = r.get("elo_ci95") or [None, None]
+        ref = Path(str(job.get("ref") or r.get("a", "")))
+        row = {"t": time.time(), "step": ckpt_step(r.get("b", "")), "ref": ref.name, "ref_step": ckpt_step(ref), "n": r.get("n"),
+               "score_new": round(1 - float(r.get("score_a", 0.5)), 4), "elo": round(-float(r["elo_a_minus_b"]), 1),
+               "ci95": [round(-float(ci[1]), 1) if ci[1] is not None else None, round(-float(ci[0]), 1) if ci[0] is not None else None]}
+        with open(self.sd.root / "eval" / "reference.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        self.log(f"auto: reference {ref.name} vs step {row['step']}: {row['elo']:+.1f} Elo (new wins {row['score_new']:.0%})")
 
     def enqueue_anchor(self, a: Path, b: Path) -> None:
         ts = time.strftime("%Y%m%d-%H%M%S")
@@ -365,6 +484,10 @@ class AutoJobs:
             job["rc"] = rc
             if job.get("kind") == "anchor" and rc == 0:
                 self.record_anchor(job)
+            elif job.get("kind") == "best" and rc == 0:
+                self.record_best(job)
+            elif job.get("kind") == "reference" and rc == 0:
+                self.record_reference(job)
             st["history"] = (st["history"] + [job])[-20:]
             st["running"] = None
             self.log(f"auto: {job.get('kind')} finished rc={rc} ({job['finished'] - job.get('started', job['finished']):.0f}s)")
@@ -424,7 +547,7 @@ class AutoJobs:
         if out.exists():
             out.replace(out.with_name(out.name + ".interrupted"))
         if not any(q.get("out") == job["out"] for q in st["queue"]):
-            st["queue"].insert(0, {k: job[k] for k in ("kind", "args", "out")})
+            st["queue"].insert(0, {k: job[k] for k in ("kind", "args", "out", "ref") if k in job})
 
     def recover(self) -> None:
         """前のランナーが stop() を通らずに終わった（abort など）ときに残った計測ジョブを止めて積み直す。load() の後に 1 回呼ぶ。

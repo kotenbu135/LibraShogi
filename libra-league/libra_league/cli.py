@@ -278,13 +278,16 @@ def main(argv: list[str] | None = None) -> int:
             _ac = _lc(sd.config_toml if sd.config_toml.exists() else None)["auto"]
             out["auto_cfg"] = {"enabled": bool(_ac.get("enabled")), "every_hours": _ac.get("every_hours"),
                                "eval_games": _ac.get("eval_games"), "anchor_games": _ac.get("anchor_games"),
-                               "match_games": _ac.get("match_games")}
+                               "best_games": _ac.get("best_games"), "reference_games": _ac.get("reference_games"),
+                               "reference_ckpts": _ac.get("reference_ckpts"), "match_games": _ac.get("match_games")}
             if a.history > 0:
-                from .auto import collect_anchor, collect_evals, collect_matches, list_archives, load_metrics
+                from .auto import collect_anchor, collect_best, collect_evals, collect_matches, collect_reference, list_archives, load_metrics
 
                 out["metrics"] = load_metrics(sd, a.history)
                 out["evals"] = collect_evals(sd)
                 out["anchor"] = collect_anchor(sd)
+                out["best"] = collect_best(sd)
+                out["reference"] = collect_reference(sd)
                 out["matches"] = collect_matches(sd)
                 from .calibrate import load_calib
 

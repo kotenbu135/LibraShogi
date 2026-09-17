@@ -329,3 +329,48 @@ def test_recover_does_not_kill_reused_pid(tmp_path):
     finally:
         other.kill()
         other.wait()
+
+
+def test_best_tracks_strongest_and_counts_stall(tmp_path):
+    """最強比（docs/restart-plan.md §3 M2）: 95% 区間の下限が 0 を超えたときだけ最強を置き換え、それ以外は足踏みを数える。"""
+    from libra_league.auto import collect_best
+
+    sd, jobs, state = _anchor_jobs(tmp_path, anchor_games=0, best_games=1000, best_stall_alert=2)
+    _archive(sd, jobs, 1000, 1000.0)  # 最初の世代が最強
+    assert state["auto"]["best"]["step"] == 1000 and state["auto"]["best_stall"] == 0
+    # +100 Elo（区間 +30〜+170）: 置き換え
+    _archive(sd, jobs, 2000, 1000.0 + 3600, elo=-100.0, score=0.3)
+    rows = collect_best(sd)
+    assert rows[-1]["improved"] and rows[-1]["elo_vs_best"] == 100.0 and rows[-1]["ci95"] == [30.0, 170.0] and rows[-1]["best_step"] == 1000
+    assert state["auto"]["best"]["step"] == 2000
+    # +20 Elo（区間 −50〜+90）: 据え置き、足踏み 1
+    _archive(sd, jobs, 3000, 1000.0 + 7200, elo=-20.0, score=0.47)
+    assert state["auto"]["best"]["step"] == 2000 and state["auto"]["best_stall"] == 1 and not collect_best(sd)[-1]["improved"]
+    # −40 Elo: 足踏み 2（WARNING）
+    _archive(sd, jobs, 4000, 1000.0 + 10800, elo=40.0, score=0.55)
+    assert state["auto"]["best_stall"] == 2 and collect_best(sd)[-1]["stall"] == 2
+    # 最強と同じ世代は積まない
+    jobs.enqueue_best(sd.checkpoints / "archive" / "ckpt_000002000.pt")
+    assert not state["auto"]["queue"]
+    assert [h["kind"] for h in state["auto"]["history"]] == ["best", "best", "best"]
+
+
+def test_reference_evals_against_fixed_checkpoints(tmp_path):
+    """固定の参照（同 M4）: run をまたいだ同じ相手との差を eval/reference.jsonl に残す。無い参照は飛ばす。"""
+    from libra_league.auto import collect_reference
+    from libra_league.config import dump_toml
+
+    (tmp_path / "refs").mkdir()
+    ref = tmp_path / "refs" / "ckpt_000000500.pt"  # step が名前から読めない参照（win1m.pt など）は ref_step が None になる
+    ref.write_bytes(b"r")
+    sd, jobs, state = _anchor_jobs(tmp_path, anchor_games=0, reference_games=200, reference_ckpts=[str(ref), str(tmp_path / "missing.pt")])
+    _archive(sd, jobs, 1000, 1000.0, elo=-150.0, score=0.3)
+    rows = collect_reference(sd)
+    assert len(rows) == 1 and rows[0]["ref"] == ref.name and rows[0]["ref_step"] == 500 and rows[0]["step"] == 1000
+    assert rows[0]["elo"] == 150.0 and rows[0]["ci95"] == [80.0, 220.0] and rows[0]["score_new"] == 0.7
+    assert [h["kind"] for h in state["auto"]["history"]] == ["reference"]
+    # 設定の写し（TOML）は文字列のリストを書ける
+    assert 'reference_ckpts = ["' in dump_toml(jobs.cfg)
+    import tomllib
+
+    assert tomllib.loads(dump_toml(jobs.cfg))["auto"]["reference_ckpts"] == [str(ref), str(tmp_path / "missing.pt")]

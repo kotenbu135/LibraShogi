@@ -807,9 +807,19 @@ function Build-Series([string]$tab) {
                     }
                 }
                 $series += $c
+                # 固定の参照（[auto] reference_ckpts）との差。run をまたいで同じ相手なので絶対の物差しになる（docs/restart-plan.md §3 M4）
+                if ($script:Data.ContainsKey($r)) {
+                    $byRef = @{}
+                    foreach ($e in @($script:Data[$r].reference)) {
+                        if ($null -eq $e.elo) { continue }
+                        if (-not $byRef.ContainsKey([string]$e.ref)) { $byRef[[string]$e.ref] = New-Series ($r + " 対 " + [string]$e.ref) ([System.Drawing.Color]::FromArgb(180, (Run-Color $r ($i + 3)))) $false }
+                        Add-Pt $byRef[[string]$e.ref] (From-Unix $e.t) ([double]$e.elo) (Ci-Val $e.ci95 0) (Ci-Val $e.ci95 1) ("対 " + [string]$e.ref + " step " + (Format-Int $e.step))
+                    }
+                    foreach ($k in ($byRef.Keys | Sort-Object)) { $series += $byRef[$k] }
+                }
                 $i++
             }
-            $note = "基準比が主（1 日 1 回 100 局、縦線は 95% 区間）。基準に 85% 勝つと基準を置き換えて差を足す。全期間を表示"
+            $note = "基準比が主（1 日 1 回、縦線は 95% 区間）。基準に 85% 勝つと基準を置き換えて差を足す。「対 …」は固定の参照との差。全期間を表示"
         }
         "対外対局" {
             $title = "外部エンジン（fuseki_usi_server.py = 方策ネット＋やねうら王/水匠5）との勝率"
@@ -1426,6 +1436,14 @@ function Update-Panel([string]$run, $obj) {
             $ci = if ($null -ne $aLo -and $null -ne $aHi) { " [{0:+0;-0;0}, {1:+0;-0;0}]" -f (-$aHi), (-$aLo) } else { "" }
             $v.elo.Text = "鎖 {0:+0.0;-0.0;0}（前回 {1:+0.0;-0.0;0}{2}、step {3}→{4}、{5}）" -f [double]$le.cumulative, (-[double]$le.elo), $ci, (Format-Int $le.step_a), (Format-Int $le.step_b), (Format-Ago (From-Unix $le.time))
         } else { $v.elo.Text = "（まだ無い。archive {0} 個）" -f @($d.archives).Count }
+        # 最強比（[auto] best_games）: 最強の step と足踏みの回数（docs/restart-plan.md §3 M2）
+        $bs = @($d.best)
+        if ($bs.Count -gt 0) {
+            $lb = $bs[$bs.Count - 1]
+            $bLo = Ci-Val $lb.ci95 0; $bHi = Ci-Val $lb.ci95 1
+            $bci = if ($null -ne $bLo -and $null -ne $bHi) { " [{0:+0;-0;0}, {1:+0;-0;0}]" -f $bLo, $bHi } else { "" }
+            $v.elo.Text += ("`r`n最強比 {0:+0.0;-0.0;0}{1}（最強 step {2}、{3}）" -f [double]$lb.elo_vs_best, $bci, (Format-Int $lb.best_step), $(if ($lb.improved) { "更新" } else { "足踏み " + [string]$lb.stall + " 回" }))
+        }
         $ms = @($d.matches)
         if ($ms.Count -gt 0) {
             $lm = $ms[$ms.Count - 1]
