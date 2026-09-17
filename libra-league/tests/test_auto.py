@@ -69,8 +69,11 @@ def test_archive_and_eval_chain(tmp_path):
     md = sd.root / "matches"
     md.mkdir()
     (md / "auto-1.summary.json").write_text(json.dumps({"n": 10, "a_points": 2.5, "b": "Opp 0.1", "go": "movetime 1000", "libra_options": {"DNN_Model": "/x/ckpt_000000200.pt"}}))
+    # 外部計測は archive の重みを書き出した ONNX で打つので、.onnx の名前からも step を読む（docs/restart-plan.md §7 P2）
+    (md / "auto-2.summary.json").write_text(json.dumps({"n": 10, "a_points": 0.0, "b": "Opp 0.1", "go": "movetime 1000", "libra_options": {"DNN_Model": f"{a}/ckpt_000000300.onnx"}}))
     ms = collect_matches(sd)
     assert ms[0]["winrate"] == 0.25 and ms[0]["libra_step"] == 200 and ms[0]["auto"]
+    assert ms[1]["winrate"] == 0.0 and ms[1]["libra_step"] == 300
 
 
 def test_autojobs_runs_subprocess(tmp_path):
@@ -487,3 +490,48 @@ def test_repair_anchor_chain_from_result_files(tmp_path):
     assert state["auto"]["anchor"]["step"] == 8144 and state["auto"]["anchor"]["offset"] == 354.5
     assert len(list(ev.glob("anchor.jsonl.bak-*"))) == 1
     assert jobs.repair_anchor_chain() is False                          # 2 回目は直すものが無い
+
+
+def test_match_uses_archived_weights(tmp_path):
+    """外部計測は動く別名（latest.onnx）ではなく、その節目の archive の重みで打つ（docs/restart-plan.md §7 P2）。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    cfg = load_config(None)
+    cfg["auto"].update({"enabled": True, "every_hours": 1.0, "match_games": 10, "anchor_games": 0, "best_games": 0, "chain_eval": False})
+    state = {}
+    jobs = AutoJobs(sd, cfg, state, lambda s: None)
+    ck = sd.checkpoints / "ckpt_000028908.pt"
+    ck.write_bytes(b"pt")
+    latest = sd.checkpoints / "latest.onnx"
+    latest.write_bytes(b"onnx-of-this-generation")
+    jobs.on_checkpoint(ck, now=1000.0)
+    job = next(j for j in state["auto"]["queue"] if j["kind"] == "match")
+    arch = sd.checkpoints / "archive" / "ckpt_000028908.pt"
+    assert "--model" not in job["args"]
+    assert job["args"][job["args"].index("--ckpt") + 1] == str(arch)
+    # 節目の重みの写しを積むときに作るので、このあと latest.onnx が動いても計測はこの写しで打つ
+    snap = arch.with_suffix(".onnx")
+    assert snap.read_bytes() == b"onnx-of-this-generation"
+    latest.write_bytes(b"newer")
+    assert snap.read_bytes() == b"onnx-of-this-generation"
+
+
+def test_match_skips_stale_onnx_snapshot(tmp_path):
+    """latest.onnx がこのチェックポイントより古い（書き出しに失敗した）ときは写さず、match 側で .pt から書き出させる。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    cfg = load_config(None)
+    cfg["auto"].update({"enabled": True, "every_hours": 1.0, "match_games": 10, "anchor_games": 0, "best_games": 0, "chain_eval": False})
+    state = {}
+    jobs = AutoJobs(sd, cfg, state, lambda s: None)
+    latest = sd.checkpoints / "latest.onnx"
+    latest.write_bytes(b"old")
+    os.utime(latest, (1000.0, 1000.0))
+    ck = sd.checkpoints / "ckpt_000028908.pt"
+    ck.write_bytes(b"pt")
+    os.utime(ck, (9000.0, 9000.0))
+    jobs.on_checkpoint(ck, now=1000.0)
+    job = next(j for j in state["auto"]["queue"] if j["kind"] == "match")
+    arch = sd.checkpoints / "archive" / "ckpt_000028908.pt"
+    assert job["args"][job["args"].index("--ckpt") + 1] == str(arch)
+    assert not arch.with_suffix(".onnx").exists()

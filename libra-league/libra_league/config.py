@@ -111,7 +111,8 @@ DEFAULTS: dict[str, Any] = {
              "best_games": 0, "best_stall_alert": 3,
              # 固定の参照（同 M4）: run をまたいで同じ重み（例: 旧 ls の 646,699 と実験の win1m.pt）と reference_games 局ずつ打つ。空で無効
              "reference_ckpts": [], "reference_games": 0,
-             "match_games": 10, "match_go": "movetime 1000", "match_opponent_opt": "Threads=2"},
+             # match_opponent_opt: 相手のルールの版は既定が変わっても今のルール（二飛香）で指させるため明示する（decisions.md 2026-09-13）
+             "match_games": 10, "match_go": "movetime 1000", "match_opponent_opt": "Threads=2,Fuseki_Rules=2"},
 }
 
 

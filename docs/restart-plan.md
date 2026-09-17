@@ -100,7 +100,7 @@ status §10.3 の確かめ方を実行した（measurements.md 同日 18:05 の�
 | # | 内容 | 対応 |
 |---|---|---|
 | P1 | 較正（偏り）と判別（相関）は別物。calib.jsonl の偏り −0.02 は「価値が効いている」証拠にならない。健康指標は held-out の相関（M1）を主にし、ECE と並べて出す | M1 の表示に calib の ECE を並べる（コンソール）。Brier の分解（reliability / resolution / uncertainty、Murphy 1973）は候補 |
-| P2 | 自動の外部計測が `latest.onnx`（動く別名）で打たれ、計測ごとに重みが違って時系列の比較にならなかった | 外部計測を再開するとき（本番で match_games 10）は archive の重みを書き出した ONNX で打ち、結果の行に step を必ず書く。閾値を変えた step も記録する |
+| P2 | 自動の外部計測が `latest.onnx`（動く別名）で打たれ、計測ごとに重みが違って時系列の比較にならなかった | 外部計測を再開するとき（本番で match_games 10）は archive の重みを書き出した ONNX で打ち、結果の行に step を必ず書く。閾値を変えた step も記録する。**2026-09-18 に実装**（`libra match --ckpt`、積むときに archive の隣へ ONNX を写す、`collect_matches` は `.onnx` の名前から step を読む） |
 | P3 | 学習目標の最大確率 0.99 超が 36〜41% でも corr(v41, z) は 0.2。鋭さ（確信度）を強さの指標と取り違えない | 済（§10 の見立てと ls2-settings.md §2 で、鋭さは σ の比較の物差しにだけ使う） |
 | P4 | 損失 1 本ではなく M1〜M4 の生の値を毎日保存し、「続ける／変える／止める」を閾値を持つ 1 つの関数（`libra review`）で出す。閾値を変えても再計測が要らない形 | M6 の実装として `libra review` を作る（metrics の gen、eval の best・anchor・reference を読み、ls2-settings.md §5 の合否を出す） |
 | P5 | 固定局面 N 個で旧／新ビルドの方策・価値・根の Q を数値で比べる一貫性ハーネス（「棋譜は同じ」の本番規模の確認、R5・CLAUDE.md 11） | 作る（`libra consistency`: 同じ seed・同じ設定の自己対局の記録と、固定局面の探索結果の一致） |

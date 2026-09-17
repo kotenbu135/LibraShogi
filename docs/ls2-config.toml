@@ -82,7 +82,8 @@ best_games = 1000           # 最強比（新規）
 best_stall_alert = 3
 reference_ckpts = ["/home/sakis/libra-run/ls-v1/checkpoints/archive/ckpt_000646699.pt", "/home/sakis/libra-run/experiments/2026-09-17-window/win1m.pt"]  # 固定の参照（新規）
 reference_games = 200
-match_games = 0             # 外部の AI との計測は得点 0 に張り付くので煙テストでは回さない。本番で 10 に戻す
+match_games = 10            # 外部の AI との計測（2026-09-18 に本番で復帰。節目の archive の重みを書き出した ONNX で打つ）
+match_opponent_opt = "Threads=2,Fuseki_Rules=2"  # 既定と同じ。相手のルールの版は既定が変わっても今のルールで指させるため明示する
 
 [workers]
 enabled = true              # vast.ai の自己対局ワーカーの局を取り込む（2026-09-17、煙テストの短縮。ユーザーの決定）。検査はブリッジが inbox に置く前に行う

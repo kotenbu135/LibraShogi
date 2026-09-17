@@ -20,7 +20,7 @@ from pathlib import Path
 
 from .state import StateDir, write_json_atomic
 
-_CKPT_RE = re.compile(r"ckpt_(\d+)\.pt$")
+_CKPT_RE = re.compile(r"ckpt_(\d+)\.(?:pt|onnx)$")  # 外部計測は archive の重みを書き出した .onnx で打つ
 JOB_FILE = "auto_job.json"  # 実行中の計測ジョブ（pid・引数）。ランナーが abort しても孤児を見つけられるように state とは別に置く
 
 
@@ -313,7 +313,8 @@ class AutoJobs:
                 self.sd.clear_flag("EVAL_NOW")
         match_now = self.sd.flag("MATCH_NOW")
         if int(self.acfg.get("match_games", 0)) > 0 and (match_now or st["last_match"] is None or self._due(st["last_match"], st.get("last_match_games"), now, games)):
-            self.enqueue_match()
+            arch = archive_dir(self.sd) / ckpt.name  # 節目の写しがあればそれを使う（計測待ちの間も消えない）
+            self.enqueue_match(arch if arch.exists() else ckpt)
             st["last_match"] = now
             st["last_match_games"] = games
             if match_now:
@@ -574,15 +575,37 @@ class AutoJobs:
                  f"old rows kept as a .bak)")
         return True
 
-    def enqueue_match(self) -> None:
+    def enqueue_match(self, ckpt: Path | None = None) -> None:
+        """外部エンジンとの計測を積む。ckpt を渡すとその重みで打つ（渡さないと latest.onnx = 中身が動く別名になり、
+        計測待ちの間に世代が変わって時系列の比較にならない。docs/restart-plan.md §7 P2）。"""
         ts = time.strftime("%Y%m%d-%H%M%S")
         out = self.sd.root / "matches" / f"auto-{ts}.jsonl"
         args = ["match", "--games", str(self.acfg.get("match_games", 10)), "--go", str(self.acfg.get("match_go", "movetime 1000")), "--out", str(out)]
         for kv in str(self.acfg.get("match_opponent_opt", "")).split(","):
             if kv.strip():
                 args += ["--opponent-opt", kv.strip()]
+        if ckpt is not None:
+            args += ["--ckpt", str(ckpt)]
+            self.snapshot_onnx(ckpt)
         self.state["auto"]["queue"].append({"kind": "match", "args": args, "out": str(out)})
-        self.log("auto: queued match")
+        self.log("auto: queued match" + (f" ({ckpt.name})" if ckpt is not None else ""))
+
+    def snapshot_onnx(self, ckpt: Path) -> Path | None:
+        """この世代の推論用の重み（latest.onnx）を ckpt の隣に写す。ランナーはチェックポイントの直後に
+        latest.pt から書き出すので、この時点の latest.onnx は ckpt と同じ重み。写せたら match 側の書き出しは要らない。"""
+        out = ckpt.with_suffix(".onnx")
+        if out.exists():
+            return out
+        latest = self.sd.checkpoints / "latest.onnx"
+        if not latest.exists():
+            return None
+        if latest.stat().st_mtime < ckpt.stat().st_mtime - 5.0:  # 書き出しに失敗して古いまま（match が .pt から書き出す）
+            self.log(f"auto: latest.onnx is older than {ckpt.name}; match will export from the checkpoint")
+            return None
+        tmp = out.with_suffix(".onnx.tmp")
+        shutil.copyfile(latest, tmp)
+        os.replace(tmp, out)
+        return out
 
     # -- 実行 --
     def poll(self) -> bool:

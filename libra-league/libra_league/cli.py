@@ -21,6 +21,38 @@ def default_match_model(sd: StateDir) -> Path:
     return onnx if onnx.exists() else sd.checkpoints / "latest.pt"
 
 
+def export_onnx_file(ckpt: Path, out: Path, log=None) -> float:
+    """チェックポイント（.pt）を推論用 ONNX に書き出し、ORT と torch の出力の差を返す（原子的に置き換える）。"""
+    import os
+
+    from libra_net.export_onnx import check, export_checkpoint, load_checkpoint
+
+    tmp = out.with_suffix(".onnx.tmp")
+    meta = export_checkpoint(ckpt, tmp)
+    model, _ = load_checkpoint(ckpt)
+    diff = check(model, tmp)
+    os.replace(tmp, out)
+    (log or print)(f"exported {out} step {meta['libra_step']} max|ort-torch| {diff:.1e}")
+    return diff
+
+
+def resolve_match_model(sd: StateDir, model: str | None, ckpt: str | None, log=None) -> str:
+    """match で使う重み。--model が最優先。--ckpt（.pt）を渡したときは隣の同じ名前の .onnx を使い、
+    無ければそこへ書き出す（自動計測は節目の archive の重みで打つ。docs/restart-plan.md §7 P2）。"""
+    if model:
+        return model
+    if ckpt:
+        p = Path(ckpt)
+        onnx = p.with_suffix(".onnx")
+        if not onnx.exists():
+            if not p.exists():  # 写しも .pt も無い（archive でないチェックポイントが回転で消えた）: 最新の重みで打つ
+                (log or print)(f"warning: neither {p} nor {onnx} exists; falling back to the latest weights")
+                return str(default_match_model(sd))
+            export_onnx_file(p, onnx, log)
+        return str(onnx)
+    return str(default_match_model(sd))
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="libra", description="Libra の自己対局・学習ランナー")
     ap.add_argument("--run", default="ls", help="run-id（状態ディレクトリ ~/libra-run/<run-id>）")
@@ -55,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     p_m.add_argument("--opponent-opt", action="append", default=[], help="相手の setoption（name=value）")
     p_m.add_argument("--libra-opt", action="append", default=[], help="Libra の setoption（name=value）")
     p_m.add_argument("--model", default=None, help="Libra のモデル（既定: <run>/checkpoints/latest.onnx。無ければ latest.pt = Python 版エンジン用）")
+    p_m.add_argument("--ckpt", default=None, help="Libra の重みをチェックポイント（.pt）で指定する。隣の同じ名前の .onnx で打ち、無ければ書き出す（--model が優先）")
     p_m.add_argument("--out", default=None, help="棋譜 JSONL（既定: <run>/matches/<時刻>.jsonl）")
     p_m.add_argument("--first-placer", default="a", choices=["a", "b"], help="第 1 局で両玉を置く側（a=Libra）")
     p_ex = sub.add_parser("export", help="チェックポイント（.pt）を推論用 ONNX に書き出す（libra / libra.exe 用）")
@@ -127,18 +160,9 @@ def main(argv: list[str] | None = None) -> int:
             signal.signal(s, on_signal)
         return w.run()
     if a.cmd == "export":
-        import os
-
-        from libra_net.export_onnx import check, export_checkpoint, load_checkpoint
-
         ckpt = Path(a.ckpt) if a.ckpt else sd.root / "checkpoints" / "latest.pt"
         out = Path(a.out) if a.out else sd.root / "checkpoints" / "latest.onnx"
-        tmp = out.with_suffix(".onnx.tmp")
-        meta = export_checkpoint(ckpt, tmp)
-        model, _ = load_checkpoint(ckpt)
-        diff = check(model, tmp)
-        os.replace(tmp, out)
-        print(f"exported {out} step {meta['libra_step']} max|ort-torch| {diff:.1e}")
+        export_onnx_file(ckpt, out)
         return 0
     if a.cmd == "openings":
         from .openings import openings_from_replay, write_openings
@@ -236,7 +260,7 @@ def main(argv: list[str] | None = None) -> int:
                 logf.write(s + "\n")
                 logf.flush()
 
-        lopts = {"Declare_Win": "true", "DNN_Model": a.model or str(default_match_model(sd))}
+        lopts = {"Declare_Win": "true", "DNN_Model": resolve_match_model(sd, a.model, a.ckpt, log)}
         for kv in a.libra_opt:
             k, v = kv.split("=", 1)
             lopts[k] = v

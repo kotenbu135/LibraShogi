@@ -98,12 +98,15 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 - **最強比（`best_games`、docs/restart-plan.md §3 M2）**: これまでで最強の保存済み（`state.json` の `auto.best`）と対局する。結果は `eval/best-*.json` と `eval/best.jsonl`。新しい世代の 95% 区間の下限が 0 を超えたら最強を置き換え、そうでなければ足踏みを数え、`best_stall_alert`（3）回続いたら log.txt に WARNING を出す（見直しの合図）。
 - **固定の参照（`reference_ckpts`・`reference_games`、同 M4）**: 設定に書いた重みのファイル（例: 旧 ls の 646,699 と実験の win1m.pt）と毎回対局し、`eval/reference.jsonl` に残す。run をまたいで同じ相手なので、絶対の物差しになる。コンソールの Elo タブに「対 <参照>」の線で出る。
 
-同じ周期で `libra match`（`match_games`=10 局、`match_go`="movetime 1000"、相手は fuseki_usi_server.py に `Threads=2`）も回す。どちらも別プロセス（`auto.log`）で GPU を共有し、結果は `eval/auto-*.json` と `matches/auto-*.summary.json`。前倒しは `libra eval-now` / `libra match-now`（フラグ EVAL_NOW / MATCH_NOW。次のチェックポイントで実行。コンソールの「今すぐ自己評価」「今すぐ対外対局」）。相手側は 41 手目以降を必ずやねうら王（水匠5 の評価関数）に中継するので「方策ネットだけの相手」は無い。ランナーを stop すると実行中のジョブは止め、再開後に積み直す。ランナーが異常終了した場合は、起動し直したランナーが残ったジョブ（孫の相手エンジンを含むプロセス グループ）を止めて積み直す。途中まで書いた出力は `<out>.interrupted` に改名する。
+同じ周期で `libra match`（`match_games`=10 局、`match_go`="movetime 1000"、相手は fuseki_usi_server.py に `match_opponent_opt`="Threads=2,Fuseki_Rules=2"）も回す。**Libra 側の重みは、その節目に固定したもので打つ**（ジョブを積むときに `--ckpt` へ `checkpoints/archive/ckpt_*.pt`（`match-now` で節目以外のときはその時点の `checkpoints/ckpt_*.pt`）を渡し、同時にその時点の `latest.onnx`（同じチェックポイントの `latest.pt` から書き出した同じ重み）を隣に `ckpt_*.onnx` として写す。1 回あたり約 40 MB。書き出しが古いままで写せなかったときは match が `.pt` から書き出し、`.pt` も回転で消えていたときは最新の重みで打ってログに warning を出す）。`latest.onnx` は中身が動く別名で、計測待ちの間に世代が変わって時系列の比較にならないため（docs/restart-plan.md §7 P2、2026-09-18）。結果の行の step は ONNX の名前から読む。どちらも別プロセス（`auto.log`）で GPU を共有し、結果は `eval/auto-*.json` と `matches/auto-*.summary.json`。前倒しは `libra eval-now` / `libra match-now`（フラグ EVAL_NOW / MATCH_NOW。次のチェックポイントで実行。コンソールの「今すぐ自己評価」「今すぐ対外対局」）。相手側は 41 手目以降を必ずやねうら王（水匠5 の評価関数）に中継するので「方策ネットだけの相手」は無い。ランナーを stop すると実行中のジョブは止め、再開後に積み直す。ランナーが異常終了した場合は、起動し直したランナーが残ったジョブ（孫の相手エンジンを含むプロセス グループ）を止めて積み直す。途中まで書いた出力は `<out>.interrupted` に改名する。
 
 ## 7. 計測（外部エンジンとの対局）
 
 ```bash
-~/LibraShogi/bin/libra match --games 20 --go "movetime 3000"      # Libra（latest.pt）対 fuseki_usi_server.py（やねうら王＋水匠5 中継）
+~/LibraShogi/bin/libra match --games 20 --go "movetime 3000"      # Libra（latest.onnx）対 fuseki_usi_server.py（やねうら王＋水匠5 中継）
+# 節目の重みで手で打つ（自動計測と同じ条件。`--ckpt` の隣に .onnx が無ければ書き出す。相手のルールの版は明示する）
+~/LibraShogi/bin/libra match --games 10 --go "movetime 1000" --ckpt ~/libra-run/ls/checkpoints/archive/ckpt_000028908.pt \
+  --opponent-opt Threads=2 --opponent-opt Fuseki_Rules=2
 ~/LibraShogi/bin/libra eval --a ckpt1.pt --b ckpt2.pt --games 200  # 世代間 Elo と較正
 ```
 
