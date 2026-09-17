@@ -137,3 +137,29 @@ def test_profile_and_cli(tmp_path: Path, capsys):
     assert [r["chunk"] for r in out["rows"]] == [0, 3] and out["rows"][0]["fuseki"]["n"] > 0
     assert main(["--root", str(tmp_path), "--run", "x", "genprof", "--n-chunks", "2", "--positions", "16"]) == 0
     assert "chunk" in capsys.readouterr().out
+
+
+def test_targets_are_from_the_side_to_move(tmp_path: Path):
+    """学習目標の符号: z と v41 は手番側から見た値（3 手目は先手、4 手目は後手）。docs/restart-plan.md §2 C4。"""
+    rb = _mk(tmp_path, window_games=100, chunk_games=1000)
+    games = _games(6, 9)
+    for g in games:
+        g["result"] = 1       # 先手勝ち
+        g["v41"] = 0.5        # 先手から見て +0.5
+    rb.add_games(games)
+    cum = np.cumsum(np.array([len(g["moves"]) for g in games], dtype=np.int64))
+    from libra_league.replay import sample_batch
+
+    rng = np.random.default_rng(0)
+    b = sample_batch(games, 0, cum, 256, rng, 0.0, 0.5, 32, 320, True)
+    # sample_batch は局面を一様に取るので、手番は glob の特徴（添字 25: 先手の番なら 1）で読む
+    sente = b["glob"][:, 25] > 0.5
+    z = b["z"]
+    assert (z[sente] == 1).all() and (z[~sente] == -1).all()
+    # 布石の目標 t = 0.5·z + 0.5·v41 は先手の番で 0.75、後手の番で −0.75。本将棋は z
+    t = b["wdl"][:, 0] - b["wdl"][:, 2]
+    fu = b["fuseki"]
+    assert np.allclose(t[fu & sente], 0.75) and np.allclose(t[fu & ~sente], -0.75)
+    assert np.allclose(t[~fu], z[~fu])
+    # V̂41 の目標は soft_wdl(v41): 先手の番で (0.5, 0.5, 0)、後手の番で (0, 0.5, 0.5)
+    assert np.allclose(b["v41"][sente], [0.5, 0.5, 0.0]) and np.allclose(b["v41"][~sente], [0.0, 0.5, 0.5])

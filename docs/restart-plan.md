@@ -64,11 +64,22 @@ status §10.3 の確かめ方を実行した（measurements.md 同日 18:05 の�
 | 読みの回数 | 96 / 24、全読み 25% | 今のまま（計算量の制約） | 計画 §3.1 | — |
 | ネットの形 | d 320・8 層・10M | 今のまま | 計画 §3.2 | — |
 
+## 4.1 実装の状況（2026-09-17 夜）
+
+| 項目 | 状況 |
+|---|---|
+| 窓の拡大（`window_frac`・`window_games_max`）、held-out、一般化の物差し `gen`・`libra genprof` | 済（bb7fc07） |
+| 最強比 `best_games`、固定の参照 `reference_ckpts` | 済（88ede39）。コンソールの Elo タブに参照の線、要約に最強比 |
+| σ の mctx 形 `gumbel_rescale` | 済（5c0bcc8、既定 off） |
+| 設定表（C1・C2）と設定の案 | docs/ls2-settings.md、docs/ls2-config.toml |
+| 目標の符号のテスト（C4） | test_targets_are_from_the_side_to_move |
+| 煙テスト（C3） | 起動待ち（§5 の 2） |
+
 ## 5. やり直しの手順（案）
 
-1. 今の ls・lx は止めたまま `~/libra-run/ls`・`lx` に残す（再開しない。ls-v0 と同じ扱い）。棋譜（CC0）は残す。
-2. 新しい run-id（例: `ls2`・`lx2`）で、二飛香を最初から入れた系列を乱数初期化から始める。搾取者は本体が M2 で伸び始めてから足す。
-3. 起動の前に §2 の C1〜C5。煙テストの結果を見てから本番。
+1. 今の ls・lx は止めたまま `~/libra-run/ls-v1`・`lx-v1` に改名して残す（再開しない。ls-v0 と同じ扱い。棋譜（CC0）は残す）。管理コンソール・bat・タスク スケジューラは run-id `ls`・`lx` を見るので、新しい系列も `ls`・`lx` の名前で作る（改名はユーザーの了承を得てから）。
+2. 新しい `ls` を docs/ls2-config.toml で乱数初期化から始める（`bin/libra run --config docs/ls2-config.toml`。起動はユーザーがコンソールから）。最初の 8 時間が煙テスト（docs/ls2-settings.md §5）。合格ならそのまま本番として続け、`[auto] every_hours` を 24 に戻す。搾取者 lx は本体が M2 で伸び始めてから足す。
+3. 起動の前に §2 の C1〜C5（C1・C2・C4 は済。C5 は CLAUDE.md に足す）。
 4. 起動後は §3 の物差しと週 1 の見直し。1 週間で M2 が伸びなければ止めて設定を見直す（11 月末まで待たない）。
 
 ## 6. 日程（案）

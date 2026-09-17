@@ -1,0 +1,89 @@
+# 新しい本体の系列（やり直し、2026-09-17 のユーザーの決定）の設定の案。決定は docs/ls2-settings.md の表で確かめてから。
+# 旧系列（~/libra-run/ls → ls-v1 に改名する案）と違う項目にはコメントを付けた。値は煙テスト（docs/restart-plan.md §2 C3）で決める。
+run_id = "ls"
+seed = 2
+
+[net]
+d_model = 320
+n_layers = 8
+n_heads = 8
+d_ff = 1280
+dropout = 0.0
+
+[search]
+full_sims = 96
+fast_sims = 24
+full_prob = 0.25
+gumbel_m_full = 16
+gumbel_m_fast = 8
+c_visit = 50.0
+c_scale = 1.0
+gumbel_rescale = false   # mctx 形にするなら true と c_scale = 0.1（煙テストの後の比較で決める）
+cpuct = 1.5
+draw_value = 0.0
+max_ply = 320
+count_from_41 = true
+policy_topk = 32
+max_moves_per_game = 400
+mate_nodes_root = 200
+proof_nodes = 1000
+proof_min_ply = 36
+
+[selfplay]
+n_games = 512
+threads = 12
+infer_dtype = "float16"
+openings = ""            # 搾取者 lx はまだ無い（本体が伸び始めてから足す）
+openings_prob = 0.1
+openings_reload_seconds = 600
+
+[train]
+batch_size = 1024
+lr = 0.0002
+weight_decay = 0.0001
+warmup_steps = 1000
+replay_ratio = 1.0       # 4 → 1。各局面を平均 1 回だけ学習する（AlphaZero の約 1.2 回に近い。窓の記憶を抑える）
+window_games = 100000    # 窓の最小
+window_frac = 0.5        # 窓を総局数の 50% まで広げる（新規）
+window_games_max = 1200000  # 上限 120 万局（1 局 約 10 KB の RAM で約 13 GB。空き 28 GB）
+min_window_games = 2000
+train_every_games = 256
+policy_weight = 1.0
+value_weight = 1.0
+v41_weight = 0.5
+lambda_z = 0.5
+mirror_prob = 0.5
+grad_clip = 1.0
+
+[run]
+checkpoint_minutes = 10
+status_seconds = 30
+chunk_games = 100
+keep_checkpoints = 3
+archive_every_steps = 50000
+heldout_every_chunks = 20   # 5% のチャンクを学習に使わず held-out にする（新規）
+heldout_games = 20000
+gen_minutes = 60            # 窓の中と held-out の一般化の物差し（新規）
+gen_positions = 4000
+
+[auto]
+enabled = true
+every_hours = 4.0           # 煙テストの間は 4 時間ごと。本番に移したら 24
+eval_games = 0              # 直前比の 100 局はやめる（向きを逆に出した 9/16 の再発防止）
+chain_eval = false
+eval_sims = 96
+eval_concurrent = 64
+eval_threads = 4
+anchor_games = 1000         # 100 → 1,000（幅 ±22 Elo）
+anchor_rebaseline = 0.85
+best_games = 1000           # 最強比（新規）
+best_stall_alert = 3
+reference_ckpts = ["/home/sakis/libra-run/ls-v1/checkpoints/archive/ckpt_000646699.pt", "/home/sakis/libra-run/experiments/2026-09-17-window/win1m.pt"]  # 固定の参照（新規）
+reference_games = 200
+match_games = 0             # 外部の AI との計測は得点 0 に張り付くので煙テストでは回さない。本番で 10 に戻す
+
+[workers]
+enabled = false
+
+[league]
+enabled = false             # lx を足してから
