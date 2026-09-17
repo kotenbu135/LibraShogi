@@ -39,7 +39,7 @@ bin/libra-vast cleanup --yes                                     # libra- のラ
 
 | ファイル | 内容 |
 |---|---|
-| `libra_cloud/vast_cli.py`（`bin/libra-vast`） | セッション（`~/libra-run/cloud/<run>-<時刻>/`）を作り、束の作成と `vast_worker.py` を setsid で切り離して起動する。同時に動かせるのは 1 つ。停止はブリッジが動いていれば `bridge/STOP`、借りる途中ならプロセスグループに SIGTERM。`~/.venvs/vastai` の Python で動く |
+| `libra_cloud/vast_cli.py`（`bin/libra-vast`） | セッション（`~/libra-run/cloud/<run>-<時刻>/`）を作り、束の作成と `vast_worker.py` を setsid で切り離して起動する。同時に動かせるのは置き場所（`--root`）ごとに 1 つ。2 台目は別の `--root`（例 `~/libra-run/cloud2`）と別のワーカー名（`start --worker-id vast2`）で起動する（コンソールは `~/libra-run/cloud` しか見ないので、2 台目は 1 台目より先に終わるように `--hours` を決める。1 台目が終わった後に 2 台目のインスタンスが残ると、コンソールが「後始末」を促し、押すと 2 台目も消える）。停止はブリッジが動いていれば `bridge/STOP`、借りる途中ならプロセスグループに SIGTERM。`~/.venvs/vastai` の Python で動く |
 
 GPU 名の空白は `_` でもよい（コンソールは wsl.exe に渡すので `_` を使う）。CPU GHz の下限の既定は 4.4（CPU が遅いホストでは探索が律速して GPU が遊ぶ）。
 

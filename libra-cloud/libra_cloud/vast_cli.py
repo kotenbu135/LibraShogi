@@ -285,11 +285,12 @@ def launch_argv(a: argparse.Namespace, run_dir: Path, d: Path) -> list[str]:
     work = [str(VAST_PY), "-u", str(REPO / "libra-cloud" / "vast_worker.py"), "--gpu", a.gpu, "--max-dph", str(a.max_dph),
             "--hours", str(a.hours), "--run-dir", str(run_dir), "--bundle", str(d / "worker" / "bundle.tar.gz"), "--out", str(d),
             "--min-rel", str(a.min_rel), "--min-cpu-ghz", str(a.min_cpu_ghz), "--min-cores", str(a.min_cores),
-            "--max-inet-cost", str(a.max_inet_cost), "--n-games", str(a.n_games), "--rent", a.rent, "--bid-margin", str(a.bid_margin)]
+            "--max-inet-cost", str(a.max_inet_cost), "--n-games", str(a.n_games), "--rent", a.rent, "--bid-margin", str(a.bid_margin),
+            "--id", getattr(a, "worker_id", "vast1")]
     return ["bash", "-c", f"{shlex.join(prep)} && exec {shlex.join(work)}"]
 
 
-CONTINUE_KEYS = ("run", "gpu", "max_dph", "min_rel", "min_cpu_ghz", "min_cores", "max_inet_cost", "n_games", "rent", "bid_margin")
+CONTINUE_KEYS = ("run", "gpu", "max_dph", "min_rel", "min_cpu_ghz", "min_cores", "max_inet_cost", "n_games", "rent", "bid_margin", "worker_id")
 MIN_CONTINUE_H = 0.25     # 残りがこれより短ければ借り直さない（借りてから打ち始めるまで 2〜6 分かかる）
 DEADLINE_SLACK_S = 1800   # セッションの鎖の締め切り = 最初の開始 + 時間 + これ（借り直しの待ちで際限なく延びないように）
 
@@ -351,7 +352,7 @@ def cmd_start(a: argparse.Namespace) -> int:
                              start_new_session=True, cwd=str(REPO), env=dict(os.environ, PYTHONPATH=PROJECT_PATH))
     write_json(d / "session.json", {"run": a.run, "gpu": a.gpu, "max_dph": a.max_dph, "hours": a.hours, "min_rel": a.min_rel,
                                     "min_cpu_ghz": a.min_cpu_ghz, "min_cores": a.min_cores, "max_inet_cost": a.max_inet_cost, "n_games": a.n_games,
-                                    "rent": a.rent, "bid_margin": a.bid_margin, "started": time.time(), "pid": p.pid,
+                                    "rent": a.rent, "bid_margin": a.bid_margin, "worker_id": a.worker_id, "started": time.time(), "pid": p.pid,
                                     "deadline": cont["deadline"] if cont else time.time() + a.hours * 3600 + DEADLINE_SLACK_S,
                                     "continues": cont["continues"] if cont else None})
     how = "入札" if a.rent == "bid" else "on-demand"
@@ -563,6 +564,8 @@ def main(argv: list[str] | None = None) -> int:
     p_s.add_argument("--run", default="ls")
     p_s.add_argument("--run-root", default="~/libra-run")
     p_s.add_argument("--force", action="store_true", help="[workers] enabled でなくても起動する")
+    p_s.add_argument("--worker-id", default="vast1",
+                     help="ワーカー名（対局ファイル名・seed・ls の workers の内訳）。2 台目を別の --root で動かすときは vast2 など別の名前にする")
     p_s.add_argument("--continue-from", default=None,
                      help="ホストを失ったセッション名。その設定と残りの時間・締め切りで次のセッションを起動する（vast_worker.py が呼ぶ）")
     for p in (p_s, sub.add_parser("offers", help="検索したオファーを安い順に、落ちた理由と 1 つ緩めれば通る条件を付けて出す（借りない）")):

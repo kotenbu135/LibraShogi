@@ -315,3 +315,26 @@ def test_history_lists_every_session_with_cost_per_million_games(tmp_path: Path,
     assert "RTX 5080" in out and "35,000" in out and "合計" in out
     assert vast_cli.main(["--root", str(tmp_path / "empty"), "history", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["sessions"] == []
+
+
+def test_worker_id_is_passed_and_continued(tmp_path):
+    """2 台目のワーカーを別の --root で動かすとき、ワーカー名（対局ファイル名・seed・ls の by_worker）を vast1 と分ける。
+    借り直しの鎖でも同じ名前を引き継ぐ。"""
+    import argparse
+
+    from libra_cloud.vast_cli import continue_settings, launch_argv
+
+    a = argparse.Namespace(gpu="RTX 5090", max_dph=0.6, hours=1.5, min_rel=0.94, min_cpu_ghz=4.4, min_cores=16, max_inet_cost=0.04,
+                           n_games=512, rent="on-demand", bid_margin=0.1, worker_id="vast2")
+    cmd = launch_argv(a, tmp_path / "ls", tmp_path / "s")[-1]
+    assert "--id vast2" in cmd
+    prev = tmp_path / "prev"
+    prev.mkdir()
+    now = time.time()
+    (prev / "session.json").write_text(json.dumps({"run": "ls", "gpu": "RTX 5090", "hours": 1.5, "started": now, "worker_id": "vast2"}))
+    cont, why = continue_settings(prev, now)
+    assert cont is not None and cont["worker_id"] == "vast2", why
+    # 名前の無い古いセッションからの借り直しは既定（vast1）のまま
+    (prev / "session.json").write_text(json.dumps({"run": "ls", "gpu": "RTX 5090", "hours": 1.5, "started": now}))
+    cont, _ = continue_settings(prev, now)
+    assert "worker_id" not in cont
