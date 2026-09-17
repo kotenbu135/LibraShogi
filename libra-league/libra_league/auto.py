@@ -73,6 +73,8 @@ def metrics_row(status: dict) -> dict:
         "exploiter": {k: status["exploiter"].get(k) for k in ("games", "wins", "draws", "losses")} if status.get("exploiter") else None,
         "gpu_mb": (status.get("gpu") or {}).get("mem_reserved_mb"),
         "timing": status.get("timing"),  # 処理時間の内訳（looptime.py。この行までの窓）
+        "gen": status.get("gen"),        # 一般化の物差し（genprof.py。窓の中と held-out。gen_minutes ごとに更新）
+        "heldout": status.get("heldout_games"),
     }
     return row
 

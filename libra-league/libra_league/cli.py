@@ -79,6 +79,13 @@ def main(argv: list[str] | None = None) -> int:
     p_ca.add_argument("--games", type=int, default=20000, help="新しい側から何局使うか（書き出し済みのチャンクから）")
     p_ca.add_argument("--bins", type=int, default=10)
     p_ca.add_argument("--json", action="store_true")
+    p_gp = sub.add_parser("genprof", help="一般化の物差し: 保存済みの重みを、リプレイの指定チャンクの局面で測る（価値の相関・二乗誤差、方策の交差エントロピー）")
+    p_gp.add_argument("--ckpt", default=None, help="既定: <run>/checkpoints/latest.pt")
+    p_gp.add_argument("--chunks", default=None, help="チャンク番号（コンマ区切り。既定: 最新から 1,000 チャンクごとに 6 点）")
+    p_gp.add_argument("--n-chunks", type=int, default=10, help="各点で読むチャンク数")
+    p_gp.add_argument("--positions", type=int, default=2000)
+    p_gp.add_argument("--seed", type=int, default=0)
+    p_gp.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     sd = StateDir(Path(a.root) / a.run)
     if a.cmd == "run":
@@ -144,6 +151,28 @@ def main(argv: list[str] | None = None) -> int:
         state = sd.read_state() if sd.state_json.exists() else {}
         row = make_row(newest_games(sd.replay, a.games), state.get("step"), state.get("generation"), a.bins)
         print(json.dumps(row, ensure_ascii=False) if a.json else format_table(row))
+        return 0
+    if a.cmd == "genprof":
+        import torch
+
+        from libra_net.export_onnx import load_checkpoint
+
+        from .config import load_config
+        from .genprof import format_rows, profile
+
+        cfg = load_config(sd.config_toml if sd.config_toml.exists() else None)
+        ckpt = Path(a.ckpt).expanduser() if a.ckpt else sd.checkpoints / "latest.pt"
+        model, _ = load_checkpoint(ckpt)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
+        if a.chunks:
+            starts = [int(x) for x in a.chunks.split(",")]
+        else:
+            newest = max((int(p.stem.split("_")[1]) for p in sd.replay.glob("chunk_*.pkl")), default=-1)
+            starts = [max(0, newest + 1 - a.n_chunks - k * 1000) for k in range(6) if newest + 1 - a.n_chunks - k * 1000 >= 0]
+        rows = profile(model, sd.replay, starts, a.n_chunks, a.positions, device, cfg["train"]["lambda_z"], cfg["search"]["policy_topk"],
+                       cfg["search"]["max_ply"], cfg["search"]["count_from_41"], a.seed)
+        print(json.dumps({"ckpt": str(ckpt), "rows": rows}, ensure_ascii=False) if a.json else f"{ckpt}\n" + format_rows(rows))
         return 0
     if a.cmd == "stop":
         sd.set_flag("STOP")
@@ -283,6 +312,10 @@ def main(argv: list[str] | None = None) -> int:
                 print("train:", json.dumps(st["train"]))
             if st.get("timing"):
                 print("timing:", format_timing(st["timing"]))
+            if st.get("gen"):
+                from .genprof import format_gen
+
+                print(format_gen(st["gen"]))
             if st.get("workers"):
                 wk = st["workers"]
                 print(f"workers: games {wk.get('games')} files {wk.get('files')} stale {wk.get('stale_games')} rejected {wk.get('rejected_files')}  "

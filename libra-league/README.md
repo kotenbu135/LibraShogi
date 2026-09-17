@@ -10,7 +10,8 @@
 | `libra_league/supervise.py` | `libra run` の監視役: ランナー本体を子プロセスで回し、異常終了したら起動し直す |
 | `libra_league/runner.py` | ランナー本体: 自己対局と学習の時分割、フラグ、10 分ごとの原子的チェックポイント。搾取者の run では凍結相手の作り直しと布石の書き出し |
 | `libra_league/selfplay.py` | C++ エンジン（librasearch）＋ PyTorch 推論（CUDA Graphs）のループ。搾取者モードの相手のネットと方策 |
-| `libra_league/replay.py` | 100 局チャンク、棋譜 JSONL（CC0）、バッチ作成（鏡映増強、V̂41 混合） |
+| `libra_league/replay.py` | 100 局チャンク、棋譜 JSONL（CC0）、バッチ作成（鏡映増強、V̂41 混合）、総局数に応じて広がる窓、held-out のチャンク |
+| `libra_league/genprof.py` | 一般化の物差し（窓の中と held-out で価値の相関・方策の交差エントロピーを比べる。`libra genprof`） |
 | `libra_league/trainer.py` | AdamW、bf16、方策・価値・V̂41 の損失 |
 | `libra_league/openings.py` | 搾取者が勝った布石（`openings.json`）の抽出と読み込み。本体の自己対局の一部をここから始める |
 | `libra_league/league.py` | 本体と過去の搾取者の対局（スナップショットのプール、PFSP で相手を選ぶ） |

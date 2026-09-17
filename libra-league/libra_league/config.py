@@ -69,7 +69,9 @@ DEFAULTS: dict[str, Any] = {
         "weight_decay": 1e-4,
         "warmup_steps": 1000,
         "replay_ratio": 4.0,
-        "window_games": 100000,
+        "window_games": 100000,    # 窓の最小（局）。window_frac > 0 なら総局数 × window_frac まで広げる（上限 window_games_max、0 で無制限）。
+        "window_frac": 0.0,        # 0 で固定の窓（2026-09-17 までの ls・lx）。KataGo [Wu19] は総数に応じて広げる（docs/restart-plan.md §4）
+        "window_games_max": 0,     # 1 局 約 5 KB（100 万局で約 5 GB。RAM の空きで決める）
         "min_window_games": 2000,
         "train_every_games": 256,
         "policy_weight": 1.0,
@@ -88,7 +90,10 @@ DEFAULTS: dict[str, Any] = {
             "export_onnx": True,   # チェックポイントごとに latest.onnx も書く（libra / libra.exe 用）
             "metrics_minutes": 5,   # metrics.jsonl（進捗の時系列）の追記間隔
             # calib.jsonl: 窓の最新 calib_games 局で、探索値と結果の較正（libra calib と同じ）を calib_minutes ごとに足す。0 で無効
-            "calib_minutes": 60, "calib_games": 20000},
+            "calib_minutes": 60, "calib_games": 20000,
+            # held-out（docs/restart-plan.md §3 M1）: チャンク番号が heldout_every_chunks の倍数の局は学習に使わず、新しい heldout_games 局を持つ。
+            # gen_minutes ごとに窓の中と held-out の gen_positions 局面で一般化の物差し（genprof.py）を測り、status・metrics の "gen" に出す。0 で無効
+            "heldout_every_chunks": 0, "heldout_games": 20000, "gen_minutes": 60, "gen_positions": 4000},
     # 自動計測（docs/runbook.md §6）: every_hours ごとにチェックポイントを archive に残し、直前の archive と対局させて Elo を鎖にする。
     # match_games > 0 なら外部エンジン（fuseki_usi_server.py）とも少数局を指す。どちらも別プロセスで GPU を共有する。
     # anchor_*: 固定の基準ネットとの対局。連続世代どうしの Elo は伸びが測定幅（100 局で ±70 Elo）に埋もれ、

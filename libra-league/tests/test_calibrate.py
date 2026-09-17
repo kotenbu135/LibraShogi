@@ -148,7 +148,7 @@ def test_runner_writes_calib_on_interval(tmp_path: Path):
     sd.create()
     games = [_game(FUSEKI_MOVES + 2, 1, 0.0) for _ in range(5)]
     fake = SimpleNamespace(cfg={"run": {"calib_minutes": 60, "calib_games": 3}}, sd=sd, last_calib=0.0,
-                           replay=SimpleNamespace(games=games), state={"step": 9, "generation": 2}, log=lambda s: None)
+                           replay=SimpleNamespace(games=games, window_games_list=lambda: games), state={"step": 9, "generation": 2}, log=lambda s: None)
     Runner.maybe_write_calib(fake, 4000.0)
     Runner.maybe_write_calib(fake, 4000.0 + 60)  # 間隔の前は書かない
     rows = load_calib(sd, 10)

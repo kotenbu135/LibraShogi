@@ -39,7 +39,9 @@ class Runner:
         self.model = LibraNet(NetConfig.from_dict(cfg["net"])).to(self.device)
         self.trainer = Trainer(self.model, cfg["train"], self.device)
         tr, sr, rr = cfg["train"], cfg["search"], cfg["run"]
-        self.replay = ReplayBuffer(sd.replay, sd.games, tr["window_games"], rr["chunk_games"], sr["max_ply"], sr["count_from_41"])
+        self.replay = ReplayBuffer(sd.replay, sd.games, tr["window_games"], rr["chunk_games"], sr["max_ply"], sr["count_from_41"],
+                                   window_frac=float(tr.get("window_frac", 0.0)), window_games_max=int(tr.get("window_games_max", 0)),
+                                   heldout_every_chunks=int(rr.get("heldout_every_chunks", 0)), heldout_games=int(rr.get("heldout_games", 20000)))
         self.state = {
             "run_id": cfg["run_id"], "created": time.time(), "generation": 0, "step": 0, "games_total": 0, "moves_total": 0,
             "chunk_index": 0, "seed": cfg["seed"], "restarts": [], "last_checkpoint": None, "elapsed": 0.0,
@@ -64,6 +66,8 @@ class Runner:
         self.auto = AutoJobs(sd, cfg, self.state, self.log)
         self.last_metrics = 0.0
         self.last_calib = 0.0
+        self.last_gen = 0.0
+        self.gen: dict | None = None  # 一般化の物差し（genprof.py。窓の中と held-out）
         # 自己対局ワーカー（[workers] enabled）: 重みを weights/ に配り、inbox/ に届いた局を取り込む。搾取者の run では使わない
         self.inbox: Inbox | None = None
         wk = cfg.get("workers", {})
@@ -110,7 +114,7 @@ class Runner:
         self.session_elapsed_offset = float(self.state.get("elapsed", 0.0))
         if self.state.get("exploiter_stats"):
             self.exploiter_stats.update(self.state["exploiter_stats"])
-        self.log(f"resume: step={self.state['step']} games={self.state['games_total']} window={self.replay.n_games()} chunks={self.state['chunk_index']}")
+        self.log(f"resume: step={self.state['step']} games={self.state['games_total']} window={self.replay.n_games()}/{self.replay.window()} heldout={self.replay.n_heldout()} chunks={self.state['chunk_index']}")
 
     def checkpoint(self) -> None:
         t0 = time.time()
@@ -447,6 +451,9 @@ class Runner:
             "games_session": self.session_games,
             "games_per_day_1h": round(rate),
             "window_games": self.replay.n_games(),
+            "window_target": self.replay.window(),
+            "heldout_games": self.replay.n_heldout(),
+            "gen": self.gen,
             "elapsed_h": round(self.elapsed() / 3600, 2),
             "engine": st,
             "train": self.last_train,
@@ -476,6 +483,23 @@ class Runner:
             append_metrics(self.sd, status)
             self.last_metrics = now
         self.maybe_write_calib(now)
+        self.maybe_measure_gen(now)
+
+    def maybe_measure_gen(self, now: float) -> None:
+        """gen_minutes ごとに、窓の中と held-out の局面で一般化の物差し（genprof.py）を測る。held-out が無い run では何もしない。"""
+        rc, tr = self.cfg["run"], self.cfg["train"]
+        minutes = float(rc.get("gen_minutes", 60))
+        if minutes <= 0 or now - self.last_gen < minutes * 60 or self.replay.n_heldout() <= 0 or self.replay.n_games() < int(tr["min_window_games"]):
+            return
+        from .genprof import format_gen, generalization
+
+        self.last_gen = now
+        t0 = time.time()
+        self.gen = generalization(self.model, self.replay, int(rc.get("gen_positions", 4000)), self.rng, self.device, tr["lambda_z"], self.cfg["search"]["policy_topk"])
+        if self.gen is not None:
+            self.gen["t"] = round(now, 1)
+            self.gen["step"] = self.trainer.step_count
+            self.log(format_gen(self.gen) + f" ({time.time() - t0:.1f}s)")
 
     def maybe_write_calib(self, now: float) -> None:
         """calib_minutes ごとに、窓の最新 calib_games 局で同じネットの較正を calib.jsonl に足す（docs/decisions.md 2026-09-17）。
@@ -486,7 +510,7 @@ class Runner:
             return
         from .calibrate import append_calib, make_row
 
-        games = list(self.replay.games)[-int(rc.get("calib_games", 20000)):]
+        games = self.replay.window_games_list()[-int(rc.get("calib_games", 20000)):]
         append_calib(self.sd, make_row(games, self.state.get("step"), self.state.get("generation"), now=now))
         self.last_calib = now
 
