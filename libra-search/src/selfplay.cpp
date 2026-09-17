@@ -318,6 +318,35 @@ static float edge_q(const Node& parent, const Edge& e) {
   return parent.visits ? parent.wsum / parent.visits : parent.net_value;
 }
 
+// 根の全ての手の σ に入れる q（completed Q）。cfg.gumbel_rescale なら mctx の qtransform_completed_by_mix_value と同じ:
+// 未訪問は v_mix = (v_net + ΣN · Σ_visited π q / Σ_visited π) / (ΣN + 1) で補い、[0, 1] に最小・最大で正規化する。
+// そうでなければ今までどおり（未訪問は根の平均、正規化なし）
+static void completed_q(const Node& root, const SearchConfig& cfg, std::vector<float>& out) {
+  out.resize(root.edges.size());
+  if (!cfg.gumbel_rescale) {
+    for (size_t i = 0; i < root.edges.size(); ++i) out[i] = edge_q(root, root.edges[i]);
+    return;
+  }
+  float sum_n = 0, sum_p = 0, wq = 0;
+  for (const Edge& e : root.edges) {
+    if (e.visits > 0) {
+      sum_n += float(e.visits);
+      sum_p += e.prior;
+      wq += e.prior * (e.wsum / e.visits);
+    }
+  }
+  const float mixed = sum_n > 0 ? (root.net_value + sum_n * (wq / std::max(sum_p, 1e-30f))) / (sum_n + 1) : root.net_value;
+  float lo = 1e30f, hi = -1e30f;
+  for (size_t i = 0; i < root.edges.size(); ++i) {
+    const Edge& e = root.edges[i];
+    out[i] = e.visits > 0 ? e.wsum / e.visits : mixed;
+    lo = std::min(lo, out[i]);
+    hi = std::max(hi, out[i]);
+  }
+  const float range = std::max(hi - lo, 1e-8f);
+  for (float& q : out) q = (q - lo) / range;
+}
+
 // 逐次半減の次の候補を選ぶ。全候補が目標に達していれば半減。終わりなら -1
 static int gumbel_pick(SelfPlay::Game& g, const SearchConfig& cfg) {
   Node& root = g.nodes[0];
@@ -333,10 +362,9 @@ static int gumbel_pick(SelfPlay::Game& g, const SearchConfig& cfg) {
     if (best >= 0) return best;
     if (g.cand.size() <= 1 || g.sh_phase + 1 >= g.sh_phases) return -1;
     // 半減: g + log π + σ(q̂) の上位半分を残す
-    auto score = [&](int c) {
-      const Edge& e = root.edges[c];
-      return g.gumbel[c] + std::log(e.prior) + sigma_q(root, edge_q(root, e), cfg);
-    };
+    std::vector<float> cq;
+    completed_q(root, cfg, cq);
+    auto score = [&](int c) { return g.gumbel[c] + std::log(root.edges[c].prior) + sigma_q(root, cq[c], cfg); };
     std::sort(g.cand.begin(), g.cand.end(), [&](int a, int b) { return score(a) > score(b); });
     g.cand.resize(std::max<size_t>(1, g.cand.size() / 2));
     ++g.sh_phase;
@@ -352,9 +380,11 @@ void SelfPlay::finish_move(Game& g) {
   // 最終選択: 残った候補から g + log π + σ(q̂) の最大
   int best = g.cand.empty() ? 0 : g.cand[0];
   float best_s = -1e30f;
+  std::vector<float> cq;
+  completed_q(root, cfg_, cq);
   for (int c : g.cand) {
     const Edge& e = root.edges[c];
-    float s = g.gumbel[c] + std::log(e.prior) + sigma_q(root, edge_q(root, e), cfg_);
+    float s = g.gumbel[c] + std::log(e.prior) + sigma_q(root, cq[c], cfg_);
     if (s > best_s) {
       best_s = s;
       best = c;
@@ -365,14 +395,13 @@ void SelfPlay::finish_move(Game& g) {
   mr.full = g.full;
   mr.root_q = g.root_q();
   if (g.full) {
-    // 改善方策 π' = softmax(log π + σ(completed Q))。未訪問は根の値で補完
+    // 改善方策 π' = softmax(log π + σ(completed Q))。completed Q は completed_q（既定は未訪問を根の平均で補完）
     std::vector<std::pair<float, int>> sc;
     sc.reserve(root.edges.size());
     float mx = -1e30f;
     for (size_t i = 0; i < root.edges.size(); ++i) {
       const Edge& e = root.edges[i];
-      float q = e.visits > 0 ? e.wsum / e.visits : mr.root_q;
-      float s = std::log(e.prior) + sigma_q(root, q, cfg_);
+      float s = std::log(e.prior) + sigma_q(root, cq[i], cfg_);
       sc.push_back({s, int(i)});
       mx = std::max(mx, s);
     }

@@ -19,6 +19,9 @@ DEFAULTS: dict[str, Any] = {
         "gumbel_m_fast": 8,
         "c_visit": 50.0,
         "c_scale": 1.0,
+        # true なら σ に入れる q を mctx の completed Q（未訪問は v_mix、根の手の間で [0,1] に正規化）にする。そのとき c_scale は mctx の既定 0.1 に
+        # 合わせる（docs/method-evidence.md §2.3、docs/restart-plan.md §4）。false は 2026-09-17 までの形
+        "gumbel_rescale": False,
         "cpuct": 1.5,
         "draw_value": 0.0,
         "max_ply": 320,

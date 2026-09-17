@@ -23,6 +23,10 @@ struct SearchConfig {
   int gumbel_m_fast = 8;
   float c_visit = 50.0f;    // Gumbel の σ(q) = (c_visit + max N) · c_scale · q
   float c_scale = 1.0f;
+  // true なら σ に入れる q を著者の実装 mctx（qtransform_completed_by_mix_value）と同じ completed Q にする:
+  // 未訪問の手は v_mix（根のネットの値と訪問した手の値の事前確率つき平均）で補い、根の手の間で [0, 1] に最小・最大で正規化する。
+  // mctx の既定は c_scale（value_scale）0.1。false（既定）は 2026-09-17 までの形（未訪問は根の平均、正規化なし、q ∈ [−1, 1]）
+  bool gumbel_rescale = false;
   float cpuct = 1.5f;       // ルート以外の PUCT
   float draw_value = 0.0f;  // 引き分けの値（手番側から）
   int max_ply = 320;

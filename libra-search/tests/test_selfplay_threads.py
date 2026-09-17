@@ -267,3 +267,30 @@ def test_eval_cache_is_off_by_default_and_can_be_switched_off():
         sp.collect(sq, glob)
         sp.apply(*fake_net(sq, glob))
     assert sp.stats()["cache_hits"] == 0
+
+
+def test_gumbel_rescale_completed_q():
+    """gumbel_rescale（mctx の completed Q: 未訪問は v_mix、根の手の間で [0,1] に正規化、c_scale 0.1）でも対局が進み、方策ターゲットは
+    正規化された分布になる。既定（false）は同じ seed で今までどおりの棋譜（この関数の中では rescale の有無で棋譜が変わることだけ見る）。"""
+    import numpy as np
+
+    def play(rescale: bool):
+        cfg = {**CFG, "full_prob": 1.0, "gumbel_rescale": rescale, "c_scale": 0.1 if rescale else 1.0}
+        sp = librasearch.SelfPlay(cfg, 4, seed=5, threads=2)
+        sq = np.zeros((4, 81, ls.SQ_FEATS), np.float32)
+        glob = np.zeros((4, ls.GLOB_FEATS), np.float32)
+        rng = np.random.default_rng(5)
+        out = []
+        while len(out) < 4:
+            sp.collect(sq, glob)
+            sp.apply(rng.standard_normal((4, ls.POLICY_SIZE), dtype=np.float32) * 2, np.tile(np.array([0.5, 0.1, 0.4], np.float32), (4, 1)))
+            out += sp.take_finished()
+        return out[:4]
+
+    a, b = play(True), play(False)
+    for g in a:
+        po, pp = np.asarray(g["policy_off"]), np.asarray(g["policy_p"], np.float64)
+        for j in range(len(g["moves"])):
+            p = pp[po[j]:po[j + 1]]
+            assert len(p) >= 1 and abs(p.sum() - 1) < 1e-4 and (p >= 0).all()
+    assert any(not np.array_equal(x["moves"], y["moves"]) for x, y in zip(a, b))
