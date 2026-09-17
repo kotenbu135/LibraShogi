@@ -98,7 +98,7 @@ WINUSER=$(powershell.exe -NoProfile -Command '$env:USERNAME' | tr -d '\r')   # W
 WIN="C:\\Users\\$WINUSER\\libra"; S="$WIN\\libra-console.ps1"; SHOT="$WIN\\console-shot.png"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot "$SHOT"   # 1 回更新して PNG 保存、要約を表示して終了（約 5 秒）
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -Do 'ls:status'     # ボタンと同じ呼び出しだけ実行（status/stop/eval-now/match-now。起動は含まない。本番の run に stop を送らない）
-powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot "$SHOT" -Tab 'lx,Elo'   # タブを選ぶ（上: ls, lx, クラウド, クラウド履歴 / グラフ: 局/日, Elo, 対外対局, 学習, 終局内訳, 手数, ログ）。カンマで両方
+powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot "$SHOT" -Tab 'lx,Elo'   # タブを選ぶ（上: ls, lx, クラウド, クラウド履歴 / グラフ: 局/日, Elo, 対外対局, 学習, 学習目標, 較正, 処理時間, 終局内訳, 手数, ログ）。カンマで両方
 powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot "$SHOT" -Size 540x900   # 大きさを指定（最小 540x900。-Screenshot のときは前回の配置を戻さない）
 ```
 

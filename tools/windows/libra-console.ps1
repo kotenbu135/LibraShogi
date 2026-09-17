@@ -892,6 +892,38 @@ function Build-Series([string]$tab) {
                 if ($null -ne $a -and $a.n -gt 0) { $note = "最新 step {0}: 全体 ECE {1:N3}・偏り（予測 − 実際）{2:+0.000;-0.000}。{3}" -f (Format-Int $rows[-1].step), [double]$a.ece, [double]$a.bias, $note }
             }
         }
+        "処理時間" {
+            # 学習器のループの実時間の内訳（metrics.jsonl の timing、5 分の窓。libra-league/libra_league/looptime.py）
+            $title = "処理時間の内訳（$sel、5 分ごとの実時間に占める割合）"
+            $yfmt = "{0:P0}"
+            $defs = [ordered]@{
+                "評価 GPU"     = @("sp_eval")                                                             # 自己対局のネットの評価の待ち
+                "探索 CPU"     = @("sp_collect", "sp_proof", "sp_apply")                                  # 自己対局の収集・証明・反映
+                "リーグ"       = @("lg_collect", "lg_eval", "lg_proof", "lg_apply", "lg_other")           # 対 lx
+                "学習"         = @("train_sample", "train_step", "train_publish")                         # バッチ・ステップ・重みの反映
+                "保存ほか"     = @("replay", "ingest", "housekeeping", "status", "checkpoint", "other")
+            }
+            $i = 0; $last = $null
+            foreach ($name in $defs.Keys) {
+                $s = New-Series $name $script:Palette[$i]
+                foreach ($m in (Get-Metrics $sel)) {
+                    if ($null -eq $m.PSObject.Properties["timing"] -or $null -eq $m.timing -or [double]$m.timing.window_s -le 0) { continue }
+                    $v = 0.0
+                    foreach ($k in $defs[$name]) { if ($null -ne $m.timing.sec.$k) { $v += [double]$m.timing.sec.$k } }
+                    Add-Pt $s (From-Unix $m.t) ($v / [double]$m.timing.window_s)
+                    $last = $m.timing
+                }
+                $series += $s; $i++
+            }
+            $note = "run の起動し直しの後から記録。内訳は bin/libra status の timing 行"
+            if ($null -ne $last) {
+                $r = [double]$last.rounds; $sec = $last.sec
+                $parts = ""
+                if ($r -gt 0) { $parts = "1 ラウンド 収集 {0:N1}・評価 {1:N1}・証明 {2:N1}・反映 {3:N1} ms " -f ($sec.sp_collect / $r * 1000), ($sec.sp_eval / $r * 1000), ($sec.sp_proof / $r * 1000), ($sec.sp_apply / $r * 1000) }
+                if ([double]$last.train_steps -gt 0) { $parts += "学習 {0:N0} ms/step" -f ($sec.train_step / [double]$last.train_steps * 1000) }
+                $note = "最新 " + $parts + "（評価は同じ GPU の別 run の待ちを含む）"
+            }
+        }
         "終局内訳" {
             $title = "終局の内訳と先手勝率（$sel、5 分ごとの新規対局の割合）"
             $yfmt = "{0:P0}"
@@ -927,7 +959,7 @@ function Build-Series([string]$tab) {
         }
     }
     # 5 分ごとの metrics（とコンソールの 30 秒観測）から作る系列は、観測の途切れで線を切る
-    if (@("局/日", "学習", "学習目標", "較正", "終局内訳", "手数") -contains $tab) { foreach ($s in $series) { $s.gap = $true } }
+    if (@("局/日", "学習", "学習目標", "較正", "処理時間", "終局内訳", "手数") -contains $tab) { foreach ($s in $series) { $s.gap = $true } }
     return @{ title = $title; series = $series; yfmt = $yfmt; zero = $zero; note = $note; all = $all }
 }
 
@@ -947,13 +979,13 @@ $cmbRange.SelectedIndex = 1
 $cmbRange.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
 $cmbRange.Add_SelectedIndexChanged({ $tabs.Invalidate($true) })
 $cbar.Controls.Add($cmbRange)
-$lblChartNote = New-Label "学習・学習目標・較正・終局内訳・手数はこのタブの run、ほかは両方" 4
+$lblChartNote = New-Label "学習・学習目標・較正・処理時間・終局内訳・手数はこのタブの run、ほかは両方" 4
 $lblChartNote.ForeColor = [System.Drawing.Color]::DimGray
 $cbar.Controls.Add($lblChartNote)
 $chartHost.Controls.Add($cbar, 0, 0)
 $tabs = New-Object System.Windows.Forms.TabControl
 $tabs.Dock = "Fill"
-$script:TabNames = @("局/日", "Elo", "対外対局", "学習", "学習目標", "較正", "終局内訳", "手数")
+$script:TabNames = @("局/日", "Elo", "対外対局", "学習", "学習目標", "較正", "処理時間", "終局内訳", "手数")
 foreach ($name in $script:TabNames) {
     $page = New-Object System.Windows.Forms.TabPage
     $page.Text = $name
