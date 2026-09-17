@@ -2,7 +2,10 @@
 
 docs/libra-local.md §7〜8 の実装。状態はすべて `~/libra-run/<run-id>/` にある。ライセンス: CC BY 4.0。
 
-**系列**: 本体 `ls` と搾取者 `lx` は、二飛香（docs/rules.md §3.2、2026-09-13）を入れた系列。`ls` は旧ルールの ls の最終チェックポイント（step 229,590）の `latest.pt`（モデル・オプティマイザ・step）を `checkpoints/latest.pt` に置いて始め、`lx` はゼロから（凍結相手 `lx/main.pt` は同じ `latest.pt` を先に置き、起動直後に `main_source` から作り直す）。局数・チャンク・自動計測の基準（`auto.anchor`）・Elo の累積は 0 から数え直し、旧系列とはつながない。外部エンジンとの自動計測は、相手が二飛香を知らないあいだ `[auto] match_games = 0` で止め（布石中に二飛香の手を指すと非合法手で負けになり、勝率が意味を持たない）、相手が二飛香に追いついた（fuseki-shogi-ai `eb3870f`、`Fuseki_Rules` 既定 2）ので 2026-09-13 に `match_games = 10`、`match_opponent_opt = "Threads=2,Fuseki_Rules=2"` に戻した（反映はランの起動し直しから）。
+**系列（2026-09-17 夜から）**: 本体 `ls` は、やり直しの系列（ユーザーの決定。docs/decisions.md 2026-09-17、docs/restart-plan.md）。二飛香を最初から入れ、乱数初期化から、docs/ls2-config.toml の設定（窓を総局数の 50% まで広げる、replay_ratio 1、held-out 5%、基準比・最強比 1,000 局、固定の参照）で回す。最初の 8 時間は煙テスト（docs/ls2-settings.md §5）。搾取者 `lx` はまだ無く、本体が最強比で伸び始めてから足す。
+9/13〜9/17 の系列（窓 10 万局を記憶して頭打ちになった旧系列）は `~/libra-run/ls-v1`（step 657,417、1,205,382 局）と `~/libra-run/lx-v1`（step 306,175）に改名して残し、再開しない。ls-v1 の archive の 646,699 は新しい系列の固定の参照に使う。
+
+**旧・旧系列**: 9/13 までの本体 `ls`（ls-v1 の元）と搾取者 `lx` は、二飛香（docs/rules.md §3.2、2026-09-13）を入れた系列。`ls` は旧ルールの ls の最終チェックポイント（step 229,590）の `latest.pt`（モデル・オプティマイザ・step）を `checkpoints/latest.pt` に置いて始め、`lx` はゼロから（凍結相手 `lx/main.pt` は同じ `latest.pt` を先に置き、起動直後に `main_source` から作り直す）。局数・チャンク・自動計測の基準（`auto.anchor`）・Elo の累積は 0 から数え直し、旧系列とはつながない。外部エンジンとの自動計測は、相手が二飛香を知らないあいだ `[auto] match_games = 0` で止め（布石中に二飛香の手を指すと非合法手で負けになり、勝率が意味を持たない）、相手が二飛香に追いついた（fuseki-shogi-ai `eb3870f`、`Fuseki_Rules` 既定 2）ので 2026-09-13 に `match_games = 10`、`match_opponent_opt = "Threads=2,Fuseki_Rules=2"` に戻した（反映はランの起動し直しから）。
 旧ルールの系列は `~/libra-run/ls-v0`（step 229,590、710,483 局）と `~/libra-run/lx-v0`（step 129,608）に残してあり、再開しない。`config.toml` の参照先はそれぞれ `ls-v0` / `lx-v0` の中で閉じるように付け替えた（`bin/libra --run ls-v0 status` で読める）。棋譜の陣の多くが二飛香に当たるので、新しい規定では再生できない。
 
 ## 1. 状態ディレクトリ
