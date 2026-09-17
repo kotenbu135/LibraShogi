@@ -48,5 +48,12 @@ libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX �
 - 一時ファイルはセッションの scratchpad に置き、リポジトリや `~/libra-run` を汚さない。
 
 ## 現在の目標
-2026 年内に Libra-L（自己対局のみで学習）を USI 拡張エンジンとして desktop に組み込み、1.0 として公開する（2026-09-15 の v0.1 とは別。ユーザーの決定。計画書の「v0.1」は 1.0 と読み替える）。「fuseki-shogi-ai 方策ネット＋水匠5」との 100 局は計測であり、勝てればよい。相手の分析や相手専用の対策はしない（docs/libra-local.md §4）。
-残りの主な作業: 世代が進んだら scale.json と搾取者の main.pt を作り直す / 複数葉の同時評価と fp16 でエンジンを速くする / desktop 側への Issue（終局判定、玉配置表）/ libra-cloud（11〜12 月の予算の配分はユーザーの判断待ち）/ docs/match_report.md / v0.1 のタグ・Release / 1.0 の公開準備（LICENSES、モデルカード、Releases の zip）。
+**目的は、強い天秤将棋の AI「Libra」をつくること**（2026-09-17 のユーザーの訂正）。作業の優先は強さを軸に決める。本体の強さの問題の現状は docs/status-2026-09-17.md。
+- 自己対局のみで学習した Libra-L の 2026 年内の版を 1.0 とする（2026-09-15 の v0.1 とは別。ユーザーの決定。計画書の「v0.1」は 1.0 と読み替える）。
+- 「fuseki-shogi-ai 方策ネット＋水匠5」との 100 局は強さの計測であり、勝てればよい。相手の分析や相手専用の対策はしない（docs/libra-local.md §4）。
+- desktop（tenbin-shogi-desktop）は別アプリで、Libra は USI 拡張エンジンとしてそこから使われる。desktop への組み込み・Issue・公開準備は目的ではなく周辺の作業。
+
+残りの主な作業:
+- 強さ: 本体の後退の原因を確かめて直す / 世代が進んだら scale.json と搾取者の main.pt を作り直す / libra-cloud（11〜12 月の予算の配分はユーザーの判断待ち）
+- エンジン: 複数葉の同時評価と fp16 で速くする
+- 周辺: desktop 側への Issue（終局判定、玉配置表）/ docs/match_report.md / v0.1 のタグ・Release / 1.0 の公開準備（LICENSES、モデルカード、Releases の zip）
