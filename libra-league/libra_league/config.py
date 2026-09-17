@@ -96,13 +96,15 @@ DEFAULTS: dict[str, Any] = {
             "calib_minutes": 60, "calib_games": 20000,
             # held-out（docs/restart-plan.md §3 M1）: チャンク番号が heldout_every_chunks の倍数の局は学習に使わず、新しい heldout_games 局を持つ。
             # gen_minutes ごとに窓の中と held-out の gen_positions 局面で一般化の物差し（genprof.py）を測り、status・metrics の "gen" に出す。0 で無効
-            "heldout_every_chunks": 0, "heldout_games": 20000, "gen_minutes": 60, "gen_positions": 4000},
+            # gen_games > 0 なら gen_minutes ではなく局数ごとに測る（局/日が変わっても同じ局数ごと。2026-09-17 のユーザーの指示）
+            "heldout_every_chunks": 0, "heldout_games": 20000, "gen_minutes": 60, "gen_games": 0, "gen_positions": 4000},
     # 自動計測（docs/runbook.md §6）: every_hours ごとにチェックポイントを archive に残し、直前の archive と対局させて Elo を鎖にする。
     # match_games > 0 なら外部エンジン（fuseki_usi_server.py）とも少数局を指す。どちらも別プロセスで GPU を共有する。
     # anchor_*: 固定の基準ネットとの対局。連続世代どうしの Elo は伸びが測定幅（100 局で ±70 Elo）に埋もれ、
     # 鎖にすると誤差が回数の平方根で積み上がる。基準との差は大きいままなので信号が残り、誤差も積み上がらない。
     # 基準に対する勝率が anchor_rebaseline を超えたら基準を新しい世代に置き換え、それまでの差を offset に足す。
-    "auto": {"enabled": False, "every_hours": 24.0, "eval_games": 100, "eval_sims": 96, "eval_concurrent": 64, "eval_threads": 4,
+    # every_games > 0 なら every_hours ではなく総局数がその分たまるごとに測る（判断に要る局数で区切る。2026-09-17 のユーザーの指示）
+    "auto": {"enabled": False, "every_hours": 24.0, "every_games": 0, "eval_games": 100, "eval_sims": 96, "eval_concurrent": 64, "eval_threads": 4,
              "chain_eval": True, "anchor_games": 100, "anchor_rebaseline": 0.85,
              # 最強比（docs/restart-plan.md §3 M2）: これまでで最強の保存済みと best_games 局。95% 区間の下限が 0 を超えたら最強を置き換える。
              # best_stall_alert 回続けて更新できなければログに WARNING。0 で無効

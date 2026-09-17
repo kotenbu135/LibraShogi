@@ -163,3 +163,45 @@ def test_targets_are_from_the_side_to_move(tmp_path: Path):
     assert np.allclose(t[~fu], z[~fu])
     # V̂41 の目標は soft_wdl(v41): 先手の番で (0.5, 0.5, 0)、後手の番で (0, 0.5, 0.5)
     assert np.allclose(b["v41"][sente], [0.5, 0.5, 0.0]) and np.allclose(b["v41"][~sente], [0.0, 0.5, 0.5])
+
+
+def test_runner_measures_gen_by_games(tmp_path: Path):
+    """gen_games > 0 なら、総局数がその分たまるごとに gen を測る（時間は見ない）。"""
+    from types import SimpleNamespace
+
+    from libra_league.runner import Runner
+
+    calls = []
+
+    class RB:
+        total_games = 0
+
+        def n_heldout(self):
+            return 5
+
+        def n_games(self):
+            return 100
+
+    rb = RB()
+    fake = SimpleNamespace(cfg={"run": {"gen_minutes": 60, "gen_games": 1000, "gen_positions": 8}, "train": {"min_window_games": 10, "lambda_z": 0.5},
+                                "search": {"policy_topk": 32}},
+                           replay=rb, last_gen=0.0, last_gen_games=-1, gen=None, model=None, rng=None, device=None,
+                           trainer=SimpleNamespace(step_count=3), log=lambda s: calls.append(s))
+    import libra_league.runner as runner_mod
+    import libra_league.genprof as gp
+
+    orig = gp.generalization
+    row = {"corr_v": 0.5, "mse_v": 0.3, "policy_ce": 2.0, "policy_acc": 0.3, "n": 4, "n_policy": 2}
+    gp.generalization = lambda *a, **k: {"window": {"fuseki": dict(row), "normal": dict(row)}, "heldout": {"fuseki": dict(row), "normal": dict(row)},
+                                        "gap": {}, "window_games": 1, "heldout_games": 1}
+    try:
+        Runner.maybe_measure_gen(fake, 1.0)            # 最初は測る
+        assert fake.gen["games"] == 0 and len(calls) == 1
+        rb.total_games = 900
+        Runner.maybe_measure_gen(fake, 1.0 + 7200)     # 2 時間たっても 900 局では測らない
+        assert len(calls) == 1
+        rb.total_games = 1000
+        Runner.maybe_measure_gen(fake, 1.0 + 7201)     # 1,000 局で測る
+        assert len(calls) == 2 and fake.gen["games"] == 1000
+    finally:
+        gp.generalization = orig

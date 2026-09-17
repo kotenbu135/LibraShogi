@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     p_gp.add_argument("--seed", type=int, default=0)
     p_gp.add_argument("--json", action="store_true")
     p_rv = sub.add_parser("review", help="物差し M1〜M4（gen・最強比・基準比・参照・局/日）の保存済みの値から「続ける／注意／見直し」を出す（docs/restart-plan.md §3 M6）")
-    p_rv.add_argument("--set", action="append", default=[], help="閾値の上書き（name=value。gen_hours, gen_min_rise, gen_max_gap, best_stall_alert, reference_hours, gpd_min）")
+    p_rv.add_argument("--set", action="append", default=[], help="閾値の上書き（name=value。gen_games, gen_min_rise, gen_max_gap, best_stall_alert, reference_games, gpd_min）")
     p_rv.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     sd = StateDir(Path(a.root) / a.run)
@@ -289,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
             from .config import load_config as _lc
 
             _ac = _lc(sd.config_toml if sd.config_toml.exists() else None)["auto"]
-            out["auto_cfg"] = {"enabled": bool(_ac.get("enabled")), "every_hours": _ac.get("every_hours"),
+            out["auto_cfg"] = {"enabled": bool(_ac.get("enabled")), "every_hours": _ac.get("every_hours"), "every_games": _ac.get("every_games"),
                                "eval_games": _ac.get("eval_games"), "anchor_games": _ac.get("anchor_games"),
                                "best_games": _ac.get("best_games"), "reference_games": _ac.get("reference_games"),
                                "reference_ckpts": _ac.get("reference_ckpts"), "match_games": _ac.get("match_games")}

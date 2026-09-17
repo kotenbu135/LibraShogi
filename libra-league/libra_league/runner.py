@@ -67,6 +67,7 @@ class Runner:
         self.last_metrics = 0.0
         self.last_calib = 0.0
         self.last_gen = 0.0
+        self.last_gen_games = -1
         self.gen: dict | None = None  # 一般化の物差し（genprof.py。窓の中と held-out）
         # 自己対局ワーカー（[workers] enabled）: 重みを weights/ に配り、inbox/ に届いた局を取り込む。搾取者の run では使わない
         self.inbox: Inbox | None = None
@@ -489,16 +490,24 @@ class Runner:
         """gen_minutes ごとに、窓の中と held-out の局面で一般化の物差し（genprof.py）を測る。held-out が無い run では何もしない。"""
         rc, tr = self.cfg["run"], self.cfg["train"]
         minutes = float(rc.get("gen_minutes", 60))
-        if minutes <= 0 or now - self.last_gen < minutes * 60 or self.replay.n_heldout() <= 0 or self.replay.n_games() < int(tr["min_window_games"]):
+        every_games = int(rc.get("gen_games", 0))
+        games = self.replay.total_games
+        if every_games > 0:  # 局数で（PC の利用状況で局/日が変わっても同じ局数ごと）
+            due = self.last_gen_games < 0 or games - self.last_gen_games >= every_games
+        else:
+            due = minutes > 0 and now - self.last_gen >= minutes * 60
+        if not due or self.replay.n_heldout() <= 0 or self.replay.n_games() < int(tr["min_window_games"]):
             return
         from .genprof import format_gen, generalization
 
         self.last_gen = now
+        self.last_gen_games = games
         t0 = time.time()
         self.gen = generalization(self.model, self.replay, int(rc.get("gen_positions", 4000)), self.rng, self.device, tr["lambda_z"], self.cfg["search"]["policy_topk"])
         if self.gen is not None:
             self.gen["t"] = round(now, 1)
             self.gen["step"] = self.trainer.step_count
+            self.gen["games"] = games
             self.log(format_gen(self.gen) + f" ({time.time() - t0:.1f}s)")
 
     def maybe_write_calib(self, now: float) -> None:

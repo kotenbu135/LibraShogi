@@ -374,3 +374,30 @@ def test_reference_evals_against_fixed_checkpoints(tmp_path):
     import tomllib
 
     assert tomllib.loads(dump_toml(jobs.cfg))["auto"]["reference_ckpts"] == [str(ref), str(tmp_path / "missing.pt")]
+
+
+def test_every_games_triggers_by_games_not_time(tmp_path):
+    """every_games > 0 なら、総局数がその分たまるごとに archive と計測を積む（時間は見ない）。行には games が入る。"""
+    from libra_league.auto import collect_best
+
+    sd, jobs, state = _anchor_jobs(tmp_path, anchor_games=0, best_games=100, every_games=1000, every_hours=0.0)
+    state["games_total"] = 0
+    _archive(sd, jobs, 100, 1000.0)                  # 最初は必ず
+    assert state["auto"]["best"]["step"] == 100 and state["auto"]["last_archive_games"] == 0
+    state["games_total"] = 900
+    _archive(sd, jobs, 200, 1000.0 + 86400)          # 1 日たっても 900 局では積まない
+    assert [p.name for p in list_archives(sd)] == ["ckpt_000000100.pt"]
+    state["games_total"] = 1000
+    _archive(sd, jobs, 300, 1000.0 + 86400 + 1, elo=-100.0, score=0.3)  # 1,000 局で積む
+    assert [p.name for p in list_archives(sd)] == ["ckpt_000000100.pt", "ckpt_000000300.pt"]
+    rows = collect_best(sd)
+    assert rows[-1]["games"] == 1000 and rows[-1]["improved"]
+    # every_hours だけの run は今までどおり時間で
+    sd2, jobs2, state2 = _anchor_jobs(tmp_path / "h", anchor_games=0, best_games=100, every_hours=1.0)
+    state2["games_total"] = 0
+    _archive(sd2, jobs2, 100, 1000.0)
+    _archive(sd2, jobs2, 200, 1000.0 + 1800)
+    assert len(list_archives(sd2)) == 1
+    _archive(sd2, jobs2, 300, 1000.0 + 3600, elo=-100.0, score=0.3)
+    assert len(list_archives(sd2)) == 2
+

@@ -265,7 +265,7 @@ class AutoJobs:
         """state["auto"]（load() で state が置き換わっても欠けたキーを補う）。"""
         st = self.state.setdefault("auto", {})
         for k, v in (("last_archive", None), ("last_match", None), ("queue", []), ("history", []), ("running", None), ("anchor", None),
-                     ("best", None), ("best_stall", 0)):
+                     ("best", None), ("best_stall", 0), ("last_archive_games", None), ("last_match_games", None)):
             st.setdefault(k, v)
         return st
 
@@ -280,12 +280,13 @@ class AutoJobs:
             return
         now = now or time.time()
         st = self._st()
-        every = float(self.acfg.get("every_hours", 24.0)) * 3600
+        games = int(self.state.get("games_total") or 0)
         eval_now = self.sd.flag("EVAL_NOW")
-        if eval_now or st["last_archive"] is None or now - st["last_archive"] >= every:
+        if eval_now or st["last_archive"] is None or self._due(st["last_archive"], st.get("last_archive_games"), now, games):
             prev = list_archives(self.sd)
             new = archive_checkpoint(self.sd, ckpt)
             st["last_archive"] = now
+            st["last_archive_games"] = games
             if new is not None:
                 self.log(f"auto: archived {new.name}")
                 anc_file = str((st.get("anchor") or {}).get("file") or "")
@@ -296,11 +297,21 @@ class AutoJobs:
             if eval_now:
                 self.sd.clear_flag("EVAL_NOW")
         match_now = self.sd.flag("MATCH_NOW")
-        if int(self.acfg.get("match_games", 0)) > 0 and (match_now or st["last_match"] is None or now - st["last_match"] >= every):
+        if int(self.acfg.get("match_games", 0)) > 0 and (match_now or st["last_match"] is None or self._due(st["last_match"], st.get("last_match_games"), now, games)):
             self.enqueue_match()
             st["last_match"] = now
+            st["last_match_games"] = games
             if match_now:
                 self.sd.clear_flag("MATCH_NOW")
+
+    def _due(self, last_t: float | None, last_games: int | None, now: float, games: int) -> bool:
+        """次の計測の時期か。every_games > 0 なら局数で（PC の利用状況で局/日が変わっても、判断に要る局数がたまったときに測る。
+        2026-09-17 のユーザーの指示）、そうでなければ every_hours で。両方 0 なら最初の 1 回と eval-now / match-now だけ。"""
+        every_games = int(self.acfg.get("every_games", 0))
+        if every_games > 0:
+            return last_games is None or games - int(last_games) >= every_games
+        every = float(self.acfg.get("every_hours", 0.0)) * 3600
+        return every > 0 and (last_t is None or now - float(last_t) >= every)
 
     def enqueue_eval(self, a: Path, b: Path) -> None:
         ts = time.strftime("%Y%m%d-%H%M%S")
@@ -375,7 +386,7 @@ class AutoJobs:
             st["best_stall"] = 0
         else:
             st["best_stall"] = int(st.get("best_stall", 0)) + 1
-        row = {"t": time.time(), "step": step_b, "best_step": best.get("step"), "n": r.get("n"), "score_new": round(1 - float(r.get("score_a", 0.5)), 4),
+        row = {"t": time.time(), "step": step_b, "games": self.state.get("games_total"), "best_step": best.get("step"), "n": r.get("n"), "score_new": round(1 - float(r.get("score_a", 0.5)), 4),
                "elo_vs_best": round(elo, 1), "ci95": [round(lo, 1) if lo is not None else None, round(hi, 1) if hi is not None else None],
                "improved": improved, "stall": int(st["best_stall"])}
         with open(self.sd.root / "eval" / "best.jsonl", "a", encoding="utf-8") as f:
@@ -413,7 +424,7 @@ class AutoJobs:
             return
         ci = r.get("elo_ci95") or [None, None]
         ref = Path(str(job.get("ref") or r.get("a", "")))
-        row = {"t": time.time(), "step": ckpt_step(r.get("b", "")), "ref": ref.name, "ref_step": ckpt_step(ref), "n": r.get("n"),
+        row = {"t": time.time(), "step": ckpt_step(r.get("b", "")), "games": self.state.get("games_total"), "ref": ref.name, "ref_step": ckpt_step(ref), "n": r.get("n"),
                "score_new": round(1 - float(r.get("score_a", 0.5)), 4), "elo": round(-float(r["elo_a_minus_b"]), 1),
                "ci95": [round(-float(ci[1]), 1) if ci[1] is not None else None, round(-float(ci[0]), 1) if ci[0] is not None else None]}
         with open(self.sd.root / "eval" / "reference.jsonl", "a", encoding="utf-8") as f:
@@ -446,7 +457,7 @@ class AutoJobs:
         hi = -float(ci[0]) if ci[0] is not None else None
         offset = float(anc.get("offset", 0.0))
         step_b = ckpt_step(r.get("b", "")) 
-        row = {"t": time.time(), "step": step_b, "n": r.get("n"), "score_new": round(1 - float(r.get("score_a", 0.5)), 4),
+        row = {"t": time.time(), "step": step_b, "games": self.state.get("games_total"), "n": r.get("n"), "score_new": round(1 - float(r.get("score_a", 0.5)), 4),
                "anchor_step": anc.get("step"), "offset": round(offset, 1), "elo_vs_anchor": round(elo, 1),
                "elo": round(offset + elo, 1),
                "ci95": [round(offset + lo, 1) if lo is not None else None, round(offset + hi, 1) if hi is not None else None]}

@@ -63,12 +63,14 @@ keep_checkpoints = 3
 archive_every_steps = 50000
 heldout_every_chunks = 20   # 5% のチャンクを学習に使わず held-out にする（新規）
 heldout_games = 20000
-gen_minutes = 60            # 窓の中と held-out の一般化の物差し（新規）
+gen_minutes = 0
+gen_games = 20000           # 窓の中と held-out の一般化の物差し（新規）。2 万局ごと（時間ではなく局数で）
 gen_positions = 4000
 
 [auto]
 enabled = true
-every_hours = 4.0           # 煙テストの間は 4 時間ごと。本番に移したら 24
+every_hours = 0.0
+every_games = 100000        # 10 万局ごとに archive と計測（時間ではなく局数で。煙テストは 30 万局まで。本番に移したら 400000）
 eval_games = 0              # 直前比の 100 局はやめる（向きを逆に出した 9/16 の再発防止）
 chain_eval = false
 eval_sims = 96
