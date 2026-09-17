@@ -85,7 +85,7 @@ reference_games = 200
 match_games = 0             # 外部の AI との計測は得点 0 に張り付くので煙テストでは回さない。本番で 10 に戻す
 
 [workers]
-enabled = false
+enabled = true              # vast.ai の自己対局ワーカーの局を取り込む（2026-09-17、煙テストの短縮。ユーザーの決定）。検査はブリッジが inbox に置く前に行う
 
 [league]
 enabled = false             # lx を足してから
