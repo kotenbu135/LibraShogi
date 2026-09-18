@@ -167,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
     p_ab.add_argument("--publish", action="store_true", help="結果を progress ブランチの experiments/ へ push する（手元の PC の外から読めるようにする）")
     p_ab.add_argument("--branch", default="progress", help="--publish の書き出し先（既定 progress。main には入れない）")
     p_rv = sub.add_parser("review", help="物差し M1〜M4（gen・最強比・基準比・参照・局/日）の保存済みの値から「続ける／注意／見直し」を出す（docs/restart-plan.md §3 M6）")
-    p_rv.add_argument("--set", action="append", default=[], help="閾値の上書き（name=value。gen_games, gen_min_rise, gen_max_gap, best_stall_alert, reference_games, gpd_min）")
+    p_rv.add_argument("--set", action="append", default=[], help="閾値の上書き（name=value。gen_games, gen_max_gap, gen_max_fall, gen_min_corr, best_stall_alert, reference_games, gpd_min）")
     p_rv.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     sd = StateDir(Path(a.root) / a.run)
