@@ -331,7 +331,6 @@ def main(argv: list[str] | None = None) -> int:
         scfg["full_sims"] = a.sims
         if a.no_noise:
             scfg["gumbel_noise"] = False
-        out = Path(a.out) if a.out else sd.root / "eval" / (time.strftime("%Y%m%d-%H%M%S") + ".json")
         scfg_b = None
         if a.b_set:
             from .abtest import parse_set
@@ -342,6 +341,13 @@ def main(argv: list[str] | None = None) -> int:
                 if section != "search":
                     raise SystemExit("--b-set は [search] の鍵だけ")
                 scfg_b[key] = value
+        if a.out:
+            out = Path(a.out).expanduser()
+        elif scfg_b is not None:
+            # 側ごとに設定を変えた対局は run の eval/ に置かない（コンソールの Elo の一覧に世代間の計測として並んでしまう）
+            out = Path(a.root).expanduser() / "experiments" / (time.strftime("%Y%m%d-%H%M%S") + "-sigma.json")
+        else:
+            out = sd.root / "eval" / (time.strftime("%Y%m%d-%H%M%S") + ".json")
         res = main_eval(Path(a.a), Path(a.b), scfg, a.games, a.concurrent, a.threads, a.seed, out, search_cfg_b=scfg_b)
         print(json.dumps({k: v for k, v in res.items() if not k.startswith("calibration")}, ensure_ascii=False))
         for side in ("a", "b"):

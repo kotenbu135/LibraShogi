@@ -171,6 +171,8 @@ GPU を L-S と共有するので、計測中は ls・lx を停止するか、�
   --b-set gumbel_rescale=true --b-set c_scale=0.1
 ```
 
+`--b-set` を付けた対局の結果は `~/libra-run/experiments/<時刻>-sigma.json`（`--out` で変えられる）。run の `eval/` には置かない（コンソールの Elo の一覧に世代間の計測として並んでしまうため）。
+
 側ごとに変えられるのは読む手の選び方だけ（`full_sims`・`fast_sims`・`gumbel_m_full`・`gumbel_m_fast`・`c_visit`・`c_scale`・`gumbel_rescale`・`gumbel_noise`・`cpuct`）。ほかの鍵を渡すと例外になる（枠ごとに棋譜や記録の形が変わってしまうため）。
 **これは「読む手の選び方」の比較で、σ が学習データ（方策の目標）の形を変える分は測れない**（窓の中の目標は今の σ で作った棋譜のもの）。そこまで見るなら σ を変えた自己対局を別に回すことになる。
 

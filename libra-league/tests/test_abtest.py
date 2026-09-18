@@ -120,9 +120,13 @@ def test_eval_with_a_different_search_config_on_one_side(tmp_path: Path):
     scfg = {**cfg["search"], "full_sims": 8, "mate_nodes_root": 0, "proof_nodes": 0}
     rc = main(["--root", str(tmp_path), "--run", "ls", "eval", "--a", str(sd.checkpoints / "latest.pt"),
                "--b", str(sd.checkpoints / "latest.pt"), "--games", "4", "--sims", "8", "--concurrent", "4", "--threads", "2",
-               "--b-set", "gumbel_rescale=true", "--b-set", "c_scale=0.1", "--out", str(tmp_path / "ev.json")])
+               "--b-set", "gumbel_rescale=true", "--b-set", "c_scale=0.1"])
     assert rc == 0
-    res = json.loads((tmp_path / "ev.json").read_text())
+    # --out を渡さないときは run の eval/ ではなく experiments/ に置く（コンソールの Elo の一覧に混ざらないように）
+    assert not (sd.root / "eval").exists()
+    written = sorted((tmp_path / "experiments").glob("*-sigma.json"))
+    assert len(written) == 1
+    res = json.loads(written[0].read_text())
     assert res["n"] == 4 and res["search_b"] == {"gumbel_rescale": True, "c_scale": 0.1}
     # 側ごとに変えられない鍵は例外（棋譜と記録の形が枠ごとに変わってしまうもの）
     from libra_league.evaluate import load_model, play_match
