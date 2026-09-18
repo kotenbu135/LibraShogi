@@ -1,20 +1,20 @@
 {
  "schema": 1,
  "run": "ls",
- "generated": "2026-09-18 12:56:11",
- "t": 1789703771.4,
+ "generated": "2026-09-18 13:11:17",
+ "t": 1789704677.2,
  "process": "running",
  "flags": [],
  "now": {
-  "step": 81666,
-  "generation": 104,
-  "games_total": 1014720,
+  "step": 81919,
+  "generation": 105,
+  "games_total": 1017659,
   "games_per_day_1h": 0,
-  "window_games": 507360,
+  "window_games": 508829,
   "active_games": 512,
-  "elapsed_h": 16.38,
+  "elapsed_h": 16.5,
   "heldout_games": 20000,
-  "status_time": "2026-09-18 12:56:09",
+  "status_time": "2026-09-18 13:11:15",
   "train": null,
   "gen": null
  },
@@ -37,8 +37,9 @@
   "best_games": 1000,
   "reference_games": 200,
   "reference_ckpts": [
-   "ckpt_000646699.pt",
-   "win1m.pt"
+   "~ckpt_000646699.pt",
+   "~win1m.pt",
+   "~ckpt_000062426.pt"
   ],
   "match_games": 10,
   "match_go": "movetime 1000"
@@ -1650,21 +1651,33 @@
    "policy_acc": null,
    "gen_window_corr_v": null,
    "gen_heldout_corr_v": null
+  },
+  {
+   "t": 1789704675.7,
+   "step": 81919,
+   "games_total": 1017659,
+   "gpd": 0,
+   "gpd_5m": 101466,
+   "window": 508829,
+   "loss": null,
+   "policy_acc": null,
+   "gen_window_corr_v": null,
+   "gen_heldout_corr_v": null
   }
  ],
  "review": {
-  "time": "2026-09-18 12:56:11",
+  "time": "2026-09-18 13:11:17",
   "run": "ls",
   "items": [
    {
     "name": "M1 一般化（本将棋の価値の相関）",
     "verdict": "注意",
-    "why": "held-out の相関が 200,000 局で -0.003（上がっていない）",
+    "why": "held-out の相関が 200,000 局で -0.028（上がっていない）",
     "values": {
-     "heldout_corr_first": 0.6518,
-     "heldout_corr_last": 0.6493,
-     "window_corr_last": 0.6662,
-     "gap": 0.016900000000000026,
+     "heldout_corr_first": 0.6545,
+     "heldout_corr_last": 0.6266,
+     "window_corr_last": 0.6552,
+     "gap": 0.02859999999999996,
      "n_rows": 13
     }
    },
