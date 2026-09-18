@@ -119,11 +119,11 @@ best_games = 1000
 best_stall_alert = 3
 reference_ckpts = ["~/libra-run/experiments/2026-09-17-window/win1m.pt", "~/libra-run/ls/checkpoints/archive/ckpt_000062426.pt"]
 reference_games = 200
+reference_rotate = 0.8
+reference_min = 1
 match_games = 40
 match_go = "movetime 1000"
 match_opponent_opt = "Threads=2,Fuseki_Rules=2"
-reference_rotate = 0.8
-reference_min = 1
 
 [progress]
 enabled = true
