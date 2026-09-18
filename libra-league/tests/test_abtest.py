@@ -112,3 +112,21 @@ def test_window_from_checkpoint_state_and_cli(tmp_path: Path):
     got = {(m["a"], m["b"]) for m in res["matches"]}
     assert got == {("lam05", "lam10"), ("lam05", "base"), ("lam10", "base")}
     assert all(m["n"] == 4 for m in res["matches"])
+
+
+def test_eval_with_a_different_search_config_on_one_side(tmp_path: Path):
+    """σ の形の比較（docs/ls2-settings.md §2）: 同じ重みで、B 側だけ mctx 形の σ で読ませる。"""
+    sd, cfg = _run(tmp_path, games=10)
+    scfg = {**cfg["search"], "full_sims": 8, "mate_nodes_root": 0, "proof_nodes": 0}
+    rc = main(["--root", str(tmp_path), "--run", "ls", "eval", "--a", str(sd.checkpoints / "latest.pt"),
+               "--b", str(sd.checkpoints / "latest.pt"), "--games", "4", "--sims", "8", "--concurrent", "4", "--threads", "2",
+               "--b-set", "gumbel_rescale=true", "--b-set", "c_scale=0.1", "--out", str(tmp_path / "ev.json")])
+    assert rc == 0
+    res = json.loads((tmp_path / "ev.json").read_text())
+    assert res["n"] == 4 and res["search_b"] == {"gumbel_rescale": True, "c_scale": 0.1}
+    # 側ごとに変えられない鍵は例外（棋譜と記録の形が枠ごとに変わってしまうもの）
+    from libra_league.evaluate import load_model, play_match
+
+    m = load_model(sd.checkpoints / "latest.pt", torch.device("cpu"), torch.float32)
+    with pytest.raises(ValueError):
+        play_match(m, m, scfg, 1, 2, 1, 0, torch.device("cpu"), torch.float32, search_cfg_b={"policy_topk": 4})

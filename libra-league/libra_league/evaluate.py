@@ -2,6 +2,7 @@
 """評価ハーネス: 2 つのネットを同じ探索設定で対局させ、先後別の得点と Elo 差、較正を出す（docs/libra-design.md §4.3）。
 
 同時進行枠の偶奇で A の先後を入れ替える（偶数枠は A が先手）。各手の探索木はルートの手番のネットで丸ごと評価する。
+`search_cfg_b` を渡すと B 側だけ別の探索設定で読む（同じ重みで σ の形を比べるときに使う。docs/ls2-settings.md §2）。
 較正は、対局記録の root_q（手番側の探索値）を勝率に直したものと実際の結果を区間ごとに比べる。
 """
 from __future__ import annotations
@@ -57,10 +58,13 @@ def calibration(games: list[dict], side_of: "callable", bins: int = 10) -> list[
 
 @torch.no_grad()
 def play_match(model_a: LibraNet, model_b: LibraNet, search_cfg: dict, n_games: int, concurrent: int, threads: int, seed: int,
-               device: torch.device, dtype: torch.dtype = torch.float16, log=None) -> dict:
+               device: torch.device, dtype: torch.dtype = torch.float16, log=None, search_cfg_b: dict | None = None) -> dict:
     cfg = dict(search_cfg)
     cfg["full_prob"] = 1.0  # 評価は全読みで固定
     eng = librasearch.SelfPlay(cfg, concurrent, seed, threads)
+    if search_cfg_b is not None:
+        cfg_b = {**cfg, **search_cfg_b, "full_prob": 1.0}
+        eng.set_side_config(cfg_b)  # B 側の探索設定（変えられるのは読む手の選び方だけ。ほかが違えば例外）
     sq = np.zeros((concurrent, 81, ls.SQ_FEATS), np.float32)
     glob = np.zeros((concurrent, ls.GLOB_FEATS), np.float32)
     slot_swap = (np.arange(concurrent) % 2).astype(np.int8)  # 奇数枠は B が先手
@@ -121,15 +125,18 @@ def play_match(model_a: LibraNet, model_b: LibraNet, search_cfg: dict, n_games: 
         "calibration_b": calibration(games, lambda g, j: not a_moved(g, j)),
         "sims": cfg.get("full_sims"),
         "gumbel_noise": bool(cfg.get("gumbel_noise", True)),
+        "search_b": {k: v for k, v in (search_cfg_b or {}).items() if cfg.get(k) != v} or None,
         "seconds": round(time.time() - t0, 1),
     }
 
 
-def main_eval(a: Path, b: Path, search_cfg: dict, n_games: int, concurrent: int, threads: int, seed: int, out: Path | None) -> dict:
+def main_eval(a: Path, b: Path, search_cfg: dict, n_games: int, concurrent: int, threads: int, seed: int, out: Path | None,
+              search_cfg_b: dict | None = None) -> dict:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ma = load_model(a, device)
     mb = load_model(b, device)
-    res = play_match(ma, mb, search_cfg, n_games, concurrent, threads, seed, device, log=lambda s: print(s, flush=True))
+    res = play_match(ma, mb, search_cfg, n_games, concurrent, threads, seed, device, log=lambda s: print(s, flush=True),
+                     search_cfg_b=search_cfg_b)
     res["a"] = str(a)
     res["b"] = str(b)
     if out:

@@ -376,15 +376,16 @@ static int gumbel_pick(SelfPlay::Game& g, const SearchConfig& cfg) {
 }
 
 void SelfPlay::finish_move(Game& g) {
+  const SearchConfig& cfg = cfg_for(g);  // σ は指す側の設定（記録の形は cfg_ のまま）
   Node& root = g.nodes[0];
   // 最終選択: 残った候補から g + log π + σ(q̂) の最大
   int best = g.cand.empty() ? 0 : g.cand[0];
   float best_s = -1e30f;
   std::vector<float> cq;
-  completed_q(root, cfg_, cq);
+  completed_q(root, cfg, cq);
   for (int c : g.cand) {
     const Edge& e = root.edges[c];
-    float s = g.gumbel[c] + std::log(e.prior) + sigma_q(root, cq[c], cfg_);
+    float s = g.gumbel[c] + std::log(e.prior) + sigma_q(root, cq[c], cfg);
     if (s > best_s) {
       best_s = s;
       best = c;
@@ -401,7 +402,7 @@ void SelfPlay::finish_move(Game& g) {
     float mx = -1e30f;
     for (size_t i = 0; i < root.edges.size(); ++i) {
       const Edge& e = root.edges[i];
-      float s = std::log(e.prior) + sigma_q(root, cq[i], cfg_);
+      float s = std::log(e.prior) + sigma_q(root, cq[i], cfg);
       sc.push_back({s, int(i)});
       mx = std::max(mx, s);
     }
@@ -630,7 +631,7 @@ void SelfPlay::step_game(Game& g) {
       g.pending = true;
       return;
     }
-    if (!g.root_ready) init_root_search(g, cfg_);
+    if (!g.root_ready) init_root_search(g, cfg_for(g));
     if (g.sims >= g.budget) {
       if (g.proof_state == 1) {
         // eval_cache で根の証明探索の結果より先に読み終えた: 指す前にここで解く（証明できれば読みを捨てて証明手）
@@ -676,6 +677,7 @@ static void backprop(SelfPlay::Game& g, Node& child, float v) {
 // 1 = 未評価の葉に着いた（g.leaf・g.path・g.path_moves を設定し、g.sp を葉まで進めた）、2 = 逐次半減が終わった、
 // 3 = 評価待ちの葉にぶつかった（複数葉の同時評価のときだけ起こる。g.sp はルートのまま）
 int SelfPlay::descend(Game& g) {
+  const SearchConfig& cfg = cfg_for(g);  // set_side_config のときは、いま考えている手番の側の設定
   g.path.clear();
   g.path_moves.clear();
   std::uint32_t ni = 0;
@@ -683,7 +685,7 @@ int SelfPlay::descend(Game& g) {
     Node& n = g.nodes[ni];
     int ei;
     if (ni == 0) {
-      ei = gumbel_pick(g, cfg_);
+      ei = gumbel_pick(g, cfg);
       if (ei < 0) return 2;
     } else {
       // PUCT（評価待ちの枝は仮の負けを含める）
@@ -692,7 +694,7 @@ int SelfPlay::descend(Game& g) {
       ei = 0;
       for (size_t i = 0; i < n.edges.size(); ++i) {
         const Edge& e = n.edges[i];
-        float u = edge_q_vl(n, e) + cfg_.cpuct * e.prior * sq_n / (1 + e.visits + e.vloss);
+        float u = edge_q_vl(n, e) + cfg.cpuct * e.prior * sq_n / (1 + e.visits + e.vloss);
         if (u > best) {
           best = u;
           ei = int(i);
@@ -1054,6 +1056,39 @@ void SelfPlay::set_two_nets(bool on, bool opponent_prior) {
   two_nets_ = on;
   opponent_prior_ = on && opponent_prior;
   ++eval_gen_;
+}
+
+void SelfPlay::set_side_config(const SearchConfig& cfg) {
+  // 側ごとに変えられるのは読む手の選び方だけ。ほかが違えば、同じ対局の中で局面の作り方や記録の形が枠ごとに変わってしまう
+  const bool same = cfg.max_ply == cfg_.max_ply && cfg.count_from_41 == cfg_.count_from_41 && cfg.policy_topk == cfg_.policy_topk &&
+                    cfg.max_moves_per_game == cfg_.max_moves_per_game && cfg.draw_value == cfg_.draw_value &&
+                    cfg.mate_nodes_root == cfg_.mate_nodes_root && cfg.proof_nodes == cfg_.proof_nodes &&
+                    cfg.proof_min_ply == cfg_.proof_min_ply && cfg.external == cfg_.external &&
+                    cfg.defer_root_proof == cfg_.defer_root_proof && cfg.eval_cache == cfg_.eval_cache &&
+                    cfg.prune_gote_rank4 == cfg_.prune_gote_rank4 && cfg.king_pairs == cfg_.king_pairs &&
+                    cfg.openings == cfg_.openings && cfg.openings_prob == cfg_.openings_prob;
+  if (!same)
+    throw std::invalid_argument("SelfPlay::set_side_config: 側ごとに変えられるのは full_sims・fast_sims・full_prob・gumbel_m_full・"
+                                "gumbel_m_fast・c_visit・c_scale・gumbel_rescale・gumbel_noise・cpuct だけ");
+  cfg_b_ = cfg_;  // 片側だけ違う項目を入れ替える（ほかは A 側に合わせたまま持つ）
+  cfg_b_.full_sims = cfg.full_sims;
+  cfg_b_.fast_sims = cfg.fast_sims;
+  cfg_b_.full_prob = cfg.full_prob;
+  cfg_b_.gumbel_m_full = cfg.gumbel_m_full;
+  cfg_b_.gumbel_m_fast = cfg.gumbel_m_fast;
+  cfg_b_.c_visit = cfg.c_visit;
+  cfg_b_.c_scale = cfg.c_scale;
+  cfg_b_.gumbel_rescale = cfg.gumbel_rescale;
+  cfg_b_.gumbel_noise = cfg.gumbel_noise;
+  cfg_b_.cpuct = cfg.cpuct;
+  has_cfg_b_ = true;
+}
+
+// 偶数枠は A 側が先手、奇数枠は B 側が先手（set_two_nets と同じ約束）
+const SearchConfig& SelfPlay::cfg_for(const Game& g) const {
+  if (!has_cfg_b_) return cfg_;
+  const int turn = g.pos.turn() == BLACK ? 0 : 1;
+  return (turn ^ (g.slot & 1)) ? cfg_b_ : cfg_;
 }
 
 void SelfPlay::apply(const float* logits, const float* wdl) {

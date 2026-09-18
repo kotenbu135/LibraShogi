@@ -193,6 +193,9 @@ PYBIND11_MODULE(_search, m) {
       .def("set_eval_cache", &SelfPlay::set_eval_cache, py::arg("on"))
       .def("eval_cache_enabled", &SelfPlay::eval_cache)
       .def("set_two_nets", &SelfPlay::set_two_nets, py::arg("on"), py::arg("opponent_prior") = true)
+      // 側ごとに違う探索設定（σ の形の比較など）。偶数枠は元の設定が先手、奇数枠はこの設定が先手
+      .def("set_side_config", [](SelfPlay& s, const py::dict& d) { s.set_side_config(config_from_dict(d)); }, py::arg("cfg_b"))
+      .def("side_configs", &SelfPlay::side_configs)
       .def("two_nets", &SelfPlay::two_nets)
       .def("set_position", [](SelfPlay& s, int slot, const std::string& line, int sims, bool full, const std::string& mode) { return s.set_position(slot, line, sims, full, mode == "fuseki" ? MODE_FUSEKI : MODE_TENBIN); }, py::arg("slot"), py::arg("usi_line"), py::arg("sims"), py::arg("full") = true, py::arg("mode") = "tenbin")
       .def("collect_batch",

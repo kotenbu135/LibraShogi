@@ -163,6 +163,17 @@ GPU を L-S と共有するので、計測中は ls・lx を停止するか、�
 - 目安の時間（RTX 5070 Ti を専有、窓 47 万局、5,000 step、1,000 局 × 3）: 窓の読み込み 1〜2 分、腕 1 つの学習 約 11 分、対局 1 本 約 8 分で**合わせて 1 時間前後**。GPU を使うので、回す間は ls・lx を停止する（CLAUDE.md「稼働中のランの扱い」）。
 - 扱うのは学習側（`[train]`）の設定。探索（`[search]`）の設定は窓の中の棋譜と方策の目標を作り直さないと比べられないので、この命令では変えても意味がない。
 
+**探索の σ の形（`gumbel_rescale`）を比べるとき**は、同じ重みで側ごとに σ を変えて打つ（`libra eval --b-set`。B 側＝奇数枠の先手だけ別の設定で読む）。
+
+```bash
+~/LibraShogi/bin/libra eval --a ~/libra-run/ls/checkpoints/archive/ckpt_000062426.pt \
+  --b ~/libra-run/ls/checkpoints/archive/ckpt_000062426.pt --games 1000 --sims 96 \
+  --b-set gumbel_rescale=true --b-set c_scale=0.1
+```
+
+側ごとに変えられるのは読む手の選び方だけ（`full_sims`・`fast_sims`・`gumbel_m_full`・`gumbel_m_fast`・`c_visit`・`c_scale`・`gumbel_rescale`・`gumbel_noise`・`cpuct`）。ほかの鍵を渡すと例外になる（枠ごとに棋譜や記録の形が変わってしまうため）。
+**これは「読む手の選び方」の比較で、σ が学習データ（方策の目標）の形を変える分は測れない**（窓の中の目標は今の σ で作った棋譜のもの）。そこまで見るなら σ を変えた自己対局を別に回すことになる。
+
 ## 8. desktop で Libra と指す（自分で体感する）
 
 desktop（天秤将棋GUI 0.10.3、`%LOCALAPPDATA%\天秤将棋GUI\tenbin-shogi-gui.exe`）には Windows 版 `libra.exe` を「LibraShogi 0.0.2」として登録済み（`%APPDATA%\com.fusekishogi.tenbin\engines\libra\engine\`。モデルは同じフォルダの `libra.onnx`）。2026-09-14 から DirectML 版の DLL（`onnxruntime.dll` 1.24.4・`DirectML.dll`）に差し替え、GPU で読む（`isready` で `info string … provider dml`）。以前の CPU 版は同じフォルダの `*.cpu-prev`、以前の exe は `libra.exe.prev`。学習中の ls・lx と GPU を共有するので、desktop で読ませている間は局/日が少し落ちる。 desktop 0.10.0 から、布石に対応したエンジンは本将棋（41 手目以降）の席にも選べるので、**1 回の登録で 1 手目から終局まで指せる**（布石と本将棋の両方に「LibraShogi」を選ぶ。同じ id なので 1 本のプロセスが続けて指す）。GUI が終局（千日手・入玉宣言・手数上限）を裁き、宣言できるエンジンには毎手 `Declare_Win=true` を送る（docs/protocol.md §1）。天秤将棋の両玉と先後の選択も Libra の `scale.json` と `winrate` で決まる（同 §2）。

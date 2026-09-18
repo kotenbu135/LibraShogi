@@ -124,6 +124,12 @@ class SelfPlay {
   // collect/apply の外で呼ぶ（持っている評価を捨てる）
   void set_two_nets(bool on, bool opponent_prior);
   bool two_nets() const { return two_nets_; }
+  // 側ごとに違う探索設定で打つ（σ の形の比較など。docs/ls2-settings.md §2）。set_two_nets と同じ枠の約束で、
+  // 偶数枠は cfg（A 側）が先手、奇数枠は cfg_b（B 側）が先手。いま考えている手番の側の設定で読む。
+  // 側ごとに変えられるのは読む手の選び方だけ（σ: c_visit・c_scale・gumbel_rescale、読む回数、Gumbel の候補数とノイズ、PUCT）で、
+  // ほかの項目（局面の作り方・詰み探索・記録の形）が cfg と違えば std::invalid_argument。collect/apply の外で呼ぶ
+  void set_side_config(const SearchConfig& cfg_b);
+  bool side_configs() const { return has_cfg_b_; }
   // set_two_nets のときの apply。logits0/wdl0 は net 0、logits1/wdl1 は net 1 の全行（形は apply と同じ）
   void apply2(const float* logits0, const float* wdl0, const float* logits1, const float* wdl1);
   int active() const { return active_; }
@@ -157,6 +163,9 @@ class SelfPlay {
   std::uint64_t eval_gen_ = 1;  // clear_eval_cache のたびに進める。対局のキャッシュの世代と違えば捨てる
   bool two_nets_ = false;       // set_two_nets
   bool opponent_prior_ = false;
+  SearchConfig cfg_b_;          // set_side_config: B 側（奇数枠の先手）の探索設定
+  bool has_cfg_b_ = false;
+  const SearchConfig& cfg_for(const Game& g) const;  // いま考えている手番の側の設定
   // 対局ごとの処理はその対局のデータだけを触る（並列に呼べる）。統計と終局記録は対局側に貯め、あとで集める
   void step_game(Game& g);  // 次の葉まで進める（終局・着手・新規対局を含む）
   int descend(Game& g);     // ルートから 1 回選ぶ（selfplay.cpp の戻り値の説明）

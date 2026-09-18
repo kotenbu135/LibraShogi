@@ -78,6 +78,8 @@ def main(argv: list[str] | None = None) -> int:
     p_ev.add_argument("--threads", type=int, default=8)
     p_ev.add_argument("--seed", type=int, default=0)
     p_ev.add_argument("--no-noise", action="store_true", help="根の Gumbel ノイズを切る（手を乱数で選ばない。エンジンとしての強さに近い条件）")
+    p_ev.add_argument("--b-set", action="append", default=[], help="B 側だけ別の探索設定で読む（<鍵>=<値>。例 gumbel_rescale=true と c_scale=0.1 で σ の形を比べる）。"
+                      "変えられるのは full_sims・fast_sims・gumbel_m_full・gumbel_m_fast・c_visit・c_scale・gumbel_rescale・gumbel_noise・cpuct")
     p_ev.add_argument("--out", default=None, help="結果 JSON の出力先（既定: <run>/eval/<時刻>.json）")
     p_m = sub.add_parser("match", help="計測: Libra（USI）と外部エンジンを無人対局させ棋譜を JSONL に残す")
     p_m.add_argument("--games", type=int, default=20)
@@ -330,7 +332,17 @@ def main(argv: list[str] | None = None) -> int:
         if a.no_noise:
             scfg["gumbel_noise"] = False
         out = Path(a.out) if a.out else sd.root / "eval" / (time.strftime("%Y%m%d-%H%M%S") + ".json")
-        res = main_eval(Path(a.a), Path(a.b), scfg, a.games, a.concurrent, a.threads, a.seed, out)
+        scfg_b = None
+        if a.b_set:
+            from .abtest import parse_set
+
+            scfg_b = {}
+            for kv in a.b_set:
+                section, key, value = parse_set(kv if "." in kv.split("=", 1)[0] else f"search.{kv}")
+                if section != "search":
+                    raise SystemExit("--b-set は [search] の鍵だけ")
+                scfg_b[key] = value
+        res = main_eval(Path(a.a), Path(a.b), scfg, a.games, a.concurrent, a.threads, a.seed, out, search_cfg_b=scfg_b)
         print(json.dumps({k: v for k, v in res.items() if not k.startswith("calibration")}, ensure_ascii=False))
         for side in ("a", "b"):
             print(f"calibration_{side}:", " ".join(f"[{c['lo']:.1f},{c['hi']:.1f}) n={c['n']} pred={c['pred']:.2f} act={c['actual']:.2f}" for c in res[f"calibration_{side}"]))

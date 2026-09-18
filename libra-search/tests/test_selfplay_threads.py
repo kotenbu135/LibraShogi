@@ -294,3 +294,69 @@ def test_gumbel_rescale_completed_q():
             p = pp[po[j]:po[j + 1]]
             assert len(p) >= 1 and abs(p.sum() - 1) < 1e-4 and (p >= 0).all()
     assert any(not np.array_equal(x["moves"], y["moves"]) for x, y in zip(a, b))
+
+
+def _records(sp, n_games, rounds):
+    sq = np.zeros((n_games, 81, ls.SQ_FEATS), np.float32)
+    glob = np.zeros((n_games, ls.GLOB_FEATS), np.float32)
+    out = []
+    for _ in range(rounds):
+        sp.collect(sq, glob)
+        sp.apply(*fake_net(sq, glob))
+        out += sp.take_finished()
+    return out
+
+
+def test_side_config_does_not_change_anything_when_both_sides_are_equal():
+    """set_side_config に同じ設定を渡したときは、渡さないときと棋譜が 1 ビット同じ（本番の自己対局の経路を変えない）。"""
+    plain = _records(librasearch.SelfPlay(CFG, 16, seed=3, threads=2), 16, 600)
+    sp = librasearch.SelfPlay(CFG, 16, seed=3, threads=2)
+    sp.set_side_config(CFG)
+    assert sp.side_configs()
+    same = _records(sp, 16, 600)
+    assert len(plain) == len(same) > 0
+    for x, y in zip(plain, same):
+        assert np.array_equal(x["moves"], y["moves"]) and np.array_equal(x["policy_p"], y["policy_p"])
+        assert (x["result"], x["plies"], x["slot"], x["v41"]) == (y["result"], y["plies"], y["slot"], y["v41"])
+
+
+def test_side_config_rejects_keys_that_would_change_the_game_or_the_record():
+    sp = librasearch.SelfPlay(CFG, 2, seed=3, threads=1)
+    for bad in ({"max_ply": 320}, {"policy_topk": 8}, {"mate_nodes_root": 0}, {"proof_nodes": 0}, {"draw_value": 0.5},
+                {"count_from_41": False}, {"eval_cache": True}):
+        with pytest.raises(ValueError):
+            sp.set_side_config({**CFG, **bad})
+    assert not sp.side_configs()
+    sp.set_side_config({**CFG, "gumbel_rescale": True, "c_scale": 0.1, "gumbel_m_full": 4, "cpuct": 2.0, "full_sims": 8})
+    assert sp.side_configs()
+
+
+def test_side_config_applies_to_the_side_that_is_thinking():
+    """外部駆動で同じ局面を偶数枠と奇数枠に与える。先手の手番なら偶数枠が A 側・奇数枠が B 側の設定で読み、
+    後手の手番では入れ替わる（評価ハーネスの「偶数枠は A が先手」と同じ約束）。"""
+    a = {**CFG, "external": True, "gumbel_noise": False, "policy_topk": 300}
+    b = {**a, "gumbel_m_full": 2, "gumbel_rescale": True, "c_scale": 0.1}
+    sente = "position fuseki moves K*5i K*5a"          # 先手の手番
+    gote = "position fuseki moves K*5i K*5a P*5g"      # 後手の手番
+
+    def visits(cfg_a, cfg_b, line, slots=(0, 1)):
+        e = librasearch.SelfPlay(cfg_a, 2, 1, 1)
+        if cfg_b is not None:
+            e.set_side_config(cfg_b)
+        sq = np.zeros((2, 81, ls.SQ_FEATS), np.float32)
+        gl = np.zeros((2, ls.GLOB_FEATS), np.float32)
+        for s in slots:
+            assert e.set_position(s, line, 48, True)
+        while not all(e.idle(s) for s in slots):
+            n = e.collect(sq, gl)
+            e.apply(*fake_net(sq[:n], gl[:n]))
+        return [sorted((c["move"], c["visits"]) for c in e.result(s)["cands"]) for s in slots]
+
+    only_a = visits(a, None, sente)
+    only_b = visits(b, None, sente)
+    assert only_a[0] != only_b[0]  # 設定で読みの分かれ方が変わる（変わらなければ以下の判定に意味が無い）
+    mixed = visits(a, b, sente)
+    assert mixed[0] == only_a[0] and mixed[1] == only_b[0]      # 先手の手番: 偶数枠は A 側、奇数枠は B 側
+    mixed_gote = visits(a, b, gote)
+    only_a_gote, only_b_gote = visits(a, None, gote), visits(b, None, gote)
+    assert mixed_gote[0] == only_b_gote[0] and mixed_gote[1] == only_a_gote[0]  # 後手の手番では入れ替わる
