@@ -338,3 +338,29 @@ def test_worker_id_is_passed_and_continued(tmp_path):
     (prev / "session.json").write_text(json.dumps({"run": "ls", "gpu": "RTX 5090", "hours": 1.5, "started": now}))
     cont, _ = continue_settings(prev, now)
     assert "worker_id" not in cont
+
+
+def test_offers_report_shows_the_expected_speed_and_cost_and_ranks_by_value():
+    """「候補を見る」の表に見込みの局/日と 100 万局あたりの費用を出し、借りる順をその費用の安い順にする。"""
+    from libra_cloud import hosts
+    from libra_cloud.vast_cli import offers_report
+
+    def off(i, dph, gpu, cpu, mid):
+        return {"id": i, "dph_total": dph, "dph_eff": dph, "num_gpus": 1, "cpu_cores_effective": 16, "cpu_ghz": 5.0, "inet_down": 500.0,
+                "reliability2": 0.99, "cuda_max_good": 12.9, "inet_up_cost": 0.004, "inet_down_cost": 0.004,
+                "gpu_name": gpu, "cpu_name": cpu, "machine_id": mid}
+
+    table = hosts.speed_table([{"name": "a", "gpu": "RTX 5070 Ti", "cpu": "Intel Xeon Gold 6130", "machine_id": 4242,
+                                "games_per_day": 300_000, "span_h": 1.0},
+                               {"name": "b", "gpu": "RTX 5080", "cpu": "AMD Ryzen 9 7900", "machine_id": 13,
+                                "games_per_day": 877_037, "span_h": 1.0}])
+    offers = hosts.annotate([off(1, 0.262, "RTX 5080", "AMD Ryzen 9 7900 12-Core Processor", 13),
+                             off(2, 0.150, "RTX 5070 Ti", "Intel Xeon Gold 6130 16-Core Processor", 4242)], table, "dph_eff")
+    cond = {"max_dph": 0.28, "min_cores": 16, "min_cpu_ghz": 4.4, "min_rel": 0.94, "max_inet_cost": 0.02, "min_cuda": 12.9,
+            "price_key": "dph_eff"}
+    rep = offers_report("RTX 5070 Ti", offers, cond, 30)
+    assert [r["id"] for r in rep["top"]] == [1, 2]  # 安いほうが遅いので、100 万局あたりでは高い GPU が勝つ（$7.17 対 $12.00）
+    assert [r["id"] for r in rep["all"]] == [2, 1]  # 表そのものは値段の安い順のまま
+    assert rep["top"][0]["est_usd_per_1m"] is not None and rep["top"][0]["est_from"] == "machine"
+    assert "◎87.7万" in rep["text"] and "$7.17" in rep["text"] and "$12.00" in rep["text"]
+    assert "見込みは過去に借りたホストの実測" in rep["text"]

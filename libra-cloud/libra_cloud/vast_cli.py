@@ -29,6 +29,7 @@ import time
 import tomllib
 from pathlib import Path
 
+from libra_cloud import hosts
 from libra_cloud.bench import MAX_INET_COST
 
 REPO = Path(__file__).resolve().parents[2]
@@ -451,9 +452,23 @@ def _rjust(s: str, w: int) -> str:
     return " " * max(0, w - _width(s)) + s
 
 
-def _short_cpu(name) -> str:
-    """表の幅に収めるため、CPU 名から型番に要らない語を落とす（"AMD EPYC 7B13 64-Core Processor" → "AMD EPYC 7B13"）。"""
-    return re.sub(r"\s+", " ", re.sub(r"®|\(R\)|\(TM\)|\bCPU\b|\d+-Core|\bProcessor\b|with Radeon.*$|@.*$", "", str(name or ""))).strip()
+# 表の幅に収めるため CPU 名から型番に要らない語を落とす（"AMD EPYC 7B13 64-Core Processor" → "AMD EPYC 7B13"）。
+# 実績を同じ CPU でまとめる鍵と同じ関数を使う（hosts.keys_of）
+_short_cpu = hosts.short_cpu
+
+
+EST_MARKS = {"machine": "◎", "cpu": "○", "gpu": "△"}
+
+
+def _est_games(r: dict) -> str:
+    """見込みの局/日（万単位）と、どの実測から当てたかの印。実測が無ければ "-"。"""
+    g = r.get("est_games_per_day")
+    return "-" if not g else EST_MARKS.get(r.get("est_from"), "") + f"{g / 1e4:.1f}万"
+
+
+def _est_cost(r: dict) -> str:
+    c = r.get("est_usd_per_1m")
+    return "-" if not c else f"${c:.2f}"
 
 
 def offers_report(gpu: str, offers: list[dict], cond: dict, disk: float) -> dict:
@@ -469,22 +484,26 @@ def offers_report(gpu: str, offers: list[dict], cond: dict, disk: float) -> dict
         return {"id": o.get("id"), "dph": round(float(o.get(price_key) or 0), 3), "bid": o.get("bid"), "cpu": _short_cpu(o.get("cpu_name")),
                 "cores": o.get("cpu_cores_effective"), "ghz": round(float(o.get("cpu_ghz") or 0), 2),
                 "reliability": round(float(o.get("reliability2") or o.get("reliability") or 0), 3),
-                "inet_cost": round(max(o.get("inet_up_cost") or 0, o.get("inet_down_cost") or 0), 4), "where": o.get("geolocation")}
+                "inet_cost": round(max(o.get("inet_up_cost") or 0, o.get("inet_down_cost") or 0), 4), "where": o.get("geolocation"),
+                "est_games_per_day": o.get("est_games_per_day"), "est_usd_per_1m": o.get("est_usd_per_1m"), "est_from": o.get("est_from")}
 
     rows = []
+    by_offer: dict[int, dict] = {}
     counts: dict[str, int] = {}
     for o in sorted(offers, key=lambda o: (float(o.get(price_key) or 0), -(o.get("cpu_cores_effective") or 0))):
         reasons = offer_rejects(o, **cond)
         for r in reasons:
             counts[r["key"]] = counts.get(r["key"], 0) + 1
         rows.append({**row(o), "ok": not reasons, "rank": rank.get(id(o)), "reasons": reasons})
+        by_offer[id(o)] = rows[-1]
     hints = []
     for h in near_misses(offers, **cond):
         need_text = COND_FORMATS[h["key"]].format(h["need"])
         hints.append({"key": h["key"], "need": h["need"], "label": COND_LABELS[h["key"]], "need_text": need_text,
                       "note": COND_NOTES.get(h["key"], ""), "offer": row(h["offer"])})
 
-    lines = [f"{gpu}: 検索 {len(offers)} 件、条件に合う {len(cands)} 件" + ("（起動すると ○1 から順に借りる）" if cands else ""),
+    lines = [f"{gpu}: 検索 {len(offers)} 件、条件に合う {len(cands)} 件"
+             + ("（起動すると ○1 から順に借りる。見込みの 100 万局あたりの費用の安い順）" if cands else ""),
              ("借り方: 入札（割り込みあり。$/h は最低入札に上乗せした入札額での実効単価）" if price_key == "dph_eff" and any(o.get("bid") for o in offers)
               else "借り方: on-demand"),
              f"条件: 上限 ${cond['max_dph']:.2f}/h、コア {cond['min_cores']} 以上、CPU {cond['min_cpu_ghz']:.1f} GHz 以上、"
@@ -492,13 +511,17 @@ def offers_report(gpu: str, offers: list[dict], cond: dict, disk: float) -> dict
              f"（検索の時点で 1 GPU・verified・下り 200 Mbps 以上・CUDA {cond['min_cuda']:g} 以上・ディスク {disk:g} GB 以上に絞っている）"]
     if counts:
         lines.append("落ちた理由: " + "、".join(f"{COND_LABELS.get(k, k)} {n} 件" for k, n in sorted(counts.items(), key=lambda kv: -kv[1])))
+    if any(r["est_games_per_day"] is not None for r in rows):
+        lines.append("見込みは過去に借りたホストの実測（定常状態の局/日）から: ◎同じ機械、○同じ GPU と CPU、△同じ GPU。"
+                     "印の無いものは実測が無く、実測のあるホストの中央値を当てている")
     if rows:
-        lines += ["", f"{_pad('判定', 5)}{'$/h':>6} {_rjust('コア', 4)} {'GHz':>5} {_rjust('信頼度', 6)} {_rjust('転送料', 6)}  {_pad('CPU', 30)} {_pad('場所', 18)} 理由"]
+        lines += ["", f"{_pad('判定', 5)}{'$/h':>6} {_rjust('局/日', 8)} {_rjust('$/100万', 8)} {_rjust('コア', 4)} {'GHz':>5} "
+                      f"{_rjust('信頼度', 6)} {_rjust('転送料', 6)}  {_pad('CPU', 30)} {_pad('場所', 18)} 理由"]
         for r in rows:
             mark = f"○{r['rank']}" if r["ok"] else "×"
             cores = "-" if r["cores"] is None else f"{r['cores']:g}"
-            lines.append(f"{_pad(mark, 5)}{r['dph']:>6.3f} {cores:>4} {r['ghz']:>5.2f} {r['reliability']:>6.3f} "
-                         f"{r['inet_cost']:>6.3f}  {_pad(r['cpu'][:30], 30)} {_pad(str(r['where'] or '-')[:18], 18)} "
+            lines.append(f"{_pad(mark, 5)}{r['dph']:>6.3f} {_rjust(_est_games(r), 8)} {_rjust(_est_cost(r), 8)} {cores:>4} {r['ghz']:>5.2f} "
+                         f"{r['reliability']:>6.3f} {r['inet_cost']:>6.3f}  {_pad(r['cpu'][:30], 30)} {_pad(str(r['where'] or '-')[:18], 18)} "
                          + "、".join(x["text"] for x in r["reasons"]))
     if hints:
         lines += ["", "1 つ緩めれば借りられる:"]
@@ -508,7 +531,7 @@ def offers_report(gpu: str, offers: list[dict], cond: dict, disk: float) -> dict
                          f"信頼度 {f['reliability']:.3f}、{f['where']}）" + (f"  ※{h['note']}" if h["note"] else ""))
     elif not cands and offers:
         lines += ["", "1 つ緩めるだけで借りられるオファーはありません。GPU を変えるか、時間をおいて見直してください。"]
-    return {"gpu": gpu, "cond": cond, "offers": len(offers), "usable": len(cands), "top": [r for r in rows if r["ok"]][:8],
+    return {"gpu": gpu, "cond": cond, "offers": len(offers), "usable": len(cands), "top": [by_offer[id(o)] for o in cands[:8]],  # 借りる順
             "all": rows, "reject_counts": counts, "hints": hints, "text": "\n".join(lines)}
 
 
@@ -523,6 +546,7 @@ def cmd_offers(a: argparse.Namespace) -> int:
     v = VastAI(raw=True, quiet=True)
     offers = v.search_offers(query=offer_query(a.gpu, a.min_rel, min_cuda, 30), type=a.rent, order="dph_total", limit=100, storage=30) or []
     offers = annotate_price(offers, a.rent, a.bid_margin)
+    offers = hosts.annotate(offers, hosts.speed_table(hosts.scan_sessions(Path(a.root).expanduser())), "dph_eff")
     cond = {"max_dph": a.max_dph, "min_cores": a.min_cores, "min_cpu_ghz": a.min_cpu_ghz, "min_rel": a.min_rel,
             "max_inet_cost": a.max_inet_cost, "min_cuda": min_cuda, "price_key": "dph_eff"}
     rep = offers_report(a.gpu, offers, cond, disk=30)

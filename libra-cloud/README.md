@@ -6,6 +6,7 @@ vast.ai で自己対局ワーカー（`libra worker`、libra-league/libra_league
 
 | ファイル | 内容 |
 |---|---|
+| `libra_cloud/hosts.py` | 借りたホストの実測（`bridge.log` の定常状態の局/日）から、次に借りるオファーの見込み（局/日、100 万局あたりの費用）を出す。選別の並び順に使う（docs/runbook.md §自己対局ワーカー「借りる順」） |
 | `libra_cloud/bench.py` | オファーの選別（1 GPU、信頼度 0.98 以上、下り 200 Mbps 以上、CUDA 12.8 以上、CPU 8 コア以上、転送料 $0.02/GB 以下）、ベンチ用の設定、inbox の対局ファイルからの局/日（`python -m libra_cloud.bench report`） |
 | `libra_cloud/prepare.py` | 手元で束を作る: チェックポイントから fp16 の重み、ベンチ用の設定（openings・学習側の機能を外す）、git の HEAD にあるワーカー用ソースの tar.gz |
 | `bench/host_setup.sh` | ホスト（`pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime`）で librashogi / librasearch だけをビルドし、GPU と CPU を記録 |
@@ -28,7 +29,7 @@ PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-clo
 ふだんは管理コンソールの **クラウド** タブから「起動」「停止」する（docs/runbook.md の自己対局ワーカーの節）。同じことをコマンドで行うとき:
 
 ```bash
-bin/libra-vast offers --gpu RTX_5070_Ti --max-dph 0.28          # 全件に落ちた条件と 1 つ緩めれば通る値を付ける（借りない。--min-cores・--max-inet-cost も指定可）
+bin/libra-vast offers --gpu RTX_5070_Ti --max-dph 0.28          # 全件に落ちた条件・1 つ緩めれば通る値・見込みの局/日と $/100 万局を付ける（借りない。--min-cores・--max-inet-cost も指定可）
 bin/libra-vast start --run ls --gpu RTX_5070_Ti --max-dph 0.28 --hours 3   # すぐ返る。準備に 5〜15 分。--rent bid（既定、入札）| on-demand、--bid-margin 0.1
 # ホストを失ったら launcher が bin/libra-vast start --continue-from <セッション名> で残りの時間の次のセッションを起動する
 bin/libra-vast status --account                                  # 段階・借りた時間・費用・回収局数・残高・インスタンス
@@ -70,6 +71,7 @@ PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-clo
 | ファイル | 内容 |
 |---|---|
 | `test_bench.py` | オファーの選別と落ちた理由、入札の実効単価、局/日の計算、束の作成、ホストのスクリプトの構文、ssh の経路 |
+| `test_hosts.py` | ホストの実測（bridge.log の傾き、日付をまたぐ時刻）、実績の鍵の優先、見込みと借りる順 |
 | `test_bridge.py` | ブリッジ（重みと布石の送信、対局ファイルの回収と検査、送信の失敗と再試行、停止と回収） |
 | `test_scale_bridge.py` | 検証対局のブリッジ（往復、ワーカーの死亡と回収の打ち切り） |
 | `test_vast_cli.py` | `bin/libra-vast` の各サブコマンド（学習側の確認、二重起動の拒否、費用の見積もり、履歴） |
