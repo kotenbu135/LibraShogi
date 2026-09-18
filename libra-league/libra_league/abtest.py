@@ -222,6 +222,33 @@ def run_abtest(sd: StateDir, base_cfg: dict, ckpt: Path, arms: list[str], base_s
     return res
 
 
+def publish_result(res: dict, name: str, repo: Path | None, branch: str, subdir: str, log, push: bool = True) -> str | None:
+    """結果を `progress` ブランチ（`<subdir>/<name>.json` と `.md`）へ push する。`~/libra-run` は手元の PC にしか
+    無いので、外（クラウドのセッション、別の端末）から結果を読めるようにするため（docs/runbook.md §設定の管理の
+    「進捗の書き出し」と同じ形: main と作業ツリーには触れない）。絶対パスは消し、ホームは `~` に直す。"""
+    from .progress import publish, repo_root, scrub
+
+    d = subdir.strip("/")
+    pre = f"{d}/" if d else ""
+    body = json.dumps(scrub(res), ensure_ascii=False, indent=1) + "\n"
+    text = format_abtest(res) if "arms" in res else format_side_eval(res)
+    files = {f"{pre}{name}.json": body, f"{pre}{name}.md": _scrub_text(text) + "\n"}
+    return publish(repo or repo_root(), branch, files, f"experiment: {name}", push=push, log=log)
+
+
+def format_side_eval(res: dict) -> str:
+    """`libra eval`（--b-set で側ごとに探索設定を変えた対局）の 1 行。"""
+    return (f"A {res.get('a')}\nB {res.get('b')}\nB 側の探索設定: {res.get('search_b')}\n"
+            f"読み {res.get('sims')}・{res.get('n')} 局: A の得点 {res.get('score_a')}、Elo {res.get('elo_a_minus_b')} "
+            f"{res.get('elo_ci95')}、平均 {res.get('avg_plies')} 手")
+
+
+def _scrub_text(text: str) -> str:
+    from .progress import scrub
+
+    return "\n".join(scrub(line) for line in text.split("\n"))
+
+
 def format_abtest(res: dict) -> str:
     lines = [f"ckpt {res['ckpt']} step {res['ckpt_step']} / window at chunk {res['chunk_index']} ({res['games_total']} games)"
              f" / {res['steps']} steps / seed {res['seed']}"]

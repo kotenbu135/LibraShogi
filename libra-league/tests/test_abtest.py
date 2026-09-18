@@ -134,3 +134,32 @@ def test_eval_with_a_different_search_config_on_one_side(tmp_path: Path):
     m = load_model(sd.checkpoints / "latest.pt", torch.device("cpu"), torch.float32)
     with pytest.raises(ValueError):
         play_match(m, m, scfg, 1, 2, 1, 0, torch.device("cpu"), torch.float32, search_cfg_b={"policy_topk": 4})
+
+
+def test_publish_result_writes_to_a_branch_without_touching_main(tmp_path: Path, monkeypatch):
+    """--publish は progress ブランチへ 1 コミット足すだけ（作業ツリー・HEAD・main に触れない。絶対パスは消す）。"""
+    import subprocess
+
+    from libra_league.abtest import publish_result
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for args in (["init", "-q", "-b", "main"], ["config", "user.name", "t"], ["config", "user.email", "t@example.com"]):
+        subprocess.run(["git", "-C", str(repo), *args], check=True)
+    (repo / "README.md").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "init"], check=True)
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout
+    monkeypatch.setenv("HOME", str(tmp_path))
+    res = {"ckpt": f"{tmp_path}/libra-run/ls/checkpoints/archive/ckpt_000062426.pt", "ckpt_step": 62426, "steps": 4,
+           "seed": 5, "chunk_index": 6, "games_total": 60, "arms": {"lam05": {"diff": {}}, "lam10": {"diff": {"train.lambda_z": 1.0}}},
+           "matches": [{"a": "lam05", "b": "lam10", "n": 4, "score_a": 0.5, "elo_a_minus_b": 0.0, "elo_ci95": [-1, 1], "avg_plies": 80}]}
+    commit = publish_result(res, "x-abtest", repo, "progress", "experiments", log=lambda s: None, push=False)
+    assert commit
+    shown = subprocess.run(["git", "-C", str(repo), "show", f"{commit}:experiments/x-abtest.json"], capture_output=True, text=True).stdout
+    assert str(tmp_path) not in shown and "ckpt_000062426.pt" in shown
+    md = subprocess.run(["git", "-C", str(repo), "show", f"{commit}:experiments/x-abtest.md"], capture_output=True, text=True).stdout
+    assert "lam05 vs lam10" in md and str(tmp_path) not in md
+    # main と HEAD は動かない（push はしない: remote が無いので commit を返すだけ）
+    assert subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout == head
+    assert subprocess.run(["git", "-C", str(repo), "status", "--short"], capture_output=True, text=True).stdout == ""

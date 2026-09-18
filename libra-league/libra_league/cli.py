@@ -81,6 +81,8 @@ def main(argv: list[str] | None = None) -> int:
     p_ev.add_argument("--b-set", action="append", default=[], help="B 側だけ別の探索設定で読む（<鍵>=<値>。例 gumbel_rescale=true と c_scale=0.1 で σ の形を比べる）。"
                       "変えられるのは full_sims・fast_sims・gumbel_m_full・gumbel_m_fast・c_visit・c_scale・gumbel_rescale・gumbel_noise・cpuct")
     p_ev.add_argument("--out", default=None, help="結果 JSON の出力先（既定: <run>/eval/<時刻>.json）")
+    p_ev.add_argument("--publish", action="store_true", help="結果を progress ブランチの experiments/ へ push する（手元の PC の外から読めるようにする）")
+    p_ev.add_argument("--branch", default="progress", help="--publish の書き出し先（既定 progress。main には入れない）")
     p_m = sub.add_parser("match", help="計測: Libra（USI）と外部エンジンを無人対局させ棋譜を JSONL に残す")
     p_m.add_argument("--games", type=int, default=20)
     p_m.add_argument("--go", default="movetime 3000", help="go の引数（例: 'movetime 3000' / 'btime 60000 wtime 60000 byoyomi 10000'）")
@@ -158,6 +160,8 @@ def main(argv: list[str] | None = None) -> int:
     p_ab.add_argument("--config-from", default="ckpt", choices=["ckpt", "run"], help="元にする設定（既定: チェックポイントに保存された設定）")
     p_ab.add_argument("--device", default=None)
     p_ab.add_argument("--out", default=None, help="出力先（既定: <root>/experiments/<時刻>-abtest）。稼働中の run には書かない")
+    p_ab.add_argument("--publish", action="store_true", help="結果を progress ブランチの experiments/ へ push する（手元の PC の外から読めるようにする）")
+    p_ab.add_argument("--branch", default="progress", help="--publish の書き出し先（既定 progress。main には入れない）")
     p_rv = sub.add_parser("review", help="物差し M1〜M4（gen・最強比・基準比・参照・局/日）の保存済みの値から「続ける／注意／見直し」を出す（docs/restart-plan.md §3 M6）")
     p_rv.add_argument("--set", action="append", default=[], help="閾値の上書き（name=value。gen_games, gen_min_rise, gen_max_gap, best_stall_alert, reference_games, gpd_min）")
     p_rv.add_argument("--json", action="store_true")
@@ -304,6 +308,10 @@ def main(argv: list[str] | None = None) -> int:
                          config_from=a.config_from)
         print(format_abtest(res))
         print("written:", out / "abtest.json")
+        if a.publish:
+            from .abtest import publish_result
+
+            publish_result(res, out.name, None, a.branch, "experiments", lambda s: print(s, flush=True))
         return 0
     if a.cmd == "stop":
         sd.set_flag("STOP")
@@ -353,6 +361,10 @@ def main(argv: list[str] | None = None) -> int:
         for side in ("a", "b"):
             print(f"calibration_{side}:", " ".join(f"[{c['lo']:.1f},{c['hi']:.1f}) n={c['n']} pred={c['pred']:.2f} act={c['actual']:.2f}" for c in res[f"calibration_{side}"]))
         print("written:", out)
+        if a.publish:
+            from .abtest import publish_result
+
+            publish_result(res, out.stem, None, a.branch, "experiments", lambda s: print(s, flush=True))
         return 0
     if a.cmd == "match":
         import time
