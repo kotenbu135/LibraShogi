@@ -1,36 +1,93 @@
 {
  "schema": 1,
  "run": "ls",
- "generated": "2026-09-18 19:00:27",
- "t": 1789725627.9,
+ "generated": "2026-09-18 19:08:32",
+ "t": 1789726112.4,
  "process": "running",
  "flags": [],
  "now": {
-  "step": 102681,
+  "step": 103590,
   "generation": 131,
-  "games_total": 1244016,
-  "games_per_day_1h": 0,
-  "window_games": 622008,
+  "games_total": 1253892,
+  "games_per_day_1h": 1756277,
+  "window_games": 626946,
   "active_games": 512,
-  "elapsed_h": 20.58,
+  "elapsed_h": 20.72,
   "heldout_games": 20000,
-  "status_time": "2026-09-18 19:00:26",
+  "status_time": "2026-09-18 19:08:32",
   "train": {
-   "loss": 2.3258843421936035,
-   "policy": 1.616255283355713,
-   "value": 0.5018243193626404,
-   "v41": 0.4156095087528229,
-   "policy_acc": 0.5890411138534546,
+   "loss": 2.141572952270508,
+   "policy": 1.4437295198440552,
+   "value": 0.48285531997680664,
+   "v41": 0.4299761652946472,
+   "policy_acc": 0.6449275612831116,
    "lr": 0.0002
   },
-  "gen": null
+  "gen": {
+   "window": {
+    "fuseki": {
+     "n": 1703,
+     "n_policy": 422,
+     "corr_v": 0.5815,
+     "mse_v": 0.6587,
+     "policy_ce": 2.0797,
+     "policy_acc": 0.6374
+    },
+    "normal": {
+     "n": 2297,
+     "n_policy": 656,
+     "corr_v": 0.6597,
+     "mse_v": 0.5477,
+     "policy_ce": 1.3144,
+     "policy_acc": 0.596
+    }
+   },
+   "heldout": {
+    "fuseki": {
+     "n": 1576,
+     "n_policy": 440,
+     "corr_v": 0.6031,
+     "mse_v": 0.6345,
+     "policy_ce": 2.0471,
+     "policy_acc": 0.6477
+    },
+    "normal": {
+     "n": 2424,
+     "n_policy": 690,
+     "corr_v": 0.6585,
+     "mse_v": 0.5589,
+     "policy_ce": 1.3428,
+     "policy_acc": 0.5522
+    }
+   },
+   "gap": {
+    "fuseki": {
+     "corr_v": 0.0216,
+     "mse_v": -0.0242,
+     "policy_ce": -0.0326,
+     "policy_acc": 0.0103
+    },
+    "normal": {
+     "corr_v": -0.0012,
+     "mse_v": 0.0112,
+     "policy_ce": 0.0284,
+     "policy_acc": -0.0438
+    }
+   },
+   "window_games": 622008,
+   "heldout_games": 20000,
+   "positions": 4000,
+   "t": 1789725626.5,
+   "step": 102681,
+   "games": 1244016
+  }
  },
  "auto": {
   "anchor_step": 28908,
   "anchor_offset": 658.6,
   "best_step": 98604,
   "best_stall": 0,
-  "queue": 3,
+  "queue": 2,
   "running": "reference",
   "last_archive_games": 1200066
  },
@@ -456,6 +513,20 @@
    "ci95": [
     304.8,
     470.4
+   ]
+  },
+  {
+   "t": 1789726112.3681884,
+   "step": 98604,
+   "games": 1253892,
+   "ref": "win1m.pt",
+   "ref_step": null,
+   "n": 200,
+   "score_new": 0.835,
+   "elo": 281.7,
+   "ci95": [
+    223.5,
+    357.0
    ]
   }
  ],
@@ -1497,22 +1568,34 @@
    "policy_acc": 0.5890411138534546,
    "gen_window_corr_v": null,
    "gen_heldout_corr_v": null
+  },
+  {
+   "t": 1789725929.1,
+   "step": 103245,
+   "games_total": 1250331,
+   "gpd": 1803190,
+   "gpd_5m": 1803093,
+   "window": 625165,
+   "loss": 2.2761120796203613,
+   "policy_acc": 0.610909104347229,
+   "gen_window_corr_v": 0.6597,
+   "gen_heldout_corr_v": 0.6585
   }
  ],
  "review": {
-  "time": "2026-09-18 19:00:27",
+  "time": "2026-09-18 19:08:32",
   "run": "ls",
   "items": [
    {
     "name": "M1 一般化（本将棋の価値の相関）",
     "verdict": "続ける",
-    "why": "held-out の相関 0.6553 → 0.658（200,000 局）、窓の中との差 +0.008",
+    "why": "held-out の相関 0.6362 → 0.6585（200,000 局）、窓の中との差 +0.001",
     "values": {
-     "heldout_corr_first": 0.6553,
-     "heldout_corr_last": 0.658,
-     "window_corr_last": 0.6659,
-     "gap": 0.007900000000000018,
-     "n_rows": 13
+     "heldout_corr_first": 0.6362,
+     "heldout_corr_last": 0.6585,
+     "window_corr_last": 0.6597,
+     "gap": 0.0011999999999999789,
+     "n_rows": 11
     }
    },
    {
@@ -1570,32 +1653,32 @@
    },
    {
     "name": "M4 参照 win1m.pt",
-    "verdict": "続ける",
-    "why": "対 win1m.pt: +31.4 → +240.8 Elo（400,000 局で +209.4）",
+    "verdict": "まだ無い",
+    "why": "対 win1m.pt: +281.7 Elo（step 98604、比べる点がまだ 1 つ）",
     "values": {
      "last": {
-      "t": 1789684140.3971748,
-      "step": 62426,
-      "games": 852010,
+      "t": 1789726112.3681884,
+      "step": 98604,
+      "games": 1253892,
       "ref": "win1m.pt",
       "ref_step": null,
       "n": 200,
-      "score_new": 0.8,
-      "elo": 240.8,
+      "score_new": 0.835,
+      "elo": 281.7,
       "ci95": [
-       185.8,
-       308.9
+       223.5,
+       357.0
       ]
      },
-     "n_recent": 2
+     "n_recent": 1
     }
    },
    {
     "name": "局/日（1 時間平均）",
     "verdict": "続ける",
-    "why": "0",
+    "why": "1,756,277",
     "values": {
-     "gpd": 0
+     "gpd": 1756277
     }
    }
   ],
@@ -1874,6 +1957,18 @@
       "n": 200,
       "score": 0.8,
       "in_band": true
+     },
+     {
+      "step": 98604,
+      "games": 1200126,
+      "elo": 281.7,
+      "ci95": [
+       223.5,
+       357.0
+      ],
+      "n": 200,
+      "score": 0.835,
+      "in_band": false
      }
     ],
     "intervals": [
@@ -1930,6 +2025,15 @@
       "elo_per_doubling": 209.3,
       "elo_per_1m": 523.2,
       "in_band": true
+     },
+     {
+      "games_from": 800281,
+      "games_to": 1200126,
+      "d_elo": 40.9,
+      "doublings": 0.585,
+      "elo_per_doubling": 70.0,
+      "elo_per_1m": 102.3,
+      "in_band": false
      }
     ],
     "fit": {
@@ -2074,6 +2178,7 @@
   },
   "notes": [
    "参照 ckpt_000646699.pt は最新の点が得点 0.895 で天井・床（この参照の伸びは実際より小さく出る）",
+   "参照 win1m.pt は最新の点が得点 0.835 で天井・床（この参照の伸びは実際より小さく出る）",
    "最新の 800,281 局で得点が 0.25〜0.75 に収まる参照が無い（次の節目では全部の参照が天井に着く）。今の重みを新しい固定の参照に足すと曲線を続けられる"
   ]
  }
