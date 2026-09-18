@@ -11,7 +11,7 @@ if ($errors.Count -gt 0) {
     $errors | ForEach-Object { Write-Host ("構文エラー {0}:{1} {2}" -f $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber, $_.Message) }
     exit 1
 }
-$want = @("Format-Int", "Format-Ago", "From-Unix", "Ci-Val", "Format-Ci", "Format-Pct", "Format-Saturated", "Format-Elo-Anchor", "Format-Elo-Best", "Format-Elo-References")
+$want = @("Format-Int", "Format-Ago", "From-Unix", "Ci-Val", "Format-Ci", "Format-Pct", "Format-Saturated", "New-Series", "Add-Pt", "Pt-XVal", "Get-XAxis", "Format-Elo-Anchor", "Format-Elo-Best", "Format-Elo-References")
 $found = @{}
 foreach ($f in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
     if ($want -contains $f.Name) { $found[$f.Name] = $true; . ([scriptblock]::Create($f.Extent.Text)) }
@@ -72,6 +72,37 @@ Check "区間なし" (Format-Ci $null) ""
 Check "区間が片側だけ" (Format-Ci @(1.0, $null)) ""
 $noci = [pscustomobject]@{ t = $now; step = 100; n = 100; score_new = 0.6; anchor_step = 50; offset = 0.0; elo_vs_anchor = 70.0; elo = 70.0; ci95 = $null }
 Check "基準比（区間なし）" (Strip (Format-Elo-Anchor $noci)) "step 100 で +70.0（基準 step 50 に 60%、<いつ>）"
+
+# --- グラフの横軸（Elo・対外対局は総局数、ほかは時間） ---
+$now = [datetime]::new(2026, 9, 19, 12, 0, 0)
+function Mk($pts) {
+    # $pts は @(@{t=<分前>; y=<値>; g=<総局数 or $null>}, ...)
+    $s = New-Series "s" 0
+    foreach ($q in $pts) { Add-Pt $s $now.AddMinutes(-[double]$q.t) ([double]$q.y) $null $null "" $q.g }
+    return @($s)
+}
+$min = [datetime]::MinValue
+# 総局数の軸: 最初と最後の点の局数がそのまま端になる（右に「今」までの空白を作らない）
+$a = Get-XAxis (Mk @(@{t=600; y=1; g=120171}, @{t=60; y=2; g=800281})) $min $true $now
+Check "総局数の軸" ("{0} {1} {2} {3}" -f $a.games, $a.min, $a.max, $a.n) "True 120171 800281 2"
+# 時間の軸: 右端は「今」なので、10 時間前の最後の点の右に空白ができる
+$b = Get-XAxis (Mk @(@{t=600; y=1; g=120171}, @{t=60; y=2; g=800281})) $min $false $now
+$bNow = [double]([System.DateTimeOffset]::new($now).ToUnixTimeMilliseconds() / 1000.0)
+Check "時間の軸は今まで伸びる" ("{0} {1}" -f $b.games, ($b.max -eq $bNow)) "False True"
+Check "時間の軸の幅" ([Math]::Round(($b.max - $b.min) / 60)) 600
+# 局数の分からない点しか無ければ時間の軸に落ちる
+$c = Get-XAxis (Mk @(@{t=600; y=1; g=$null}, @{t=60; y=2; g=$null})) $min $true $now
+Check "局数が無ければ時間の軸" $c.games $false
+# 一部だけ局数がある: 総局数の軸にし、無い点は描かない
+$d = Get-XAxis (Mk @(@{t=600; y=1; g=$null}, @{t=60; y=2; g=500000})) $min $true $now
+# 1 点しか残らないので、幅 0 で割らないように左へ 1 だけ広げる
+Check "局数のある点だけ描く" ("{0} {1} {2} {3}" -f $d.games, $d.min, $d.max, $d.n) "True 499999 500000 1"
+# 点が無い
+$e2 = Get-XAxis (Mk @()) $min $true $now
+Check "点が無い" $e2.n 0
+# 局数が 1 点だけでも幅 0 で割らない
+$f = Get-XAxis (Mk @(@{t=60; y=2; g=800281})) $min $true $now
+Check "1 点でも幅がある" ($f.span -ge 1) $true
 
 if ($fails -gt 0) { Write-Host "`n$fails 件 失敗"; exit 1 }
 Write-Host "`nすべて通過"

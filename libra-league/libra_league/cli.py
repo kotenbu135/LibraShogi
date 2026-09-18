@@ -494,6 +494,15 @@ def main(argv: list[str] | None = None) -> int:
                 out["best"] = collect_best(sd)
                 out["reference"] = collect_reference(sd)
                 out["matches"] = collect_matches(sd)
+                # 計測の行に「その重みを保存した時点の総局数」を足す（管理コンソールの Elo グラフの横軸。
+                # 行の games は打ち終わった時刻の総局数で archive より後なので使えない。scaling.games_of_step と同じ）
+                from .scaling import games_of_step
+
+                g_of = games_of_step(load_metrics(sd, 100000))
+                for key, step_key in (("anchor", "step"), ("best", "step"), ("reference", "step"),
+                                      ("matches", "libra_step"), ("evals", "step_b")):
+                    for row in out[key]:
+                        row["games_at"] = g_of(row.get(step_key))
                 from .calibrate import load_calib
 
                 out["calib"] = load_calib(sd, a.history)

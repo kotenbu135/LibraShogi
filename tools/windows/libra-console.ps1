@@ -674,17 +674,62 @@ function Get-Range {
         default { return [datetime]::MinValue }
     }
 }
+function Get-XAxis($series, [datetime]$t0, [bool]$xGames, [datetime]$now) {
+    # 横軸の範囲。総局数の軸は局数（games_at）の付いた点が 1 つでもあるときだけで、無ければ時間の軸に落ちる。
+    # 返すのは @{ games; min; max; span; n }（n は描ける点の数。0 なら「データなし」）
+    $useGames = $false
+    if ($xGames) {
+        foreach ($s in $series) { foreach ($p in $s.pts) { if ($null -ne $p.g) { $useGames = $true; break } }; if ($useGames) { break } }
+    }
+    $min = $null; $max = $null; $n = 0
+    foreach ($s in $series) {
+        foreach ($p in $s.pts) {
+            if ($p.t -lt $t0) { continue }
+            $xv = Pt-XVal $p $useGames
+            if ($null -eq $xv) { continue }
+            $n++
+            if ($null -eq $min -or $xv -lt $min) { $min = $xv }
+            if ($null -eq $max -or $xv -gt $max) { $max = $xv }
+        }
+    }
+    if ($n -eq 0) { return @{ games = $useGames; min = 0.0; max = 1.0; span = 1.0; n = 0 } }
+    if ($useGames) {
+        # 測った点のところまで（右に「今」までの空白を作らない）
+        if ($max - $min -lt 1) { $min = [Math]::Max(0.0, $max - 1) }
+    } else {
+        # 時間の軸は右端を「今」にして、いつの値かが分かるようにする
+        $max = [double]([System.DateTimeOffset]::new($now).ToUnixTimeMilliseconds() / 1000.0)
+        if ($t0 -gt [datetime]::MinValue) { $min = [double]([System.DateTimeOffset]::new($t0).ToUnixTimeMilliseconds() / 1000.0) }
+        if ($max - $min -lt 600) { $min = $max - 600 }
+    }
+    return @{ games = $useGames; min = $min; max = $max; span = [Math]::Max(1.0, $max - $min); n = $n }
+}
+function Use-GamesAxis {
+    # Elo と 対外対局 の横軸。学習を進めるのは時間ではなく局数（止めている間・GPU を分け合う間は
+    # 同じ時間でも進みが違う）ので、既定は総局数。$cmbAxis がまだ無い起動直後も総局数
+    if ($null -eq $script:cmbAxis) { return $true }
+    return ($script:cmbAxis.SelectedIndex -ne 1)
+}
 function New-Series([string]$name, $color, [bool]$marker = $false, [bool]$dash = $false) {
     return @{ name = $name; color = $color; pts = (New-Object System.Collections.ArrayList); marker = $marker; dash = $dash; gap = $false }
 }
-function Add-Pt($series, [datetime]$t, [double]$y, $lo = $null, $hi = $null, [string]$label = "") {
-    [void]$series.pts.Add(@{ t = $t; y = $y; lo = $lo; hi = $hi; label = $label })
+function Add-Pt($series, [datetime]$t, [double]$y, $lo = $null, $hi = $null, [string]$label = "", $g = $null) {
+    # g は「その重みを保存した時点の総局数」（status --history の games_at）。横軸を総局数にするときに使う
+    [void]$series.pts.Add(@{ t = $t; y = $y; lo = $lo; hi = $hi; label = $label; g = $g })
+}
+function Pt-XVal($p, [bool]$useGames) {
+    # 横軸の値。総局数の軸なら局数、時間の軸なら Unix 秒。総局数が分からない点は総局数の軸では描かない
+    if ($useGames) {
+        if ($null -eq $p.g) { return $null }
+        return [double]$p.g
+    }
+    return [double]([System.DateTimeOffset]::new($p.t).ToUnixTimeMilliseconds() / 1000.0)
 }
 function Run-Color([string]$run, [int]$i = 0) {
     if ($script:Colors.ContainsKey($run)) { return $script:Colors[$run] }
     return $script:Palette[$i % $script:Palette.Length]
 }
-function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt, [bool]$zeroBase, [string]$note, [bool]$allTime = $false) {
+function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt, [bool]$zeroBase, [string]$note, [bool]$allTime = $false, [bool]$xGames = $false) {
     $g.SmoothingMode = "AntiAlias"
     $g.Clear([System.Drawing.Color]::White)
     $font = New-Object System.Drawing.Font("Yu Gothic UI", 8)
@@ -694,30 +739,26 @@ function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt
     $g.DrawString($title, $font, $black, 6, 3)
     # 1 日 1 回の計測（Elo・対外対局）は、期間の選択が短いと前回の点が外れて推移が見えないので常に全期間を描く
     $t0 = if ($allTime) { [datetime]::MinValue } else { Get-Range }
-    $now = [datetime]::Now
-    $tmin = $null; $tmax = $now
+    $ax = Get-XAxis $series $t0 $xGames ([datetime]::Now)
+    $useGames = [bool]$ax.games
+    $xmin = [double]$ax.min; $xmax = [double]$ax.max; $xspan = [double]$ax.span
+    if ([int]$ax.n -eq 0) {
+        $g.DrawString("（データなし）", $font, $gray, $left, $top + 10)
+        if ($note) { $g.DrawString($note, $font, $gray, $left, $top + 28) }
+        return
+    }
     $ymin = [double]::MaxValue; $ymax = [double]::MinValue
-    $n = 0
     foreach ($s in $series) {
         foreach ($p in $s.pts) {
-            if ($p.t -lt $t0) { continue }
-            $n++
-            if ($null -eq $tmin -or $p.t -lt $tmin) { $tmin = $p.t }
+            if ($p.t -lt $t0 -or $null -eq (Pt-XVal $p $useGames)) { continue }
             $lo = if ($null -ne $p.lo) { [double]$p.lo } else { $p.y }
             $hi = if ($null -ne $p.hi) { [double]$p.hi } else { $p.y }
             if ($lo -lt $ymin) { $ymin = $lo }
             if ($hi -gt $ymax) { $ymax = $hi }
         }
     }
-    if ($n -eq 0) {
-        $g.DrawString("（データなし）", $font, $gray, $left, $top + 10)
-        if ($note) { $g.DrawString($note, $font, $gray, $left, $top + 28) }
-        return
-    }
-    if ($t0 -gt [datetime]::MinValue) { $tmin = $t0 }
-    if (($tmax - $tmin).TotalSeconds -lt 600) { $tmin = $tmax.AddMinutes(-10) }
     # 見出し: タイトルの右に注記、その右に凡例を置き、入らなければ次の行に回して描画域を下げる（重なって読めなくなるため）
-    $shown = @($series | Where-Object { @($_.pts | Where-Object { $_.t -ge $tmin }).Count -gt 0 })
+    $shown = @($series | Where-Object { @($_.pts | Where-Object { $_.t -ge $t0 -and $null -ne (Pt-XVal $_ $useGames) }).Count -gt 0 })
     $legendW = 0
     foreach ($s in $shown) { $legendW += 22 + $g.MeasureString($s.name, $font).Width + 8 }
     $rowEnd = 6 + $g.MeasureString($title, $font).Width
@@ -747,12 +788,16 @@ function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt
         $y0 = $top + $ph * (1 - (0 - $ymin) / ($ymax - $ymin))
         $g.DrawLine((New-Object System.Drawing.Pen([System.Drawing.Color]::DarkGray)), $left, $y0, $w - $right, $y0)
     }
-    $span = ($tmax - $tmin).TotalSeconds
-    $fmt = if ($span -gt 3 * 86400) { "MM/dd" } else { "MM/dd HH:mm" }
-    $g.DrawString($tmin.ToString($fmt), $font, $gray, $left, $h - $bottom + 4)
-    $mid = $tmin.AddSeconds($span / 2)
-    $g.DrawString($mid.ToString($fmt), $font, $gray, $left + $pw / 2 - 30, $h - $bottom + 4)
-    $g.DrawString($tmax.ToString($fmt), $font, $gray, $w - $right - 70, $h - $bottom + 4)
+    $fmt = if ($xspan -gt 3 * 86400) { "MM/dd" } else { "MM/dd HH:mm" }
+    $xlab = {
+        param([double]$v)
+        if ($useGames) { return (Format-Int $v) }
+        return (From-Unix $v).ToString($fmt)
+    }
+    $g.DrawString((& $xlab $xmin), $font, $gray, $left, $h - $bottom + 4)
+    $g.DrawString((& $xlab ($xmin + $xspan / 2)), $font, $gray, $left + $pw / 2 - 30, $h - $bottom + 4)
+    $lastLab = & $xlab $xmax
+    $g.DrawString($lastLab, $font, $gray, $w - $right - $g.MeasureString($lastLab, $font).Width, $h - $bottom + 4)
     $lx = $w - $right - $legendW
     $ly = 3 + $lineH * $legendRow
     foreach ($s in $shown) {
@@ -770,14 +815,16 @@ function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt
         }
         $prevT = $null
         foreach ($p in $s.pts) {
-            if ($p.t -lt $tmin) { continue }
+            if ($p.t -lt $t0) { continue }
+            $xv = Pt-XVal $p $useGames
+            if ($null -eq $xv) { continue }
             if ($null -ne $prevT -and ($p.t - $prevT).TotalSeconds -gt $gapSec) {
                 if ($pts.Count -ge 2) { $g.DrawLines($rp, [System.Drawing.PointF[]]$pts.ToArray()) }
                 elseif ($pts.Count -eq 1) { $g.FillEllipse($brush, $pts[0].X - 2, $pts[0].Y - 2, 4, 4) }
                 $pts.Clear()
             }
             $prevT = $p.t
-            $x = $left + $pw * (($p.t - $tmin).TotalSeconds / $span)
+            $x = $left + $pw * (($xv - $xmin) / $xspan)
             $y = $top + $ph * (1 - ($p.y - $ymin) / ($ymax - $ymin))
             [void]$pts.Add((New-Object System.Drawing.PointF([single]$x, [single]$y)))
             if ($null -ne $p.lo -and $null -ne $p.hi) {
@@ -810,7 +857,7 @@ function Get-Metrics([string]$run) {
 }
 function Build-Series([string]$tab) {
     $series = @()
-    $note = ""; $all = $false
+    $note = ""; $all = $false; $xg = $false
     $yfmt = "{0:N0}"; $zero = $true; $title = $tab
     $sel = Selected-Run
     switch ($tab) {
@@ -836,7 +883,7 @@ function Build-Series([string]$tab) {
         }
         "Elo" {
             $title = "強さの推移（Elo。縦線は 95% 区間）"
-            $all = $true
+            $all = $true; $xg = $true
             $i = 0
             foreach ($r in $Runs) {
                 $s = New-Series ($r + " 基準比") (Run-Color $r $i) $true
@@ -844,7 +891,7 @@ function Build-Series([string]$tab) {
                     foreach ($a in @($script:Data[$r].anchor)) {
                         $lo = Ci-Val $a.ci95 0
                         $hi = Ci-Val $a.ci95 1
-                        Add-Pt $s (From-Unix $a.t) ([double]$a.elo) $lo $hi ("基準比 step " + (Format-Int $a.step))
+                        Add-Pt $s (From-Unix $a.t) ([double]$a.elo) $lo $hi ("基準比 step " + (Format-Int $a.step)) $a.games_at
                     }
                 }
                 $series += $s
@@ -853,7 +900,7 @@ function Build-Series([string]$tab) {
                 if ($script:Data.ContainsKey($r)) {
                     foreach ($e in @($script:Data[$r].evals)) {
                         if ($null -eq $e.cumulative) { continue }
-                        Add-Pt $c (From-Unix $e.time) ([double]$e.cumulative) $null $null "鎖"
+                        Add-Pt $c (From-Unix $e.time) ([double]$e.cumulative) $null $null "鎖" $e.games_at
                     }
                 }
                 $series += $c
@@ -869,7 +916,7 @@ function Build-Series([string]$tab) {
                     $j = 0
                     foreach ($k in ($byRef.Keys | Sort-Object)) {
                         $rs = New-Series ($r + " 対 " + $k) $script:RefPalette[$j % $script:RefPalette.Length] $true ($i -gt 0)
-                        foreach ($e in $byRef[$k]) { Add-Pt $rs (From-Unix $e.t) ([double]$e.elo) (Ci-Val $e.ci95 0) (Ci-Val $e.ci95 1) ("対 " + $k + " step " + (Format-Int $e.step)) }
+                        foreach ($e in $byRef[$k]) { Add-Pt $rs (From-Unix $e.t) ([double]$e.elo) (Ci-Val $e.ci95 0) (Ci-Val $e.ci95 1) ("対 " + $k + " step " + (Format-Int $e.step)) $e.games_at }
                         $series += $rs
                         $j++
                     }
@@ -877,15 +924,16 @@ function Build-Series([string]$tab) {
                 $i++
             }
             $note = "「基準比」の 0 は系列の最初の重み（基準に 85% 勝つと基準を置き換えて差を足す）。「対 …」の 0 はその参照と互角で、基準比とは 0 の意味が違う。全期間を表示"
+            if (-not (Use-GamesAxis)) { $note += "。横軸が時間だと止めた間も伸びが寝て見えるので、ふだんは「総局数」で見る" }
         }
         "対外対局" {
             $title = "外部エンジン（fuseki_usi_server.py = 方策ネット＋やねうら王/水匠5）との勝率"
-            $yfmt = "{0:P0}"; $all = $true
+            $yfmt = "{0:P0}"; $all = $true; $xg = $true
             $i = 0
             foreach ($r in $Runs) {
                 $s = New-Series $r (Run-Color $r $i) $true
                 if ($script:Data.ContainsKey($r)) {
-                    foreach ($m in @($script:Data[$r].matches)) { if ($null -ne $m.winrate) { Add-Pt $s (From-Unix $m.time) ([double]$m.winrate) $null $null ("{0} 局 {1}" -f $m.n, $m.go) } }
+                    foreach ($m in @($script:Data[$r].matches)) { if ($null -ne $m.winrate) { Add-Pt $s (From-Unix $m.time) ([double]$m.winrate) $null $null ("{0} 局 {1}" -f $m.n, $m.go) $m.games_at } }
                 }
                 $series += $s; $i++
             }
@@ -1027,7 +1075,7 @@ function Build-Series([string]$tab) {
     }
     # 5 分ごとの metrics（とコンソールの 30 秒観測）から作る系列は、観測の途切れで線を切る
     if (@("局/日", "学習", "学習目標", "較正", "処理時間", "終局内訳", "手数") -contains $tab) { foreach ($s in $series) { $s.gap = $true } }
-    return @{ title = $title; series = $series; yfmt = $yfmt; zero = $zero; note = $note; all = $all }
+    return @{ title = $title; series = $series; yfmt = $yfmt; zero = $zero; note = $note; all = $all; xgames = ($xg -and (Use-GamesAxis)) }
 }
 
 # グラフは 1 組だけ作り、選んでいる run のタブの下半分（chartSlot）に Move-Charts が付け替える
@@ -1046,6 +1094,15 @@ $cmbRange.SelectedIndex = 1
 $cmbRange.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
 $cmbRange.Add_SelectedIndexChanged({ $tabs.Invalidate($true) })
 $cbar.Controls.Add($cmbRange)
+# Elo と 対外対局 の横軸。既定は総局数（伸びを決めるのは時間ではなく局数。時間だと止めた間も寝て見える）
+$cbar.Controls.Add((New-Label "Elo の横軸" 2))
+$script:cmbAxis = New-Object System.Windows.Forms.ComboBox
+$script:cmbAxis.DropDownStyle = "DropDownList"; $script:cmbAxis.Width = 80
+[void]$script:cmbAxis.Items.AddRange(@("総局数", "時間"))
+$script:cmbAxis.SelectedIndex = 0
+$script:cmbAxis.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
+$script:cmbAxis.Add_SelectedIndexChanged({ $tabs.Invalidate($true) })
+$cbar.Controls.Add($script:cmbAxis)
 $lblChartNote = New-Label "学習・学習目標・較正・処理時間・終局内訳・手数はこのタブの run、ほかは両方" 4
 $lblChartNote.ForeColor = [System.Drawing.Color]::DimGray
 $cbar.Controls.Add($lblChartNote)
@@ -1063,7 +1120,7 @@ foreach ($name in $script:TabNames) {
     $panel.Add_Paint({
         param($s, $e)
         $b = Build-Series ([string]$s.Tag)
-        Draw-Chart $e.Graphics $s.ClientSize.Width $s.ClientSize.Height $b.title $b.series $b.yfmt $b.zero $b.note ([bool]$b.all)
+        Draw-Chart $e.Graphics $s.ClientSize.Width $s.ClientSize.Height $b.title $b.series $b.yfmt $b.zero $b.note ([bool]$b.all) ([bool]$b.xgames)
     })
     $panel.Add_Resize({ param($s, $e) $s.Invalidate() })
     $page.Controls.Add($panel)
@@ -1356,7 +1413,7 @@ function Save-Layout {
     try {
         $b = if ($form.WindowState -eq "Normal") { $form.Bounds } else { $form.RestoreBounds }
         if (-not (Test-Path $script:HistDir)) { [void](New-Item -ItemType Directory -Path $script:HistDir) }
-        $o = @{ x = $b.X; y = $b.Y; w = $b.Width; h = $b.Height; top = $runTabs.SelectedIndex; chart = $tabs.SelectedIndex; range = $cmbRange.SelectedIndex }
+        $o = @{ x = $b.X; y = $b.Y; w = $b.Width; h = $b.Height; top = $runTabs.SelectedIndex; chart = $tabs.SelectedIndex; range = $cmbRange.SelectedIndex; axis = $script:cmbAxis.SelectedIndex }
         ($o | ConvertTo-Json -Compress) | Set-Content -Path $script:LayoutFile -Encoding ASCII
     } catch {}
 }
@@ -1373,6 +1430,7 @@ function Restore-Layout {
         if ($null -ne $o.top -and [int]$o.top -ge 0 -and [int]$o.top -lt $runTabs.TabCount) { $runTabs.SelectedIndex = [int]$o.top }
         if ($null -ne $o.chart -and [int]$o.chart -ge 0 -and [int]$o.chart -lt $tabs.TabCount) { $tabs.SelectedIndex = [int]$o.chart }
         if ($null -ne $o.range -and [int]$o.range -ge 0 -and [int]$o.range -lt $cmbRange.Items.Count) { $cmbRange.SelectedIndex = [int]$o.range }
+        if ($null -ne $o.axis -and [int]$o.axis -ge 0 -and [int]$o.axis -lt $script:cmbAxis.Items.Count) { $script:cmbAxis.SelectedIndex = [int]$o.axis }
     } catch {}
 }
 if ($Tab) {
