@@ -138,6 +138,24 @@ def main(argv: list[str] | None = None) -> int:
     p_sc.add_argument("--cost-per-1m", type=float, default=None, help="100 万局あたりの費用（ドル。既定: measurements.md 2026-09-17 の $8）")
     p_sc.add_argument("--band", default=None, help="Elo が縮まない得点の範囲（lo,hi。既定 0.2,0.8）")
     p_sc.add_argument("--json", action="store_true")
+    p_ab = sub.add_parser("abtest", help="「仮」の設定値のオフライン比較: 保存済みの重みと同じ窓から、学習の設定だけを変えた腕を同じ step 学習し、対局させる（docs/restart-plan.md §0）")
+    p_ab.add_argument("--ckpt", default=None, help="元の重み（既定: <run>/checkpoints/latest.pt。ふつうは checkpoints/archive の節目）")
+    p_ab.add_argument("--arm", action="append", required=True, help="腕: <名前>[:<節>.<鍵>=<値>[,...]]（例 lam05:train.lambda_z=0.5 と lam10:train.lambda_z=1.0）")
+    p_ab.add_argument("--set", action="append", default=[], help="全部の腕に先に当てる上書き（例 train.compile=none）")
+    p_ab.add_argument("--steps", type=int, default=5000, help="腕ごとの学習 step 数")
+    p_ab.add_argument("--games", type=int, default=1000, help="腕どうし・腕対元の重みの対局数（0 で対局しない）")
+    p_ab.add_argument("--sims", type=int, default=96)
+    p_ab.add_argument("--concurrent", type=int, default=64)
+    p_ab.add_argument("--threads", type=int, default=8)
+    p_ab.add_argument("--seed", type=int, default=41, help="腕の間で同じ局面を引く種（対局の種にも使う）")
+    p_ab.add_argument("--positions", type=int, default=4000, help="一般化の物差しで測る局面数")
+    p_ab.add_argument("--log-every", type=int, default=500, help="学習の損失を何 step ごとに出すか")
+    p_ab.add_argument("--no-vs-base", dest="vs_base", action="store_false", help="元の重みとの対局を省く")
+    p_ab.add_argument("--chunk-index", type=int, default=None, help="窓の右端（既定: チェックポイントに保存された値）")
+    p_ab.add_argument("--games-total", type=int, default=None, help="窓の大きさの計算に使う総局数（既定: 同上）")
+    p_ab.add_argument("--config-from", default="ckpt", choices=["ckpt", "run"], help="元にする設定（既定: チェックポイントに保存された設定）")
+    p_ab.add_argument("--device", default=None)
+    p_ab.add_argument("--out", default=None, help="出力先（既定: <root>/experiments/<時刻>-abtest）。稼働中の run には書かない")
     p_rv = sub.add_parser("review", help="物差し M1〜M4（gen・最強比・基準比・参照・局/日）の保存済みの値から「続ける／注意／見直し」を出す（docs/restart-plan.md §3 M6）")
     p_rv.add_argument("--set", action="append", default=[], help="閾値の上書き（name=value。gen_games, gen_min_rise, gen_max_gap, best_stall_alert, reference_games, gpd_min）")
     p_rv.add_argument("--json", action="store_true")
@@ -266,6 +284,24 @@ def main(argv: list[str] | None = None) -> int:
         rows = profile(model, sd.replay, starts, a.n_chunks, a.positions, device, cfg["train"]["lambda_z"], cfg["search"]["policy_topk"],
                        cfg["search"]["max_ply"], cfg["search"]["count_from_41"], a.seed)
         print(json.dumps({"ckpt": str(ckpt), "rows": rows}, ensure_ascii=False) if a.json else f"{ckpt}\n" + format_rows(rows))
+        return 0
+    if a.cmd == "abtest":
+        import time
+
+        import torch
+
+        from .abtest import format_abtest, run_abtest
+        from .config import load_config
+
+        cfg = load_config(sd.config_toml if sd.config_toml.exists() else None)
+        ckpt = Path(a.ckpt).expanduser() if a.ckpt else sd.checkpoints / "latest.pt"
+        out = Path(a.out).expanduser() if a.out else Path(a.root).expanduser() / "experiments" / (time.strftime("%Y%m%d-%H%M%S") + "-abtest")
+        device = torch.device(a.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        res = run_abtest(sd, cfg, ckpt, a.arm, a.set, a.steps, a.games, a.sims, a.concurrent, a.threads, a.seed, a.positions,
+                         a.log_every, a.vs_base, out, device, a.chunk_index, a.games_total, lambda s: print(s, flush=True),
+                         config_from=a.config_from)
+        print(format_abtest(res))
+        print("written:", out / "abtest.json")
         return 0
     if a.cmd == "stop":
         sd.set_flag("STOP")

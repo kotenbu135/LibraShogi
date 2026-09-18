@@ -144,6 +144,25 @@ metrics_points = 120      # metrics.jsonl から残す点の数
 `match` は `~/libra-run/ls/matches/<時刻>.jsonl`（1 局 1 行）と `.summary.json`、USI ログ `.log` を書く。裁定は libra-sim（docs/rules.md）。相手のバージョンとハッシュは docs/protocol.md §5。
 GPU を L-S と共有するので、計測中は ls・lx を停止するか、局/日が落ちることを承知で回す。
 
+## 7.1 設定値のオフライン比較（`libra abtest`）
+
+「仮」のまま残っている学習の設定値（docs/ls2-settings.md の区分「記録なし（仮）」）を決めるための手順（docs/restart-plan.md §0、同 §6 の段の条件）。
+**保存済みの重みと、その重みが持っていた窓**から、設定だけを変えた「腕」を同じ step だけ学習し、腕どうしと元の重みを対局させる。
+
+```bash
+# 布石の価値目標 λ（0.5 = z と V̂41 の平均 / 1.0 = 実際の勝敗 z だけ）を、最新の archive から比べる
+~/LibraShogi/bin/libra abtest --ckpt ~/libra-run/ls/checkpoints/archive/ckpt_000062426.pt \
+  --arm lam05:train.lambda_z=0.5 --arm lam10:train.lambda_z=1.0 --steps 5000 --games 1000
+```
+
+- 稼働中の run には**書かない**（リプレイと重みを読むだけ）。出力は `~/libra-run/experiments/<時刻>-abtest/`（`abtest.json` と腕ごとの `.pt`）。
+- 腕の間で**学習する局面と鏡映は 1 バッチずつ同じ**（同じ seed のサンプラ）。違うのは設定だけになる。
+- 窓の位置（`chunk_index`）と総局数はチェックポイントに保存された値を使う（＝その節目の窓）。`--chunk-index` / `--games-total` で変えられる。
+- 一般化の物差しは 2 通り出る。`gen_z` は目標を λ = 1.0（実際の勝敗）にして測った値で**腕の間で比べられる**もの、`gen_own` は腕自身の λ で測った値（学習の損失と同じ物差し）。
+- 対局は評価ハーネス（`libra eval` と同じ条件、読み 96・根のノイズあり）。`--games 0` で学習と物差しだけ。
+- 目安の時間（RTX 5070 Ti を専有、窓 47 万局、5,000 step、1,000 局 × 3）: 窓の読み込み 1〜2 分、腕 1 つの学習 約 11 分、対局 1 本 約 8 分で**合わせて 1 時間前後**。GPU を使うので、回す間は ls・lx を停止する（CLAUDE.md「稼働中のランの扱い」）。
+- 扱うのは学習側（`[train]`）の設定。探索（`[search]`）の設定は窓の中の棋譜と方策の目標を作り直さないと比べられないので、この命令では変えても意味がない。
+
 ## 8. desktop で Libra と指す（自分で体感する）
 
 desktop（天秤将棋GUI 0.10.3、`%LOCALAPPDATA%\天秤将棋GUI\tenbin-shogi-gui.exe`）には Windows 版 `libra.exe` を「LibraShogi 0.0.2」として登録済み（`%APPDATA%\com.fusekishogi.tenbin\engines\libra\engine\`。モデルは同じフォルダの `libra.onnx`）。2026-09-14 から DirectML 版の DLL（`onnxruntime.dll` 1.24.4・`DirectML.dll`）に差し替え、GPU で読む（`isready` で `info string … provider dml`）。以前の CPU 版は同じフォルダの `*.cpu-prev`、以前の exe は `libra.exe.prev`。学習中の ls・lx と GPU を共有するので、desktop で読ませている間は局/日が少し落ちる。 desktop 0.10.0 から、布石に対応したエンジンは本将棋（41 手目以降）の席にも選べるので、**1 回の登録で 1 手目から終局まで指せる**（布石と本将棋の両方に「LibraShogi」を選ぶ。同じ id なので 1 本のプロセスが続けて指す）。GUI が終局（千日手・入玉宣言・手数上限）を裁き、宣言できるエンジンには毎手 `Declare_Win=true` を送る（docs/protocol.md §1）。天秤将棋の両玉と先後の選択も Libra の `scale.json` と `winrate` で決まる（同 §2）。
