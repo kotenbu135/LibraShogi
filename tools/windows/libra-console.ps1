@@ -86,6 +86,8 @@ $script:TabState = @{}  # 上のタブの Tag -> @{text; color}（見出しの�
 $script:TaskNames = @{ ls = "LibraShogi run"; lx = "LibraShogi run lx" }
 $script:Colors = @{ ls = [System.Drawing.Color]::FromArgb(31, 119, 180); lx = [System.Drawing.Color]::FromArgb(255, 127, 14) }
 $script:Palette = @([System.Drawing.Color]::FromArgb(31, 119, 180), [System.Drawing.Color]::FromArgb(255, 127, 14), [System.Drawing.Color]::FromArgb(44, 160, 44), [System.Drawing.Color]::FromArgb(148, 103, 189), [System.Drawing.Color]::FromArgb(214, 39, 40))
+# 固定の参照の系列の色。Run-Color は run に色が決まっていれば $i を見ないので、参照を run の色で描くと基準比と重なって見分けが付かない
+$script:RefPalette = @([System.Drawing.Color]::FromArgb(44, 160, 44), [System.Drawing.Color]::FromArgb(148, 103, 189), [System.Drawing.Color]::FromArgb(214, 39, 40), [System.Drawing.Color]::FromArgb(140, 86, 75), [System.Drawing.Color]::FromArgb(227, 119, 194), [System.Drawing.Color]::FromArgb(23, 190, 207))
 $script:HistDir = Join-Path $env:LOCALAPPDATA "LibraShogi"
 $script:HistFile = Join-Path $script:HistDir "console-history.csv"
 $script:Hist = @{}      # run -> ArrayList（コンソール自身の観測: t, games, step, gpd。実測 局/日 に使う）
@@ -137,6 +139,54 @@ function Ci-Val($ci, [int]$i) {
     $a = @($ci)
     if ($a.Count -le $i -or $null -eq $a[$i]) { return $null }
     return [double]$a[$i]
+}
+
+# ---- Elo の文言（純関数。tools/windows/tests/console-format.tests.ps1 が AST で取り出して試す） ----
+function Format-Ci($ci) {
+    $lo = Ci-Val $ci 0; $hi = Ci-Val $ci 1
+    if ($null -eq $lo -or $null -eq $hi) { return "" }
+    return " [{0:+0;-0;0}, {1:+0;-0;0}]" -f $lo, $hi
+}
+function Format-Pct($score) {
+    # {0:P0} は地域によって「83 %」と空白が入る。日本語の文なので空白を入れない形に固定する
+    if ($null -eq $score) { return "-" }
+    return ("{0}%" -f [Math]::Round([double]$score * 100))
+}
+function Format-Saturated($score) {
+    # 得点が 15%〜85% の外だと差が開きすぎて、Elo の値も区間も当てにならない（docs/scaling-2026-09-18.md の「天井」）
+    if ($null -eq $score) { return "" }
+    $s = [double]$score
+    if ($s -ge 0.85 -or $s -le 0.15) { return "・天井" }
+    return ""
+}
+function Format-Elo-Anchor($row) {
+    # 基準比。どの step を測った値かを頭に出す（今の step とは違うことが多い）
+    if ($null -eq $row) { return $null }
+    return "step {0} で {1:+0.0;-0.0;0}{2}（基準 step {3} に {4}{5}、{6}）" -f (Format-Int $row.step), [double]$row.elo, (Format-Ci $row.ci95),
+        (Format-Int $row.anchor_step), (Format-Pct $row.score_new), (Format-Saturated $row.score_new), (Format-Ago (From-Unix $row.t))
+}
+function Format-Elo-Best($row) {
+    # 最強比。best_step は「打った相手（そのときの最強）」で、更新していれば今の最強は row.step のほう
+    if ($null -eq $row) { return $null }
+    $tail = if ($row.improved) { "最強を更新" } else { "最強を抜けず、足踏み {0} 回" -f $row.stall }
+    return "最強比 {0:+0.0;-0.0;0}{1}（step {2} が step {3} に {4}{5}で{6}、{7}）" -f [double]$row.elo_vs_best, (Format-Ci $row.ci95),
+        (Format-Int $row.step), (Format-Int $row.best_step), (Format-Pct $row.score_new), (Format-Saturated $row.score_new), $tail, (Format-Ago (From-Unix $row.t))
+}
+function Format-Elo-References($rows) {
+    # 固定の参照は run をまたいで同じ相手なので絶対の物差しになる（docs/restart-plan.md §3 M4）。参照ごとに最新の 1 行だけ出す
+    $last = [ordered]@{}
+    foreach ($e in @($rows)) {
+        if ($null -eq $e -or $null -eq $e.elo) { continue }
+        $last[[string]$e.ref] = $e
+    }
+    $out = @()
+    foreach ($k in (@($last.Keys) | Sort-Object)) {
+        $e = $last[$k]
+        $out += "対 {0} {1:+0.0;-0.0;0}{2}（step {3}、{4}{5}、{6}）" -f $k, [double]$e.elo, (Format-Ci $e.ci95),
+            (Format-Int $e.step), (Format-Pct $e.score_new), (Format-Saturated $e.score_new), (Format-Ago (From-Unix $e.t))
+    }
+    if ($out.Count -eq 0) { return $null }
+    return ($out -join "`r`n")
 }
 
 # ---- WSL 呼び出し ----
@@ -547,7 +597,7 @@ $script:Keys = @(
     @("gpd", "局/日（1 時間平均）"), @("measured", "局/日（実測）"), @("active", "同時局数"), @("elapsed", "稼働 / セッション局数"),
     @("results", "先手 / 引分 / 後手"), @("plies", "平均手数 / sims/手"), @("loss", "loss / policy / value"),
     @("lr", "lr / 学習 1 回"), @("gpu", "GPU メモリ"), @("ckpt", "最終チェックポイント"), @("exploiter", "対本体 勝率"), @("restarts", "再起動"),
-    @("elo", "強さ（基準比 Elo）"), @("match", "対外対局 勝率"), @("auto", "自動計測")
+    @("elo", "強さ（基準比 Elo）"), @("reference", "強さ（固定の参照 Elo）"), @("match", "対外対局 勝率"), @("auto", "自動計測")
 )
 function New-RunPanel([string]$run) {
     # 上から 状態の表 / ボタン / グラフ（Move-Charts が選んでいる run の chartSlot に付け替える。log.txt の末尾はグラフの「ログ」タブ）
@@ -785,7 +835,7 @@ function Build-Series([string]$tab) {
             }
         }
         "Elo" {
-            $title = "強さの推移（Elo。0 は系列の最初の基準。実線は固定の基準との差、薄い点線は前の世代との差を足した鎖）"
+            $title = "強さの推移（Elo。縦線は 95% 区間）"
             $all = $true
             $i = 0
             foreach ($r in $Runs) {
@@ -809,17 +859,24 @@ function Build-Series([string]$tab) {
                 $series += $c
                 # 固定の参照（[auto] reference_ckpts）との差。run をまたいで同じ相手なので絶対の物差しになる（docs/restart-plan.md §3 M4）
                 if ($script:Data.ContainsKey($r)) {
+                    # 参照ごとに RefPalette の色を割り当てる（run の色で描くと基準比と同じ青になって見分けが付かない）。run が 2 つ目以降なら破線
                     $byRef = @{}
                     foreach ($e in @($script:Data[$r].reference)) {
                         if ($null -eq $e.elo) { continue }
-                        if (-not $byRef.ContainsKey([string]$e.ref)) { $byRef[[string]$e.ref] = New-Series ($r + " 対 " + [string]$e.ref) ([System.Drawing.Color]::FromArgb(180, (Run-Color $r ($i + 3)))) $false }
-                        Add-Pt $byRef[[string]$e.ref] (From-Unix $e.t) ([double]$e.elo) (Ci-Val $e.ci95 0) (Ci-Val $e.ci95 1) ("対 " + [string]$e.ref + " step " + (Format-Int $e.step))
+                        if (-not $byRef.ContainsKey([string]$e.ref)) { $byRef[[string]$e.ref] = (New-Object System.Collections.ArrayList) }
+                        [void]$byRef[[string]$e.ref].Add($e)
                     }
-                    foreach ($k in ($byRef.Keys | Sort-Object)) { $series += $byRef[$k] }
+                    $j = 0
+                    foreach ($k in ($byRef.Keys | Sort-Object)) {
+                        $rs = New-Series ($r + " 対 " + $k) $script:RefPalette[$j % $script:RefPalette.Length] $true ($i -gt 0)
+                        foreach ($e in $byRef[$k]) { Add-Pt $rs (From-Unix $e.t) ([double]$e.elo) (Ci-Val $e.ci95 0) (Ci-Val $e.ci95 1) ("対 " + $k + " step " + (Format-Int $e.step)) }
+                        $series += $rs
+                        $j++
+                    }
                 }
                 $i++
             }
-            $note = "基準比が主（1 日 1 回、縦線は 95% 区間）。基準に 85% 勝つと基準を置き換えて差を足す。「対 …」は固定の参照との差。全期間を表示"
+            $note = "「基準比」の 0 は系列の最初の重み（基準に 85% 勝つと基準を置き換えて差を足す）。「対 …」の 0 はその参照と互角で、基準比とは 0 の意味が違う。全期間を表示"
         }
         "対外対局" {
             $title = "外部エンジン（fuseki_usi_server.py = 方策ネット＋やねうら王/水匠5）との勝率"
@@ -1425,10 +1482,7 @@ function Update-Panel([string]$run, $obj) {
         $anc = @($d.anchor)
         $chain = @(@($d.evals) | Where-Object { $null -ne $_.cumulative })
         if ($anc.Count -gt 0) {
-            $la = $anc[$anc.Count - 1]
-            $lo = Ci-Val $la.ci95 0; $hi = Ci-Val $la.ci95 1
-            $ci = if ($null -ne $lo -and $null -ne $hi) { " [{0:+0;-0;0}, {1:+0;-0;0}]" -f $lo, $hi } else { "" }
-            $v.elo.Text = "{0:+0.0;-0.0;0}{1}（基準 step {2} に {3:P0}、{4}）" -f [double]$la.elo, $ci, (Format-Int $la.anchor_step), [double]$la.score_new, (Format-Ago (From-Unix $la.t))
+            $v.elo.Text = Format-Elo-Anchor $anc[$anc.Count - 1]
         } elseif ($chain.Count -gt 0) {
             $le = $chain[$chain.Count - 1]
             # eval の ci95 は a−b の区間。鎖は b−a を足すので、符号を反転して上下を入れ替える
@@ -1436,14 +1490,12 @@ function Update-Panel([string]$run, $obj) {
             $ci = if ($null -ne $aLo -and $null -ne $aHi) { " [{0:+0;-0;0}, {1:+0;-0;0}]" -f (-$aHi), (-$aLo) } else { "" }
             $v.elo.Text = "鎖 {0:+0.0;-0.0;0}（前回 {1:+0.0;-0.0;0}{2}、step {3}→{4}、{5}）" -f [double]$le.cumulative, (-[double]$le.elo), $ci, (Format-Int $le.step_a), (Format-Int $le.step_b), (Format-Ago (From-Unix $le.time))
         } else { $v.elo.Text = "（まだ無い。archive {0} 個）" -f @($d.archives).Count }
-        # 最強比（[auto] best_games）: 最強の step と足踏みの回数（docs/restart-plan.md §3 M2）
+        # 最強比（[auto] best_games）: どの step が、そのときの最強だった step に勝ったか（docs/restart-plan.md §3 M2）
         $bs = @($d.best)
-        if ($bs.Count -gt 0) {
-            $lb = $bs[$bs.Count - 1]
-            $bLo = Ci-Val $lb.ci95 0; $bHi = Ci-Val $lb.ci95 1
-            $bci = if ($null -ne $bLo -and $null -ne $bHi) { " [{0:+0;-0;0}, {1:+0;-0;0}]" -f $bLo, $bHi } else { "" }
-            $v.elo.Text += ("`r`n最強比 {0:+0.0;-0.0;0}{1}（最強 step {2}、{3}）" -f [double]$lb.elo_vs_best, $bci, (Format-Int $lb.best_step), $(if ($lb.improved) { "更新" } else { "足踏み " + [string]$lb.stall + " 回" }))
-        }
+        if ($bs.Count -gt 0) { $v.elo.Text += "`r`n" + (Format-Elo-Best $bs[$bs.Count - 1]) }
+        # 固定の参照（[auto] reference_ckpts）: 基準比と違って相手が動かないので、世代をまたいで比べられる（同 §3 M4）
+        $refText = Format-Elo-References $d.reference
+        $v.reference.Text = if ($null -ne $refText) { $refText } else { "（まだ無い）" }
         $ms = @($d.matches)
         if ($ms.Count -gt 0) {
             $lm = $ms[$ms.Count - 1]
@@ -1452,6 +1504,7 @@ function Update-Panel([string]$run, $obj) {
         # 自動計測が無効で結果も無い run（搾取者）では強さ・対外対局の行を隠す
         $autoCfgOn = ($null -ne $d.auto_cfg -and $d.auto_cfg.enabled)
         Set-RowVisible $u "elo" ($autoCfgOn -or $anc.Count -gt 0 -or $chain.Count -gt 0)
+        Set-RowVisible $u "reference" ($null -ne $refText)
         Set-RowVisible $u "match" ($autoCfgOn -or $ms.Count -gt 0)
         $au = $d.auto; $ac = $d.auto_cfg
         if ($null -eq $ac -or -not $ac.enabled) { $v.auto.Text = "無効（config.toml の [auto]）" }
