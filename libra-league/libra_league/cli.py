@@ -142,6 +142,10 @@ def main(argv: list[str] | None = None) -> int:
     p_sc.add_argument("--cost-per-1m", type=float, default=None, help="100 万局あたりの費用（ドル。既定: measurements.md 2026-09-17 の $8）")
     p_sc.add_argument("--band", default=None, help="Elo が縮まない得点の範囲（lo,hi。既定 0.2,0.8）")
     p_sc.add_argument("--json", action="store_true")
+    p_rt = sub.add_parser("rating", help="記録した対局を全部まとめて 1 本の Elo の目盛りにする（Bradley-Terry。参照を入れ替えても鎖を継ぎ足さない）")
+    p_rt.add_argument("--anchor", default=None, help="0 Elo に置く点（既定: いちばん古い step）")
+    p_rt.add_argument("--curve", action="store_true", help="総局数に対する伸び（2 倍あたりの Elo）も出す")
+    p_rt.add_argument("--json", action="store_true")
     p_ab = sub.add_parser("abtest", help="「仮」の設定値のオフライン比較: 保存済みの重みと同じ窓から、学習の設定だけを変えた腕を同じ step 学習し、対局させる（docs/restart-plan.md §0）")
     p_ab.add_argument("--ckpt", default=None, help="元の重み（既定: <run>/checkpoints/latest.pt。ふつうは checkpoints/archive の節目）")
     p_ab.add_argument("--arm", action="append", required=True, help="腕: <名前>[:<節>.<鍵>=<値>[,...]]（例 lam05:train.lambda_z=0.5 と lam10:train.lambda_z=1.0）")
@@ -258,6 +262,29 @@ def main(argv: list[str] | None = None) -> int:
         band = BAND if a.band is None else tuple(float(x) for x in a.band.split(","))
         r = scaling(sd, a.cost_per_1m if a.cost_per_1m is not None else COST_PER_1M_USD, band)
         print(json.dumps(r, ensure_ascii=False) if a.json else render(r))
+        return 0
+    if a.cmd == "rating":
+        from .rating import curve as rating_curve
+        from .rating import rating, render as rating_render
+
+        r = rating(sd, a.anchor)
+        if a.curve:
+            r["curve"] = rating_curve(sd, r)
+        if a.json:
+            print(json.dumps(r, ensure_ascii=False))
+        else:
+            print(rating_render(r))
+            c = r.get("curve")
+            if c and c.get("fit"):
+                print("")
+                print(f"== 総局数に対する伸び（土台 {c['anchor']}）==")
+                for p_ in c["points"]:
+                    print(f"{p_['games']:>11,} | {p_['elo']:+8.1f} | {p_['node']}")
+                for iv in c["intervals"]:
+                    print(f"  {iv['games_from']:>9,} → {iv['games_to']:>9,}  {iv['d_elo']:+7.1f} Elo"
+                          f"  2 倍あたり {iv['elo_per_doubling']:+7.1f}")
+                f_ = c["fit"]
+                print(f"  {f_['n']} 点の当てはめ: {f_['elo_per_doubling']:+.1f} Elo / 2 倍（残差 {f_['rms_resid']}）")
         return 0
     if a.cmd == "review":
         from .review import format_review, review

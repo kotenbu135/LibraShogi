@@ -379,6 +379,40 @@ def test_reference_evals_against_fixed_checkpoints(tmp_path):
     assert tomllib.loads(dump_toml(jobs.cfg))["auto"]["reference_ckpts"] == [str(ref), str(tmp_path / "missing.pt")]
 
 
+def test_reference_rotates_when_it_is_beaten_too_often(tmp_path):
+    """参照に勝ちすぎたら自動で外し、代わりに**今の重みの archive** を参照にする（物差しの自動調整）。
+
+    2026-09-18 の 120 万局で、古い参照が勝率 83〜90% の天井に着いて伸びが見えなくなったため。
+    入れ替え先をこの run 自身の archive にすると、足した時点では自分自身（＝互角）なので、
+    古い参照が既に天井でも目盛りが必ずつながる。"""
+    from libra_league.auto import collect_reference
+
+    (tmp_path / "refs").mkdir()
+    old = tmp_path / "refs" / "old.pt"
+    old.write_bytes(b"r")
+    sd, jobs, state = _anchor_jobs(tmp_path, anchor_games=0, reference_games=200, reference_ckpts=[str(old)],
+                                   reference_rotate=0.8)
+    # 得点 0.7 では外さない
+    _archive(sd, jobs, 1000, 1000.0, elo=-150.0, score=0.3)
+    assert state["auto"]["references"] == [str(old)] and state["auto"]["references_retired"] == []
+    # 得点 0.85（新しい側から見て）で天井。step 2000 の archive に入れ替わる
+    _archive(sd, jobs, 2000, 1000.0 + 3600, elo=-300.0, score=0.15)
+    new_ref = sd.root / "checkpoints" / "archive" / "ckpt_000002000.pt"
+    assert state["auto"]["references"] == [str(new_ref)]
+    assert state["auto"]["references_retired"] == [str(old)]
+    # 次の節目は新しい参照とだけ打つ（外した参照の過去の行は残る）
+    _archive(sd, jobs, 3000, 1000.0 + 7200, elo=-100.0, score=0.35)
+    rows = collect_reference(sd)
+    assert [r["ref"] for r in rows] == ["old.pt", "old.pt", "ckpt_000002000.pt"]
+    # 入れ替えの記録が残る
+    import json as _json
+    log = [_json.loads(x) for x in (sd.root / "eval" / "references.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert log == [{"t": log[0]["t"], "step": 2000, "out": "old.pt", "in": "ckpt_000002000.pt",
+                    "score_new": 0.85, "threshold": 0.8}]
+    # 自動で外した参照は、設定に残っていても戻さない
+    assert jobs.active_references() == [str(new_ref)]
+
+
 def test_every_games_triggers_by_games_not_time(tmp_path):
     """every_games > 0 なら、総局数がその分たまるごとに archive と計測を積む（時間は見ない）。行には games が入る。"""
     from libra_league.auto import collect_best

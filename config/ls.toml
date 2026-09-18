@@ -88,7 +88,9 @@ best_stall_alert = 3
 # 3 つ目は 80 万局の archive。これから主に使う参照で、80% を超えたら次の archive を足して外す
 reference_ckpts = ["~/libra-run/experiments/2026-09-17-window/win1m.pt", "~/libra-run/ls/checkpoints/archive/ckpt_000062426.pt"]
 reference_games = 200
-match_games = 10             # 外部の AI との計測は得点 0 に張り付くので煙テストでは回さない。本番で 10 に戻す
+reference_rotate = 0.8      # 参照に 80% 以上勝ったら自動で外し、そのときの archive を参照にする（2026-09-18。手で入れ替えなくても物差しが天井に着かない）
+reference_min = 1
+match_games = 40             # 10 → 40（2026-09-18 のユーザーの指示「増やす」）。外部の相手はじゃんけんの影響を受けない唯一の物差しで、10 局では 7 点と 9 点の差が偶然の範囲だったため
 
 [workers]
 enabled = true              # vast.ai の自己対局ワーカーの局を取り込む（2026-09-17、煙テストの短縮。ユーザーの決定）。検査はブリッジが inbox に置く前に行う

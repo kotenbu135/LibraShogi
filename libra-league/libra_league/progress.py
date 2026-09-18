@@ -112,6 +112,16 @@ def snapshot(sd: StateDir, cfg: dict | None = None, points: int = 120, now: floa
         out["scaling"] = scaling(sd)
     except (OSError, ValueError, KeyError, TypeError, IndexError, ZeroDivisionError) as e:
         out["scaling"] = {"error": f"{type(e).__name__}: {e}"}
+    try:
+        from .rating import curve as rating_curve
+        from .rating import rating
+
+        r = rating(sd)
+        r["curve"] = rating_curve(sd, r)
+        r["pairs"] = (r.get("pairs") or [])[:5]      # ずれの大きい組だけ残す（全部だと長い）
+        out["rating"] = r
+    except (OSError, ValueError, KeyError, TypeError, IndexError, ZeroDivisionError, StopIteration) as e:
+        out["rating"] = {"error": f"{type(e).__name__}: {e}"}
     return scrub(out)
 
 
@@ -158,6 +168,15 @@ def format_md(s: dict) -> str:
                  f"（帯の中の {_fmt(curve.get('n'))} 点、残差 {_fmt(curve.get('rms_resid'))}） |")
         L.append(f"| 100 万局の買い足しの見込み | {_fmt(outlook.get('next_1m_elo'), plus=True)} Elo"
                  f"（2 倍 ＝ +{_fmt(outlook.get('double_games'))} 局で ${_fmt(outlook.get('double_cost_usd'), 2)}、1 Elo あたり ${_fmt(outlook.get('usd_per_elo'), 3)}） |")
+    rt = s.get("rating") or {}
+    rc = (rt.get("curve") or {}).get("fit")
+    if rc:
+        L.append(f"| 全部の対局から出した伸び | {_fmt(rc.get('elo_per_doubling'), plus=True)} Elo / 2 倍"
+                 f"（{_fmt(rc.get('n'))} 点、残差 {_fmt(rc.get('rms_resid'))}。Bradley-Terry） |")
+    rf = rt.get("fit") or {}
+    if rf.get("chi2_per_df") is not None:
+        L.append(f"| じゃんけん度（当てはまり） | χ²/自由度 {_fmt(rf.get('chi2_per_df'), 2)}"
+                 f"（1 なら Elo の 1 本の目盛りで説明できる。{_fmt(rf.get('n_pairs'))} 組・{_fmt(rf.get('n_nodes'))} 点） |")
     rv = s.get("review") or {}
     if rv.get("items"):
         L += ["", f"## 物差しの判定: {rv.get('verdict')}", ""]

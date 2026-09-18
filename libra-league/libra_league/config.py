@@ -111,6 +111,9 @@ DEFAULTS: dict[str, Any] = {
              "best_games": 0, "best_stall_alert": 3,
              # 固定の参照（同 M4）: run をまたいで同じ重み（例: 旧 ls の 646,699 と実験の win1m.pt）と reference_games 局ずつ打つ。空で無効
              "reference_ckpts": [], "reference_games": 0,
+             # 参照に勝ちすぎたら自動で外し、そのときの archive を参照にする（0 で無効。docs/runbook.md §6）。
+             # 勝率が 1 に寄ると Elo が縮み、伸びていても曲線が寝て見えるため
+             "reference_rotate": 0.0, "reference_min": 1,
              # match_opponent_opt: 相手のルールの版は既定が変わっても今のルール（二飛香）で指させるため明示する（decisions.md 2026-09-13）
              "match_games": 10, "match_go": "movetime 1000", "match_opponent_opt": "Threads=2,Fuseki_Rules=2"},
     # 進捗の書き出し（libra_league/progress.py、docs/runbook.md §6）: 自動計測が動いた節目と heartbeat_minutes ごとに、

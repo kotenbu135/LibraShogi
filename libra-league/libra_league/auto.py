@@ -273,7 +273,8 @@ class AutoJobs:
         """state["auto"]（load() で state が置き換わっても欠けたキーを補う）。"""
         st = self.state.setdefault("auto", {})
         for k, v in (("last_archive", None), ("last_match", None), ("queue", []), ("history", []), ("running", None), ("anchor", None),
-                     ("best", None), ("best_stall", 0), ("last_archive_games", None), ("last_match_games", None)):
+                     ("best", None), ("best_stall", 0), ("last_archive_games", None), ("last_match_games", None),
+                     ("references", []), ("references_retired", []), ("references_seeded", False)):
             st.setdefault(k, v)
         return st
 
@@ -421,9 +422,58 @@ class AutoJobs:
             self.log(f"auto: WARNING best not updated for {row['stall']} evals (best step {best.get('step')}); docs/restart-plan.md §3 M2 の見直し")
 
     # -- 固定の参照（reference、同 §3 M4）: run をまたいで同じ相手と打ち、絶対の物差しにする --
+    def active_references(self) -> list[str]:
+        """今の参照。設定の `reference_ckpts` を種にして state に持ち、勝ちすぎた参照を入れ替えていく
+        （docs/runbook.md §6。手で config を直さなくても物差しが天井に着かないようにする）。"""
+        st = self._st()
+        act = [str(x) for x in (st.get("references") or [])]
+        retired = [str(x) for x in (st.get("references_retired") or [])]
+        seeded = bool(st.get("references_seeded"))
+        for ref in [str(x) for x in (self.acfg.get("reference_ckpts") or []) if str(x).strip()]:
+            # 設定に新しく足された参照だけ取り込む（自動で外したものを設定が書き戻さないように）
+            if ref not in act and (ref not in retired or not seeded):
+                act.append(ref)
+        st["references"] = act
+        st["references_retired"] = retired
+        st["references_seeded"] = True
+        return act
+
+    def rotate_references(self, ref_path: str, step: int | None, score_new: float | None) -> None:
+        """参照に勝ちすぎたら外し、代わりに**今の重みの archive** を参照にする。
+
+        新しい参照をこの run 自身の archive にするのは、足した時点では自分自身（＝互角）なので、
+        古い参照が既に天井に着いていても目盛りが必ずつながるため（docs/scaling-2026-09-18.md §6.5）。"""
+        thr = float(self.acfg.get("reference_rotate", 0.0) or 0.0)
+        if thr <= 0 or score_new is None or float(score_new) <= thr or step is None:
+            return
+        st = self._st()
+        act = self.active_references()
+        if ref_path not in act:
+            return
+        new_ref = self.sd.root / "checkpoints" / "archive" / f"ckpt_{int(step):09d}.pt"
+        if not new_ref.exists():
+            self.log(f"auto: reference {Path(ref_path).name} は得点 {score_new} だが、置き換える archive が無い（{new_ref.name}）")
+            return
+        if str(new_ref) in act:
+            keep_min = max(int(self.acfg.get("reference_min", 1)), 1)
+            if len(act) <= keep_min:
+                return
+            act.remove(ref_path)
+            st["references_retired"] = [*st.get("references_retired", []), ref_path]
+            self.log(f"auto: reference {Path(ref_path).name} を外した（得点 {score_new} > {thr}。代わりは既にある）")
+            return
+        act[act.index(ref_path)] = str(new_ref)
+        st["references_retired"] = [*st.get("references_retired", []), ref_path]
+        st["references"] = act
+        self.log(f"auto: reference {Path(ref_path).name}（得点 {score_new} > {thr}）を {new_ref.name} に入れ替えた")
+        with open(self.sd.root / "eval" / "references.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": time.time(), "step": int(step), "out": Path(ref_path).name,
+                                "in": new_ref.name, "score_new": float(score_new), "threshold": thr},
+                               ensure_ascii=False) + "\n")
+
     def enqueue_references(self, new: Path) -> None:
         games = int(self.acfg.get("reference_games", 0))
-        refs = [str(x) for x in (self.acfg.get("reference_ckpts") or []) if str(x).strip()]
+        refs = self.active_references()
         if games <= 0 or not refs:
             return
         st = self._st()
@@ -453,6 +503,7 @@ class AutoJobs:
         with open(self.sd.root / "eval" / "reference.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
         self.log(f"auto: reference {ref.name} vs step {row['step']}: {row['elo']:+.1f} Elo (new wins {row['score_new']:.0%})")
+        self.rotate_references(str(job.get("ref") or ""), row["step"], row["score_new"])
 
     def enqueue_anchor(self, a: Path, b: Path, anc: dict | None = None, reuse: str | None = None) -> None:
         """基準との対局を積む。積んだときの基準の step と offset をジョブに残す（結果が出る前に先の結果で基準が替わっても、
