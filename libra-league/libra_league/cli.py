@@ -128,6 +128,10 @@ def main(argv: list[str] | None = None) -> int:
     p_pg.add_argument("--points", type=int, default=120, help="metrics.jsonl から残す点の数")
     p_pg.add_argument("--remote", default="origin")
     p_pg.add_argument("--no-push", dest="push", action="store_false", help="コミットまで作って push しない")
+    p_sc = sub.add_parser("scaling", help="局を何倍にすると何 Elo 伸びるかを、固定の参照の保存済みの計測から出す（docs/scaling-2026-09-18.md §4）")
+    p_sc.add_argument("--cost-per-1m", type=float, default=None, help="100 万局あたりの費用（ドル。既定: measurements.md 2026-09-17 の $8）")
+    p_sc.add_argument("--band", default=None, help="Elo が縮まない得点の範囲（lo,hi。既定 0.2,0.8）")
+    p_sc.add_argument("--json", action="store_true")
     p_rv = sub.add_parser("review", help="物差し M1〜M4（gen・最強比・基準比・参照・局/日）の保存済みの値から「続ける／注意／見直し」を出す（docs/restart-plan.md §3 M6）")
     p_rv.add_argument("--set", action="append", default=[], help="閾値の上書き（name=value。gen_games, gen_min_rise, gen_max_gap, best_stall_alert, reference_games, gpd_min）")
     p_rv.add_argument("--json", action="store_true")
@@ -187,6 +191,13 @@ def main(argv: list[str] | None = None) -> int:
         state = sd.read_state() if sd.state_json.exists() else {}
         row = make_row(newest_games(sd.replay, a.games), state.get("step"), state.get("generation"), a.bins)
         print(json.dumps(row, ensure_ascii=False) if a.json else format_table(row))
+        return 0
+    if a.cmd == "scaling":
+        from .scaling import BAND, COST_PER_1M_USD, render, scaling
+
+        band = BAND if a.band is None else tuple(float(x) for x in a.band.split(","))
+        r = scaling(sd, a.cost_per_1m if a.cost_per_1m is not None else COST_PER_1M_USD, band)
+        print(json.dumps(r, ensure_ascii=False) if a.json else render(r))
         return 0
     if a.cmd == "review":
         from .review import format_review, review

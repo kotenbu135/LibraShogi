@@ -106,6 +106,12 @@ def snapshot(sd: StateDir, cfg: dict | None = None, points: int = 120, now: floa
         out["review"] = review(sd, now=now)
     except (OSError, ValueError, KeyError, TypeError, IndexError) as e:  # 物差しが揃う前でも要約は出す
         out["review"] = {"error": f"{type(e).__name__}: {e}"}
+    try:
+        from .scaling import scaling
+
+        out["scaling"] = scaling(sd)
+    except (OSError, ValueError, KeyError, TypeError, IndexError, ZeroDivisionError) as e:
+        out["scaling"] = {"error": f"{type(e).__name__}: {e}"}
     return scrub(out)
 
 
@@ -144,10 +150,20 @@ def format_md(s: dict) -> str:
     for m in (s.get("matches") or [])[-3:]:
         wr = m.get("winrate")
         L.append(f"| 外部計測 {m.get('opponent')} | step {_fmt(m.get('libra_step'))}: 得点 {_fmt(wr, 3)}（{_fmt(m.get('n'))} 局、{m.get('go')}） |")
+    sc = s.get("scaling") or {}
+    curve = (sc.get("curve") or {}).get("fit")
+    outlook = sc.get("outlook")
+    if curve and outlook:
+        L.append(f"| 局を 2 倍にしたときの伸び | {_fmt(curve.get('elo_per_doubling'), plus=True)} Elo / 2 倍"
+                 f"（帯の中の {_fmt(curve.get('n'))} 点、残差 {_fmt(curve.get('rms_resid'))}） |")
+        L.append(f"| 100 万局の買い足しの見込み | {_fmt(outlook.get('next_1m_elo'), plus=True)} Elo"
+                 f"（2 倍 ＝ +{_fmt(outlook.get('double_games'))} 局で ${_fmt(outlook.get('double_cost_usd'), 2)}、1 Elo あたり ${_fmt(outlook.get('usd_per_elo'), 3)}） |")
     rv = s.get("review") or {}
     if rv.get("items"):
         L += ["", f"## 物差しの判定: {rv.get('verdict')}", ""]
         L += [f"- [{i['verdict']}] {i['name']}: {i['why']}" for i in rv["items"]]
+    if sc.get("notes"):
+        L += ["", "## 伸びの曲線の注意", ""] + [f"- {n}" for n in sc["notes"]]
     return "\n".join(L) + "\n"
 
 
