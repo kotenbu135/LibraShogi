@@ -229,8 +229,14 @@ def files_for(sd: StateDir, cfg: dict | None, points: int, subdir: str) -> tuple
     snap = snapshot(sd, cfg, points)
     d = subdir.strip("/")
     pre = f"{d}/" if d else ""
-    return {f"{pre}{sd.root.name}.json": json.dumps(snap, ensure_ascii=False, indent=1) + "\n",
-            f"{pre}{sd.root.name}.md": format_md(snap)}, snap
+    files = {f"{pre}{sd.root.name}.json": json.dumps(snap, ensure_ascii=False, indent=1) + "\n",
+             f"{pre}{sd.root.name}.md": format_md(snap)}
+    # 効いている設定そのもの（ホームは ~ に直す）。外から「今どの設定で動いているか」を読めるようにする
+    if sd.config_toml.exists():
+        from .runconfig import home_to_tilde
+
+        files[f"{pre}{sd.root.name}-config.toml"] = home_to_tilde(sd.config_toml.read_text(encoding="utf-8"))
+    return files, snap
 
 
 def message_for(snap: dict) -> str:

@@ -17,6 +17,7 @@ from libra_net.model import LibraNet, NetConfig
 from .auto import AutoJobs, append_metrics, crossed_games_multiple
 from .progress import Publisher
 from .config import dump_toml, load_config
+from .runconfig import resolve as resolve_config
 from .league import add_result, list_pool, main_winrate, pfsp_pick, pool_name, prune_pool, tag_league_game
 from .looptime import LoopTimer
 from .replay import ReplayBuffer, add_target_stats, summarize_target_stats
@@ -656,14 +657,24 @@ class Runner:
 
 def main_run(root: Path, config_path: Path | None) -> None:
     sd = StateDir(root)
-    cfg_path = config_path if config_path else (sd.config_toml if sd.config_toml.exists() else None)
-    cfg = load_config(cfg_path)
     sd.create()
     lock = sd.root / "run.lock"
     pid = acquire_lock(lock)
     if pid is not None:
         print(f"already running (pid {pid})", file=sys.stderr)
         sys.exit(EXIT_ALREADY_RUNNING)  # 監視役はこれを見て起動し直さない
+    # 設定の正はリポジトリの config/<run-id>.toml（libra_league/runconfig.py、docs/runbook.md §設定の管理）。
+    # `<run>/config.toml` はそこから作り直した写しで、ブリッジやワーカーの束はこれまで通りそれを読む。
+    # 動いているランの config.toml を書き換えないよう、鍵を取ってから作り直す
+    try:
+        cfg, cfg_info = resolve_config(sd, config_path, log=lambda m: (print(m, flush=True), sd.append_log(m)))
+        sd.append_log(f"config: {cfg_info['source']}"
+                      + (f"（{cfg_info['ref']}）" if cfg_info.get("ref") else "")
+                      + ("＋ config.local.toml" if cfg_info.get("local") else ""))
+    except Exception as e:  # 設定の作り直しで落ちるくらいなら、今の config.toml で動かす
+        print(f"config: 作り直しに失敗（{type(e).__name__}: {e}）。今の config.toml を使う", flush=True)
+        sd.append_log(f"config: 作り直しに失敗（{type(e).__name__}: {e}）。今の config.toml を使う")
+        cfg = load_config(sd.config_toml if sd.config_toml.exists() else None)
     try:
         Runner(sd, cfg).run()
     finally:

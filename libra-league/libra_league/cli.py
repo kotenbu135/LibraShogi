@@ -128,6 +128,12 @@ def main(argv: list[str] | None = None) -> int:
     p_pg.add_argument("--points", type=int, default=120, help="metrics.jsonl から残す点の数")
     p_pg.add_argument("--remote", default="origin")
     p_pg.add_argument("--no-push", dest="push", action="store_false", help="コミットまで作って push しない")
+    p_cf = sub.add_parser("config", help="効いている設定と、その出どころ（リポジトリの config/<run-id>.toml）を見る。反映待ちの違いも出す")
+    p_cf.add_argument("--ref", default=None, help="読むところ（既定: origin/main。none で作業ツリーのファイル）")
+    p_cf.add_argument("--repo", default=None, help="リポジトリ（既定: このチェックアウト）")
+    p_cf.add_argument("--adopt", action="store_true", help="今の <run>/config.toml をリポジトリの config/<run-id>.toml に写す（git に入れると、そちらが正になる）")
+    p_cf.add_argument("--force", action="store_true", help="--adopt で既にあるファイルを上書きする")
+    p_cf.add_argument("--json", action="store_true")
     p_sc = sub.add_parser("scaling", help="局を何倍にすると何 Elo 伸びるかを、固定の参照の保存済みの計測から出す（docs/scaling-2026-09-18.md §4）")
     p_sc.add_argument("--cost-per-1m", type=float, default=None, help="100 万局あたりの費用（ドル。既定: measurements.md 2026-09-17 の $8）")
     p_sc.add_argument("--band", default=None, help="Elo が縮まない得点の範囲（lo,hi。既定 0.2,0.8）")
@@ -191,6 +197,36 @@ def main(argv: list[str] | None = None) -> int:
         state = sd.read_state() if sd.state_json.exists() else {}
         row = make_row(newest_games(sd.replay, a.games), state.get("step"), state.get("generation"), a.bins)
         print(json.dumps(row, ensure_ascii=False) if a.json else format_table(row))
+        return 0
+    if a.cmd == "config":
+        from .runconfig import adopt, local_path, repo_config_path, resolve
+
+        if a.adopt:
+            try:
+                p, _ = adopt(sd, Path(a.repo) if a.repo else None, a.force)
+            except (FileExistsError, FileNotFoundError) as e:
+                print(e, file=sys.stderr)
+                return 1
+            print(f"写した: {p}\ngit に入れると、次の起動からそちらが正になる（作業ツリーが古くても origin/main の中身を読む）")
+            return 0
+
+        # 下見なので何も書かず、ランナー向けのログも出さない（この下でまとめて出す）
+        cfg, info = resolve(sd, None, Path(a.repo) if a.repo else None, a.ref, apply=False, log=lambda m: None)
+        if a.json:
+            print(json.dumps({"info": info, "config": cfg}, ensure_ascii=False, default=str))
+            return 0
+        print(f"run: {sd.root}")
+        print(f"設定の正: {info['source']}" + (f"（{info['ref']}）" if info.get("ref") else ""))
+        print(f"リポジトリのファイル: {repo_config_path(sd.root.name, Path(a.repo) if a.repo else None)}")
+        print(f"この PC だけの上書き: {local_path(sd)}" + ("（あり）" if info.get("local") else "（無し）"))
+        if info.get("adopt_hint"):
+            print(f"リポジトリにまだ設定が無い（{info['adopt_hint']}）。`--adopt` で今の設定を写せる")
+        if info["changed"]:
+            print(f"反映待ちの違い {len(info['changed'])} 件（コンソールの停止 → 起動で効く）:")
+            for line in info["changed"]:
+                print(f"  {line}")
+        else:
+            print("反映待ちの違いは無い")
         return 0
     if a.cmd == "scaling":
         from .scaling import BAND, COST_PER_1M_USD, render, scaling

@@ -150,7 +150,8 @@ def dump_toml(cfg: dict[str, Any]) -> str:
             return "true" if v else "false"
         if isinstance(v, (int, float)):
             return repr(v)
-        return '"' + str(v).replace('"', '\\"') + '"'
+        # TOML の基本文字列: 逆斜線を先に、次に引用符を逃がす（Windows の置き場所が入っても壊れない）
+        return '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
     for k, v in cfg.items():
         if not isinstance(v, dict):
