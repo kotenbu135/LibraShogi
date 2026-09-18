@@ -15,6 +15,7 @@ import torch
 from libra_net.model import LibraNet, NetConfig
 
 from .auto import AutoJobs, append_metrics, crossed_games_multiple
+from .progress import Publisher
 from .config import dump_toml, load_config
 from .league import add_result, list_pool, main_winrate, pfsp_pick, pool_name, prune_pool, tag_league_game
 from .looptime import LoopTimer
@@ -64,6 +65,7 @@ class Runner:
         self.openings_mtime: float | None = None
         self.openings_checked = 0.0
         self.auto = AutoJobs(sd, cfg, self.state, self.log)
+        self.progress = Publisher(sd, cfg, self.log)  # 進捗の要約をリポジトリへ（[progress] enabled のとき）
         self.last_metrics = 0.0
         self.last_calib = 0.0
         self.last_gen = 0.0
@@ -641,8 +643,10 @@ class Runner:
             if now - last_status > rr["status_seconds"]:
                 with self.timer.phase("status"):
                     self.write_status()
-                    if self.auto.poll():
+                    changed = self.auto.poll()
+                    if changed:
                         self.sd.write_state(self.state)  # コンソールの「自動計測」欄が実行中/待機を追えるように
+                    self.progress.maybe_publish(now, milestone=changed)
                 last_status = now
             if now - last_ck > rr["checkpoint_minutes"] * 60 or self.auto.games_due(self.replay.total_games):  # 計測の区切り（10 万局など）は待たない
                 with self.timer.phase("checkpoint"):

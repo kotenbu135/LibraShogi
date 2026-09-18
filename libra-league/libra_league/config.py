@@ -113,6 +113,11 @@ DEFAULTS: dict[str, Any] = {
              "reference_ckpts": [], "reference_games": 0,
              # match_opponent_opt: 相手のルールの版は既定が変わっても今のルール（二飛香）で指させるため明示する（decisions.md 2026-09-13）
              "match_games": 10, "match_go": "movetime 1000", "match_opponent_opt": "Threads=2,Fuseki_Rules=2"},
+    # 進捗の書き出し（libra_league/progress.py、docs/runbook.md §6）: 自動計測が動いた節目と heartbeat_minutes ごとに、
+    # 数値の要約を repo の branch へ push する。~/libra-run の値をクラウドのセッションからも読めるようにするため（2026-09-18）。
+    # repo が空ならこのチェックアウト。push には git の認証（gh の credential helper）が要る。
+    "progress": {"enabled": False, "repo": "", "branch": "progress", "dir": "progress", "push": True,
+                 "heartbeat_minutes": 180, "min_seconds": 120, "metrics_points": 120},
 }
 
 

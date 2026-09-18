@@ -32,6 +32,7 @@ docs/libra-local.md §7〜8 の実装。状態はすべて `~/libra-run/<run-id>
 ~/LibraShogi/bin/libra run                 # 起動。前回状態から再開（無ければ新規）。冪等
 ~/LibraShogi/bin/libra stop                # 停止。チェックポイントを書いて終了
 ~/LibraShogi/bin/libra status
+~/LibraShogi/bin/libra progress            # 進み具合の要約（--publish で GitHub の progress ブランチへ）
 ```
 
 **操作は起動（`run`）と停止（`stop`）だけ**（2026-09-14 のユーザーの決定。一時停止・再開は廃止）。GPU や CPU を空けるときも停止し、終わったら起動する。どの順に押しても起動が空振りしないよう、`libra run` は起動前に次をする（log.txt に `start:` 行）:
@@ -99,6 +100,22 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 - **固定の参照（`reference_ckpts`・`reference_games`、同 M4）**: 設定に書いた重みのファイル（例: 旧 ls の 646,699 と実験の win1m.pt）と毎回対局し、`eval/reference.jsonl` に残す。run をまたいで同じ相手なので、絶対の物差しになる。コンソールの Elo タブに「対 <参照>」の線で出る。
 
 同じ周期で `libra match`（`match_games`=10 局、`match_go`="movetime 1000"、相手は fuseki_usi_server.py に `match_opponent_opt`="Threads=2,Fuseki_Rules=2"）も回す。**Libra 側の重みは、その節目に固定したもので打つ**（ジョブを積むときに `--ckpt` へ `checkpoints/archive/ckpt_*.pt`（`match-now` で節目以外のときはその時点の `checkpoints/ckpt_*.pt`）を渡し、同時にその時点の `latest.onnx`（同じチェックポイントの `latest.pt` から書き出した同じ重み）を隣に `ckpt_*.onnx` として写す。1 回あたり約 40 MB。書き出しが古いままで写せなかったときは match が `.pt` から書き出し、`.pt` も回転で消えていたときは最新の重みで打ってログに warning を出す）。`latest.onnx` は中身が動く別名で、計測待ちの間に世代が変わって時系列の比較にならないため（docs/restart-plan.md §7 P2、2026-09-18）。結果の行の step は ONNX の名前から読む。どちらも別プロセス（`auto.log`）で GPU を共有し、結果は `eval/auto-*.json` と `matches/auto-*.summary.json`。前倒しは `libra eval-now` / `libra match-now`（フラグ EVAL_NOW / MATCH_NOW。次のチェックポイントで実行。コンソールの「今すぐ自己評価」「今すぐ対外対局」）。相手側は 41 手目以降を必ずやねうら王（水匠5 の評価関数）に中継するので「方策ネットだけの相手」は無い。ランナーを stop すると実行中のジョブは止め、再開後に積み直す。ランナーが異常終了した場合は、起動し直したランナーが残ったジョブ（孫の相手エンジンを含むプロセス グループ）を止めて積み直す。途中まで書いた出力は `<out>.interrupted` に改名する。
+
+**進捗の書き出し（`[progress]`、既定は無効）**: `~/libra-run` は手元の PC にしか無いので、外（クラウドのセッション、別の端末）からは数値が読めない。`enabled = true` にすると、ランナーは自動計測が動いた節目と `heartbeat_minutes`（180 分）ごとに `libra progress --publish` を別プロセスで起動し、要約を GitHub の `progress` ブランチ（`branch`、`dir` の下）へ push する。
+
+- 置くのは `progress/<run-id>.json`（機械可読。`libra status --json --history` と `libra review --json` を絞ったもの: step・総局数・局/日・窓、`auto` の基準と最強、`best`・`anchor`・`reference` の全行、外部計測の得点、`metrics` の直近 `metrics_points` 点、物差しの判定）と `progress/<run-id>.md`（同じ中身の短い表。GitHub でそのまま読める）。**手で直さない**（次の書き出しで上書きされる）。
+- **絶対パスはファイル名に直し、ホームは `~` にする**（`libra_league/progress.py` の `scrub`）。棋譜・重み・秘密情報は入れない。公開リポジトリなので、足す項目は必ずこの処理を通す。
+- **main と作業ツリーには触れない**。git の下位コマンド（`hash-object` → `update-index` → `write-tree` → `commit-tree`）で作ったコミットを `<commit>:refs/heads/progress` に push するだけなので、稼働中に別の作業をしていても邪魔せず、HEAD もローカルのブランチも動かず、CI も走らない。中身が前回と同じ回は積まない。ほかから同じブランチに push があって弾かれたら、読み直して積み直す（3 回まで、2・4 秒待ち）。
+- push には git の認証が要る（`gh auth setup-git` 済みの credential helper）。手で試すのは `bin/libra progress --out /tmp/x`（書き出すだけ）と `bin/libra progress --publish`。`--no-push` でコミットまで、`--repo` でリポジトリ、`--points` で残す点の数を変えられる。
+- 設定（`~/libra-run/ls/config.toml`）:
+
+```toml
+[progress]
+enabled = true
+branch = "progress"       # main には入れない
+heartbeat_minutes = 180   # 節目が来なくてもこの間隔で書き出す
+metrics_points = 120      # metrics.jsonl から残す点の数
+```
 
 ## 7. 計測（外部エンジンとの対局）
 

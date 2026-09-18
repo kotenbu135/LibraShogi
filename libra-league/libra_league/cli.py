@@ -119,6 +119,15 @@ def main(argv: list[str] | None = None) -> int:
     p_gp.add_argument("--positions", type=int, default=2000)
     p_gp.add_argument("--seed", type=int, default=0)
     p_gp.add_argument("--json", action="store_true")
+    p_pg = sub.add_parser("progress", help="学習の進み具合の要約をリポジトリのファイルに書き出す（--publish で別ブランチへ push。docs/runbook.md §6）")
+    p_pg.add_argument("--out", default=None, help="書き出し先のディレクトリ（既定: 標準出力に JSON を出すだけ）")
+    p_pg.add_argument("--publish", action="store_true", help="リポジトリの --branch に 1 コミット足して push する（作業ツリーと HEAD には触れない）")
+    p_pg.add_argument("--repo", default=None, help="リポジトリ（既定: このチェックアウト）")
+    p_pg.add_argument("--branch", default="progress", help="書き出し先のブランチ（既定: progress。main には入れない）")
+    p_pg.add_argument("--dir", dest="subdir", default="progress", help="ブランチの中のディレクトリ（既定: progress）")
+    p_pg.add_argument("--points", type=int, default=120, help="metrics.jsonl から残す点の数")
+    p_pg.add_argument("--remote", default="origin")
+    p_pg.add_argument("--no-push", dest="push", action="store_false", help="コミットまで作って push しない")
     p_rv = sub.add_parser("review", help="物差し M1〜M4（gen・最強比・基準比・参照・局/日）の保存済みの値から「続ける／注意／見直し」を出す（docs/restart-plan.md §3 M6）")
     p_rv.add_argument("--set", action="append", default=[], help="閾値の上書き（name=value。gen_games, gen_min_rise, gen_max_gap, best_stall_alert, reference_games, gpd_min）")
     p_rv.add_argument("--json", action="store_true")
@@ -290,6 +299,25 @@ def main(argv: list[str] | None = None) -> int:
         out.with_suffix(".summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
         print(json.dumps({k: v for k, v in summary.items() if k != "games"}, ensure_ascii=False))
         print("written:", out)
+        return 0
+    if a.cmd == "progress":
+        from .config import load_config as _lc
+        from .progress import files_for, message_for, publish, repo_root
+
+        cfg = _lc(sd.config_toml if sd.config_toml.exists() else None)
+        files, snap = files_for(sd, cfg, a.points, a.subdir)
+        if a.out:
+            d = Path(a.out)
+            for rel, content in files.items():
+                f = d / Path(rel).name
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text(content, encoding="utf-8")
+                print("written:", f)
+        if a.publish:
+            repo = Path(a.repo) if a.repo else repo_root()
+            publish(repo, a.branch, files, message_for(snap), remote=a.remote, push=a.push)
+        elif not a.out:
+            print(json.dumps(snap, ensure_ascii=False))
         return 0
     if a.cmd == "status":
         st = read_json(sd.status_json)
