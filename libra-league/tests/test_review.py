@@ -59,3 +59,48 @@ def test_review_verdicts(tmp_path, capsys):
     assert out.startswith("review x") and "[注意] M2" in out
     assert main(["--root", str(tmp_path), "--run", "x", "review", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["verdict"] == REVIEW
+
+
+def test_m1_flat_is_ok_and_fall_warns(tmp_path):
+    """M1 は「横ばい」を咎めない（2026-09-19 の切り分け。docs/gen-metric-2026-09-19.md）。
+    見るのは窓の中との差（丸暗記）と、下がっていないかだけ。"""
+    sd = StateDir(tmp_path / "flat")
+    sd.create()
+    now = 100000.0
+
+    def write(series):
+        with open(sd.root / "metrics.jsonl", "w", encoding="utf-8") as f:
+            for i, (w, h) in enumerate(series):
+                g = 1000000 + i * 20000
+                f.write(json.dumps(_gen(now - (len(series) - i) * 600, w, h, g)) + "\n")
+
+    # 1 点ずつのばらつき（±0.02）はあるが横ばい → 続ける。以前の「上がっていない」は出さない
+    flat = [(0.66, 0.655), (0.68, 0.645), (0.65, 0.668), (0.67, 0.648), (0.66, 0.662), (0.65, 0.651),
+            (0.67, 0.659), (0.66, 0.646), (0.68, 0.664), (0.66, 0.653), (0.67, 0.661), (0.66, 0.657)]
+    write(flat)
+    r = review(sd, now=now)["items"][0]
+    assert r["verdict"] == OK and "横ばい" in r["why"], r
+    assert abs(r["values"]["fall"]) < 0.01
+
+    # 端の 1 点だけ低くても裏返らない（中央値で見る）
+    write(flat[:-1] + [(0.66, 0.630)])
+    assert review(sd, now=now)["items"][0]["verdict"] == OK
+
+    # 本当に下がった（-0.05）→ 注意
+    write(flat[:6] + [(0.66, 0.605), (0.65, 0.611), (0.67, 0.603), (0.66, 0.608), (0.67, 0.606), (0.66, 0.604)])
+    r = review(sd, now=now)["items"][0]
+    assert r["verdict"] == WARN and "下がった" in r["why"], r
+
+    # 一度 0.6 を超えた run が 0.6 を割った → 見直し
+    write(flat[:6] + [(0.60, 0.55), (0.59, 0.56), (0.60, 0.55), (0.58, 0.54), (0.59, 0.55), (0.60, 0.56)])
+    r = review(sd, now=now)["items"][0]
+    assert r["verdict"] == REVIEW and "下回った" in r["why"], r
+
+    # まだ一度も 0.6 に届いていない run（学習の初め）は、0.6 未満でも見直しにしない
+    write([(0.30, 0.28), (0.32, 0.30), (0.34, 0.31), (0.36, 0.33), (0.38, 0.35), (0.40, 0.37)])
+    assert review(sd, now=now)["items"][0]["verdict"] == OK
+
+    # 丸暗記（差 0.3）は今までどおり注意
+    write(flat[:6] + [(0.95, 0.65), (0.95, 0.65), (0.95, 0.65), (0.95, 0.65), (0.95, 0.65), (0.95, 0.65)])
+    r = review(sd, now=now)["items"][0]
+    assert r["verdict"] == WARN and "窓の記憶" in r["why"], r

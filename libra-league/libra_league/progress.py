@@ -52,9 +52,14 @@ def _metric_row(r: dict) -> dict:
     out["loss"] = tr.get("loss")
     out["policy_acc"] = tr.get("policy_acc")
     gen = r.get("gen") or {}
+    # 価値の相関だけだと「横ばい」の読み分けができないので、方策の側と布石の側も出す
+    # （2026-09-19: 本将棋の corr_v は結果 z が上限を決めるので上がり続けない。docs/gen-metric-2026-09-19.md）
     for side in ("window", "heldout"):
-        v = ((gen.get(side) or {}).get("normal") or {}).get("corr_v")
-        out[f"gen_{side}_corr_v"] = v
+        g = gen.get(side) or {}
+        out[f"gen_{side}_corr_v"] = (g.get("normal") or {}).get("corr_v")
+        out[f"gen_{side}_policy_acc"] = (g.get("normal") or {}).get("policy_acc")
+        out[f"gen_{side}_policy_ce"] = (g.get("normal") or {}).get("policy_ce")
+        out[f"gen_{side}_fuseki_corr_v"] = (g.get("fuseki") or {}).get("corr_v")
     return out
 
 

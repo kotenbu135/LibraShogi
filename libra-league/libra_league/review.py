@@ -1,7 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """`libra review`: 物差し M1〜M4 の生の値（metrics.jsonl の gen、eval/best.jsonl・anchor.jsonl・reference.jsonl）を読み、
 閾値で「続ける／注意／見直し」を出す（docs/restart-plan.md §3 M6・§7 P4、合否の目安は docs/ls2-settings.md §5）。
-計測は保存済みの値だけを読むので、閾値を変えても再計測は要らない。"""
+計測は保存済みの値だけを読むので、閾値を変えても再計測は要らない。
+
+M1 の読み方（2026-09-19 の切り分け。docs/gen-metric-2026-09-19.md）: held-out の本将棋の corr_v の目標は
+その局の結果 z そのもの（replay.py の `t = np.where(fu, ..., z)`）なので、値の上限は「今の自己対局の
+結果がどれだけ読めるか」で決まり、ネットが強くなっても上がり続けない。試験の問題（held-out の局）も
+20,000 局で入れ替わる（replay.py の heldout_games）。よって**横ばいは異常ではなく、M1 で見るのは
+「窓の中との差（丸暗記）」と「下がっていないか」だけ**にする。伸びているかは M2・M4 と `libra rating` で見る。"""
 from __future__ import annotations
 
 import json
@@ -13,14 +19,27 @@ from .state import StateDir
 
 DEFAULT_THRESHOLDS = {
     "gen_games": 200000,        # gen の伸びを見る窓（局数。時間ではなく局数で区切る: PC の利用状況で局/日が変わるため）
-    "gen_min_rise": 0.0,        # held-out の本将棋の価値の相関が、窓の間にこれ以上上がれば「続ける」
     "gen_max_gap": 0.1,         # 窓の中 − held-out の相関の差がこれを超えたら「注意」（窓の記憶）
+    "gen_max_fall": 0.03,       # held-out の相関が窓の間にこれ以上下がったら「注意」（1 回の計測のばらつき sd 0.013 の約 2 倍）
+    "gen_min_corr": 0.6,        # 一度この線を超えた run で下回ったら「見直し」（docs/restart-plan.md §3 M1）
     "best_stall_alert": 3,      # 最強を更新できない回数がこれ以上なら「見直し」
     "reference_games": 400000,  # 参照との Elo の伸びを見る窓（局数）
     "gpd_min": 0,               # 局/日の下限（0 で見ない）
 }
 
 OK, WARN, REVIEW, NA = "続ける", "注意", "見直し", "まだ無い"
+
+
+def _held(r: dict) -> float | None:
+    return r["gen"]["heldout"]["normal"].get("corr_v")
+
+
+def _window(rows: list[dict], window_games: int) -> list[dict]:
+    """gen の行のうち、最新の局数から window_games 局ぶん。"""
+    if not rows:
+        return rows
+    last = int(rows[-1].get("games_total") or 0)
+    return [r for r in rows if int(r.get("games_total") or 0) >= last - window_games]
 
 
 def _gen_rows(sd: StateDir, window_games: int) -> list[dict]:
@@ -35,10 +54,7 @@ def _gen_rows(sd: StateDir, window_games: int) -> list[dict]:
             continue
         seen.add(key)
         rows.append(r)
-    if not rows:
-        return rows
-    last = int(rows[-1].get("games_total") or 0)
-    return [r for r in rows if int(r.get("games_total") or 0) >= last - window_games]
+    return _window(rows, window_games)
 
 
 def _recent(rows: list[dict], window_games: int) -> list[dict]:
@@ -50,27 +66,45 @@ def _recent(rows: list[dict], window_games: int) -> list[dict]:
     return [r for r in rows if r.get("games") is not None and int(r["games"]) >= int(last) - window_games]
 
 
+def _k(n: int) -> int:
+    """中央値を取る点の数（両端それぞれ）。行が少ないうちは 1 点。"""
+    return max(1, min(3, n // 3))
+
+
+def _med(xs: list) -> float | None:
+    ys = sorted(x for x in xs if x is not None)
+    if not ys:
+        return None
+    return round(ys[len(ys) // 2] if len(ys) % 2 else (ys[len(ys) // 2 - 1] + ys[len(ys) // 2]) / 2, 4)
+
+
 def review(sd: StateDir, thresholds: dict | None = None, now: float | None = None) -> dict:
     th = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
     now = now or time.time()
     out: dict = {"time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)), "run": sd.root.name, "items": []}
 
-    # M1 一般化: held-out の本将棋の価値の相関の伸びと、窓の中との差
-    rows = _gen_rows(sd, int(th["gen_games"]))
+    # M1 一般化: 窓の中との差（丸暗記）と、下がっていないか。伸びは見ない（上の docstring）
+    allrows = _gen_rows(sd, 1 << 62)
+    rows = _window(allrows, int(th["gen_games"]))
     if len(rows) >= 2:
-        first, last = rows[0]["gen"], rows[-1]["gen"]
-        h0, h1 = first["heldout"]["normal"].get("corr_v"), last["heldout"]["normal"].get("corr_v")
-        w1 = last["window"]["normal"].get("corr_v")
-        gap = (w1 - h1) if (w1 is not None and h1 is not None) else None
-        rise = (h1 - h0) if (h0 is not None and h1 is not None) else None
+        h = [_held(r) for r in rows]
+        w1 = rows[-1]["gen"]["window"]["normal"].get("corr_v")
+        h0, h1 = _med(h[:_k(len(h))]), _med(h[-_k(len(h)):])  # 端の 1 点のばらつきで判定が裏返らないよう中央値にする
+        gap = (w1 - h[-1]) if (w1 is not None and h[-1] is not None) else None
+        fall = (h1 - h0) if (h0 is not None and h1 is not None) else None
+        best = max((x for r in allrows if (x := _held(r)) is not None), default=None)  # この run のこれまでの最高
         if gap is not None and gap > th["gen_max_gap"]:
             verdict, why = WARN, f"窓の中との差 {gap:+.3f} が {th['gen_max_gap']} を超えた（窓の記憶）"
-        elif rise is not None and rise < th["gen_min_rise"]:
-            verdict, why = WARN, f"held-out の相関が {int(th['gen_games']):,} 局で {rise:+.3f}（上がっていない）"
+        elif h1 is not None and best is not None and best >= th["gen_min_corr"] > h1:
+            verdict, why = REVIEW, f"held-out の相関 {h1:.3f} が {th['gen_min_corr']}（この run の最高 {best:.3f}）を下回った"
+        elif fall is not None and fall < -th["gen_max_fall"]:
+            verdict, why = WARN, f"held-out の相関が {int(th['gen_games']):,} 局で {fall:+.3f} 下がった"
         else:
-            verdict, why = OK, (f"held-out の相関 {h0} → {h1}（{int(th['gen_games']):,} 局）、窓の中との差 {gap:+.3f}" if gap is not None else f"held-out の相関 {h0} → {h1}")
+            verdict, why = OK, (f"held-out の相関 {h0} → {h1}（{int(th['gen_games']):,} 局。横ばいは想定どおりで、伸びは M2・M4 で見る）、窓の中との差 {gap:+.3f}"
+                                if gap is not None else f"held-out の相関 {h0} → {h1}")
         out["items"].append({"name": "M1 一般化（本将棋の価値の相関）", "verdict": verdict, "why": why,
-                             "values": {"heldout_corr_first": h0, "heldout_corr_last": h1, "window_corr_last": w1, "gap": gap, "n_rows": len(rows)}})
+                             "values": {"heldout_corr_first": h0, "heldout_corr_last": h1, "window_corr_last": w1,
+                                        "gap": gap, "fall": fall, "heldout_corr_best": best, "n_rows": len(rows)}})
     else:
         out["items"].append({"name": "M1 一般化（本将棋の価値の相関）", "verdict": NA, "why": f"gen の行が {len(rows)} 個（{int(th['gen_games']):,} 局の窓）", "values": {}})
 
