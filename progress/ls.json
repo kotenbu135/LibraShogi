@@ -1,0 +1,1573 @@
+{
+ "schema": 1,
+ "run": "ls",
+ "generated": "2026-09-18 09:48:46",
+ "t": 1789692526.7,
+ "process": "running",
+ "flags": [],
+ "now": {
+  "step": 75156,
+  "generation": 87,
+  "games_total": 942237,
+  "games_per_day_1h": 0,
+  "window_games": 471118,
+  "active_games": 512,
+  "elapsed_h": 13.64,
+  "heldout_games": 20000,
+  "status_time": "2026-09-18 09:48:45",
+  "train": null,
+  "gen": null
+ },
+ "auto": {
+  "anchor_step": 28908,
+  "anchor_offset": 658.6,
+  "best_step": 62426,
+  "best_stall": 0,
+  "queue": 0,
+  "running": null,
+  "last_archive_games": 800229
+ },
+ "auto_cfg": {
+  "enabled": true,
+  "every_hours": 0.0,
+  "every_games": 400000,
+  "eval_games": 0,
+  "eval_sims": 96,
+  "anchor_games": 1000,
+  "best_games": 1000,
+  "reference_games": 200,
+  "reference_ckpts": [
+   "ckpt_000646699.pt",
+   "win1m.pt"
+  ],
+  "match_games": 10,
+  "match_go": "movetime 1000"
+ },
+ "best": [
+  {
+   "t": 1789647244.467953,
+   "step": 1416,
+   "games": 34681,
+   "best_step": 402,
+   "n": 1000,
+   "score_new": 0.828,
+   "elo_vs_best": 273.0,
+   "ci95": [
+    245.9,
+    303.2
+   ],
+   "improved": true,
+   "stall": 0
+  },
+  {
+   "t": 1789652537.45003,
+   "step": 8144,
+   "games": 194461,
+   "best_step": 1416,
+   "n": 1000,
+   "score_new": 0.888,
+   "elo_vs_best": 359.7,
+   "ci95": [
+    327.9,
+    396.8
+   ],
+   "improved": true,
+   "stall": 0
+  },
+  {
+   "t": 1789656457.9652581,
+   "step": 13807,
+   "games": 364296,
+   "best_step": 8144,
+   "n": 1000,
+   "score_new": 0.777,
+   "elo_vs_best": 216.8,
+   "ci95": [
+    192.0,
+    243.9
+   ],
+   "improved": true,
+   "stall": 0
+  },
+  {
+   "t": 1789659716.9190521,
+   "step": 21270,
+   "games": 425086,
+   "best_step": 13807,
+   "n": 1000,
+   "score_new": 0.827,
+   "elo_vs_best": 271.8,
+   "ci95": [
+    244.7,
+    301.9
+   ],
+   "improved": true,
+   "stall": 0
+  },
+  {
+   "t": 1789663402.1061437,
+   "step": 28908,
+   "games": 451151,
+   "best_step": 21270,
+   "n": 1000,
+   "score_new": 0.797,
+   "elo_vs_best": 237.6,
+   "ci95": [
+    211.9,
+    265.7
+   ],
+   "improved": true,
+   "stall": 0
+  },
+  {
+   "t": 1789683359.8315272,
+   "step": 62426,
+   "games": 835400,
+   "best_step": 28908,
+   "n": 1000,
+   "score_new": 0.832,
+   "elo_vs_best": 277.9,
+   "ci95": [
+    250.6,
+    308.5
+   ],
+   "improved": true,
+   "stall": 0
+  }
+ ],
+ "anchor": [
+  {
+   "t": 1789649268.8907502,
+   "step": 1416,
+   "games": 91053,
+   "n": 1000,
+   "score_new": 0.828,
+   "anchor_step": 402,
+   "offset": 0.0,
+   "elo_vs_anchor": 273.0,
+   "elo": 273.0,
+   "ci95": [
+    245.9,
+    303.2
+   ]
+  },
+  {
+   "t": 1789654678.0788734,
+   "step": 8144,
+   "games": 288985,
+   "n": 1000,
+   "score_new": 0.885,
+   "anchor_step": 402,
+   "offset": 0.0,
+   "elo_vs_anchor": 354.5,
+   "elo": 354.5,
+   "ci95": [
+    323.0,
+    391.1
+   ]
+  },
+  {
+   "t": 1789658298.631313,
+   "step": 13807,
+   "games": 414962,
+   "n": 1000,
+   "score_new": 0.876,
+   "anchor_step": 402,
+   "offset": 0.0,
+   "elo_vs_anchor": 339.6,
+   "elo": 339.6,
+   "ci95": [
+    309.0,
+    374.9
+   ]
+  },
+  {
+   "t": 1789661835.2511868,
+   "step": 21270,
+   "games": 440084,
+   "n": 1000,
+   "score_new": 0.827,
+   "anchor_step": 8144,
+   "offset": 354.5,
+   "elo_vs_anchor": 271.8,
+   "elo": 626.3,
+   "ci95": [
+    599.2,
+    656.4
+   ]
+  },
+  {
+   "t": 1789665604.6970153,
+   "step": 28908,
+   "games": 466550,
+   "n": 1000,
+   "score_new": 0.852,
+   "anchor_step": 8144,
+   "offset": 354.5,
+   "elo_vs_anchor": 304.1,
+   "elo": 658.6,
+   "ci95": [
+    629.9,
+    691.0
+   ]
+  },
+  {
+   "t": 1789684140.4085836,
+   "step": 62426,
+   "games": 852010,
+   "n": 1000,
+   "score_new": 0.832,
+   "anchor_step": 28908,
+   "offset": 658.6,
+   "elo_vs_anchor": 277.9,
+   "elo": 936.5,
+   "ci95": [
+    909.2,
+    967.1
+   ]
+  }
+ ],
+ "reference": [
+  {
+   "t": 1789643354.9703453,
+   "step": 402,
+   "ref": "ckpt_000646699.pt",
+   "ref_step": 646699,
+   "n": 200,
+   "score_new": 0.145,
+   "elo": -308.2,
+   "ci95": [
+    -389.2,
+    -247.6
+   ]
+  },
+  {
+   "t": 1789643657.1243274,
+   "step": 402,
+   "ref": "win1m.pt",
+   "ref_step": null,
+   "n": 200,
+   "score_new": 0.14,
+   "elo": -315.3,
+   "ci95": [
+    -397.9,
+    -254.1
+   ]
+  },
+  {
+   "t": 1789647575.1481786,
+   "step": 1416,
+   "games": 44123,
+   "ref": "ckpt_000646699.pt",
+   "ref_step": 646699,
+   "n": 200,
+   "score_new": 0.135,
+   "elo": -322.7,
+   "ci95": [
+    -407.0,
+    -260.7
+   ]
+  },
+  {
+   "t": 1789647860.9731584,
+   "step": 1416,
+   "games": 52186,
+   "ref": "win1m.pt",
+   "ref_step": null,
+   "n": 200,
+   "score_new": 0.15,
+   "elo": -301.3,
+   "ci95": [
+    -380.7,
+    -241.4
+   ]
+  },
+  {
+   "t": 1789653017.6553535,
+   "step": 8144,
+   "games": 215639,
+   "ref": "ckpt_000646699.pt",
+   "ref_step": 646699,
+   "n": 200,
+   "score_new": 0.525,
+   "elo": 17.4,
+   "ci95": [
+    -30.8,
+    66.3
+   ]
+  },
+  {
+   "t": 1789653502.2583306,
+   "step": 8144,
+   "games": 237113,
+   "ref": "win1m.pt",
+   "ref_step": null,
+   "n": 200,
+   "score_new": 0.17,
+   "elo": -275.5,
+   "ci95": [
+    -349.5,
+    -217.8
+   ]
+  },
+  {
+   "t": 1789656882.909996,
+   "step": 13807,
+   "games": 381652,
+   "ref": "ckpt_000646699.pt",
+   "ref_step": 646699,
+   "n": 200,
+   "score_new": 0.695,
+   "elo": 143.1,
+   "ci95": [
+    93.3,
+    199.1
+   ]
+  },
+  {
+   "t": 1789657305.5280948,
+   "step": 13807,
+   "games": 397568,
+   "ref": "win1m.pt",
+   "ref_step": null,
+   "n": 200,
+   "score_new": 0.32,
+   "elo": -130.9,
+   "ci95": [
+    -185.9,
+    -81.6
+   ]
+  },
+  {
+   "t": 1789660050.9080915,
+   "step": 21270,
+   "games": 427482,
+   "ref": "ckpt_000646699.pt",
+   "ref_step": 646699,
+   "n": 200,
+   "score_new": 0.785,
+   "elo": 225.0,
+   "ci95": [
+    171.1,
+    290.6
+   ]
+  },
+  {
+   "t": 1789660444.4146874,
+   "step": 21270,
+   "games": 430300,
+   "ref": "win1m.pt",
+   "ref_step": null,
+   "n": 200,
+   "score_new": 0.385,
+   "elo": -81.4,
+   "ci95": [
+    -132.9,
+    -33.1
+   ]
+  },
+  {
+   "t": 1789663732.276462,
+   "step": 28908,
+   "games": 453501,
+   "ref": "ckpt_000646699.pt",
+   "ref_step": 646699,
+   "n": 200,
+   "score_new": 0.83,
+   "elo": 275.5,
+   "ci95": [
+    217.8,
+    349.5
+   ]
+  },
+  {
+   "t": 1789664122.4232533,
+   "step": 28908,
+   "games": 456277,
+   "ref": "win1m.pt",
+   "ref_step": null,
+   "n": 200,
+   "score_new": 0.545,
+   "elo": 31.4,
+   "ci95": [
+    -16.7,
+    80.6
+   ]
+  },
+  {
+   "t": 1789683720.0076613,
+   "step": 62426,
+   "games": 843124,
+   "ref": "ckpt_000646699.pt",
+   "ref_step": 646699,
+   "n": 200,
+   "score_new": 0.9025,
+   "elo": 386.6,
+   "ci95": [
+    317.4,
+    489.4
+   ]
+  },
+  {
+   "t": 1789684140.3971748,
+   "step": 62426,
+   "games": 852010,
+   "ref": "win1m.pt",
+   "ref_step": null,
+   "n": 200,
+   "score_new": 0.8,
+   "elo": 240.8,
+   "ci95": [
+    185.8,
+    308.9
+   ]
+  }
+ ],
+ "matches": [
+  {
+   "file": "auto-20260918-092329.summary.json",
+   "time": 1789692118.331179,
+   "n": 10,
+   "a_points": 7.0,
+   "winrate": 0.7,
+   "opponent": "Tenbin Fuseki Engine 0.1",
+   "go": "movetime 1000",
+   "reasons": {
+    "no_legal_move": 10
+   },
+   "libra_step": 74627,
+   "auto": true
+  }
+ ],
+ "archives": [
+  {
+   "step": 402
+  },
+  {
+   "step": 1416
+  },
+  {
+   "step": 8144
+  },
+  {
+   "step": 13807
+  },
+  {
+   "step": 21270
+  },
+  {
+   "step": 28908
+  },
+  {
+   "step": 62426
+  }
+ ],
+ "metrics": [
+  {
+   "t": 1789642466.0,
+   "step": 0,
+   "games_total": 0,
+   "gpd": 0,
+   "gpd_5m": null,
+   "window": 0,
+   "loss": null,
+   "policy_acc": null,
+   "gen_window_corr_v": null,
+   "gen_heldout_corr_v": null
+  },
+  {
+   "t": 1789643083.9,
+   "step": 423,
+   "games_total": 4873,
+   "gpd": 681483,
+   "gpd_5m": 738940,
+   "window": 4573,
+   "loss": 5.743377208709717,
+   "policy_acc": 0.040441177785396576,
+   "gen_window_corr_v": 0.1826,
+   "gen_heldout_corr_v": 0.1705
+  },
+  {
+   "t": 1789643687.1,
+   "step": 815,
+   "games_total": 9995,
+   "gpd": 707215,
+   "gpd_5m": 757323,
+   "window": 9495,
+   "loss": 5.296970367431641,
+   "policy_acc": 0.06737588346004486,
+   "gen_window_corr_v": 0.1826,
+   "gen_heldout_corr_v": 0.1705
+  },
+  {
+   "t": 1789644297.7,
+   "step": 1200,
+   "games_total": 15507,
+   "gpd": 830094,
+   "gpd_5m": 830174,
+   "window": 14696,
+   "loss": 5.059017658233643,
+   "policy_acc": 0.08041957765817642,
+   "gen_window_corr_v": 0.2677,
+   "gen_heldout_corr_v": 0.3172
+  },
+  {
+   "t": 1789644858.2,
+   "step": 1434,
+   "games_total": 19000,
+   "gpd": 0,
+   "gpd_5m": 92903,
+   "window": 17900,
+   "loss": null,
+   "policy_acc": null,
+   "gen_window_corr_v": null,
+   "gen_heldout_corr_v": null
+  },
+  {
+   "t": 1789645487.6,
+   "step": 1650,
+   "games_total": 22211,
+   "gpd": 440823,
+   "gpd_5m": 281697,
+   "window": 20911,
+   "loss": 4.3964128494262695,
+   "policy_acc": 0.20522387325763702,
+   "gen_window_corr_v": 0.3255,
+   "gen_heldout_corr_v": 0.3152
+  },
+  {
+   "t": 1789646095.1,
+   "step": 1773,
+   "games_total": 24002,
+   "gpd": 349411,
+   "gpd_5m": 273855,
+   "window": 22702,
+   "loss": 4.394402027130127,
+   "policy_acc": 0.19243986904621124,
+   "gen_window_corr_v": 0.3255,
+   "gen_heldout_corr_v": 0.3152
+  },
+  {
+   "t": 1789646701.8,
+   "step": 2012,
+   "games_total": 27455,
+   "gpd": 396245,
+   "gpd_5m": 724239,
+   "window": 25955,
+   "loss": 4.332117557525635,
+   "policy_acc": 0.1672862470149994,
+   "gen_window_corr_v": 0.3255,
+   "gen_heldout_corr_v": 0.3152
+  },
+  {
+   "t": 1789647304.5,
+   "step": 2595,
+   "games_total": 36413,
+   "gpd": 615012,
+   "gpd_5m": 1766831,
+   "window": 34413,
+   "loss": 4.022806644439697,
+   "policy_acc": 0.24834437668323517,
+   "gen_window_corr_v": 0.3255,
+   "gen_heldout_corr_v": 0.3152
+  },
+  {
+   "t": 1789647912.1,
+   "step": 3729,
+   "games_total": 53516,
+   "gpd": 976533,
+   "gpd_5m": 2414076,
+   "window": 50716,
+   "loss": 3.896956443786621,
+   "policy_acc": 0.2544802725315094,
+   "gen_window_corr_v": 0.4649,
+   "gen_heldout_corr_v": 0.3922
+  },
+  {
+   "t": 1789648515.5,
+   "step": 4837,
+   "games_total": 70413,
+   "gpd": 1232911,
+   "gpd_5m": 2372407,
+   "window": 66713,
+   "loss": 3.741590738296509,
+   "policy_acc": 0.31740614771842957,
+   "gen_window_corr_v": 0.4863,
+   "gen_heldout_corr_v": 0.4551
+  },
+  {
+   "t": 1789649126.1,
+   "step": 5937,
+   "games_total": 87145,
+   "gpd": 1563975,
+   "gpd_5m": 2639304,
+   "window": 82645,
+   "loss": 3.5550808906555176,
+   "policy_acc": 0.34020617604255676,
+   "gen_window_corr_v": 0.5386,
+   "gen_heldout_corr_v": 0.5075
+  },
+  {
+   "t": 1789649749.1,
+   "step": 7142,
+   "games_total": 105112,
+   "gpd": 1943950,
+   "gpd_5m": 2482309,
+   "window": 99712,
+   "loss": 3.5382115840911865,
+   "policy_acc": 0.34545454382896423,
+   "gen_window_corr_v": 0.4812,
+   "gen_heldout_corr_v": 0.5461
+  },
+  {
+   "t": 1789650349.3,
+   "step": 8272,
+   "games_total": 122101,
+   "gpd": 2266483,
+   "gpd_5m": 2418106,
+   "window": 100000,
+   "loss": 3.3636860847473145,
+   "policy_acc": 0.4256756901741028,
+   "gen_window_corr_v": 0.5574,
+   "gen_heldout_corr_v": 0.5545
+  },
+  {
+   "t": 1789650954.5,
+   "step": 9388,
+   "games_total": 138403,
+   "gpd": 2414120,
+   "gpd_5m": 2273982,
+   "window": 100000,
+   "loss": 3.0957608222961426,
+   "policy_acc": 0.4609929025173187,
+   "gen_window_corr_v": 0.5574,
+   "gen_heldout_corr_v": 0.5545
+  },
+  {
+   "t": 1789651572.0,
+   "step": 10502,
+   "games_total": 154439,
+   "gpd": 2397118,
+   "gpd_5m": 2396578,
+   "window": 100000,
+   "loss": 3.0673301219940186,
+   "policy_acc": 0.4254545569419861,
+   "gen_window_corr_v": 0.5942,
+   "gen_heldout_corr_v": 0.5382
+  },
+  {
+   "t": 1789652175.4,
+   "step": 12132,
+   "games_total": 177370,
+   "gpd": 2988977,
+   "gpd_5m": 4001699,
+   "window": 100000,
+   "loss": 2.9700262546539307,
+   "policy_acc": 0.4695340394973755,
+   "gen_window_corr_v": 0.6167,
+   "gen_heldout_corr_v": 0.5523
+  },
+  {
+   "t": 1789652777.6,
+   "step": 14146,
+   "games_total": 205020,
+   "gpd": 3380175,
+   "gpd_5m": 3824682,
+   "window": 102510,
+   "loss": 2.8114328384399414,
+   "policy_acc": 0.4964539110660553,
+   "gen_window_corr_v": 0.6293,
+   "gen_heldout_corr_v": 0.5814
+  },
+  {
+   "t": 1789653382.2,
+   "step": 16129,
+   "games_total": 231879,
+   "gpd": 3511352,
+   "gpd_5m": 3799487,
+   "window": 115939,
+   "loss": 2.7076334953308105,
+   "policy_acc": 0.5152542591094971,
+   "gen_window_corr_v": 0.6344,
+   "gen_heldout_corr_v": 0.5724
+  },
+  {
+   "t": 1789653984.1,
+   "step": 18130,
+   "games_total": 258716,
+   "gpd": 3586985,
+   "gpd_5m": 3924766,
+   "window": 129358,
+   "loss": 2.634734630584717,
+   "policy_acc": 0.48591548204421997,
+   "gen_window_corr_v": 0.6243,
+   "gen_heldout_corr_v": 0.5746
+  },
+  {
+   "t": 1789654588.1,
+   "step": 20080,
+   "games_total": 284725,
+   "gpd": 3611373,
+   "gpd_5m": 3748299,
+   "window": 142362,
+   "loss": 2.614637613296509,
+   "policy_acc": 0.5358361601829529,
+   "gen_window_corr_v": 0.6293,
+   "gen_heldout_corr_v": 0.5824
+  },
+  {
+   "t": 1789655190.0,
+   "step": 22031,
+   "games_total": 310581,
+   "gpd": 3740967,
+   "gpd_5m": 3709847,
+   "window": 155290,
+   "loss": 2.5511393547058105,
+   "policy_acc": 0.5813953280448914,
+   "gen_window_corr_v": 0.6502,
+   "gen_heldout_corr_v": 0.5959
+  },
+  {
+   "t": 1789655793.5,
+   "step": 23983,
+   "games_total": 336268,
+   "gpd": 3792184,
+   "gpd_5m": 3671426,
+   "window": 168134,
+   "loss": 2.65980863571167,
+   "policy_acc": 0.5806451439857483,
+   "gen_window_corr_v": 0.6507,
+   "gen_heldout_corr_v": 0.6159
+  },
+  {
+   "t": 1789656397.9,
+   "step": 25932,
+   "games_total": 361619,
+   "gpd": 3737052,
+   "gpd_5m": 3635153,
+   "window": 180809,
+   "loss": 2.6309914588928223,
+   "policy_acc": 0.5316455960273743,
+   "gen_window_corr_v": 0.6459,
+   "gen_heldout_corr_v": 0.6132
+  },
+  {
+   "t": 1789657004.8,
+   "step": 27902,
+   "games_total": 387004,
+   "gpd": 3699150,
+   "gpd_5m": 3624223,
+   "window": 193502,
+   "loss": 2.6228747367858887,
+   "policy_acc": 0.5236486196517944,
+   "gen_window_corr_v": 0.6519,
+   "gen_heldout_corr_v": 0.6152
+  },
+  {
+   "t": 1789657607.7,
+   "step": 29300,
+   "games_total": 405004,
+   "gpd": 3485911,
+   "gpd_5m": 2125977,
+   "window": 202502,
+   "loss": 2.587792158126831,
+   "policy_acc": 0.5130111575126648,
+   "gen_window_corr_v": 0.6611,
+   "gen_heldout_corr_v": 0.6355
+  },
+  {
+   "t": 1789658208.6,
+   "step": 30019,
+   "games_total": 414293,
+   "gpd": 3086246,
+   "gpd_5m": 625615,
+   "window": 207146,
+   "loss": 2.5126497745513916,
+   "policy_acc": 0.5802919864654541,
+   "gen_window_corr_v": 0.6611,
+   "gen_heldout_corr_v": 0.6355
+  },
+  {
+   "t": 1789658810.1,
+   "step": 30359,
+   "games_total": 418614,
+   "gpd": 2571821,
+   "gpd_5m": 611880,
+   "window": 209307,
+   "loss": 2.5509989261627197,
+   "policy_acc": 0.5352112650871277,
+   "gen_window_corr_v": 0.6611,
+   "gen_heldout_corr_v": 0.6355
+  },
+  {
+   "t": 1789659415.6,
+   "step": 30699,
+   "games_total": 422921,
+   "gpd": 2059417,
+   "gpd_5m": 617549,
+   "window": 211460,
+   "loss": 2.571154832839966,
+   "policy_acc": 0.5451263785362244,
+   "gen_window_corr_v": 0.6655,
+   "gen_heldout_corr_v": 0.6396
+  },
+  {
+   "t": 1789660020.3,
+   "step": 31039,
+   "games_total": 427226,
+   "gpd": 1546562,
+   "gpd_5m": 609413,
+   "window": 213613,
+   "loss": 2.544828176498413,
+   "policy_acc": 0.5598591566085815,
+   "gen_window_corr_v": 0.6655,
+   "gen_heldout_corr_v": 0.6396
+  },
+  {
+   "t": 1789660624.5,
+   "step": 31379,
+   "games_total": 431583,
+   "gpd": 1046384,
+   "gpd_5m": 619143,
+   "window": 215791,
+   "loss": 2.637359619140625,
+   "policy_acc": 0.6109215021133423,
+   "gen_window_corr_v": 0.6655,
+   "gen_heldout_corr_v": 0.6396
+  },
+  {
+   "t": 1789661231.2,
+   "step": 31699,
+   "games_total": 435909,
+   "gpd": 724831,
+   "gpd_5m": 596537,
+   "window": 217954,
+   "loss": 2.531076669692993,
+   "policy_acc": 0.5724637508392334,
+   "gen_window_corr_v": 0.6655,
+   "gen_heldout_corr_v": 0.6396
+  },
+  {
+   "t": 1789661831.5,
+   "step": 32039,
+   "games_total": 440084,
+   "gpd": 615038,
+   "gpd_5m": 602007,
+   "window": 220042,
+   "loss": 2.516286611557007,
+   "policy_acc": 0.5779221057891846,
+   "gen_window_corr_v": 0.6655,
+   "gen_heldout_corr_v": 0.6396
+  },
+  {
+   "t": 1789662437.0,
+   "step": 32359,
+   "games_total": 444360,
+   "gpd": 613274,
+   "gpd_5m": 612857,
+   "window": 222180,
+   "loss": 2.5674490928649902,
+   "policy_acc": 0.5424836874008179,
+   "gen_window_corr_v": 0.6608,
+   "gen_heldout_corr_v": 0.67
+  },
+  {
+   "t": 1789663041.5,
+   "step": 32699,
+   "games_total": 448556,
+   "gpd": 610740,
+   "gpd_5m": 602432,
+   "window": 224278,
+   "loss": 2.6121442317962646,
+   "policy_acc": 0.573122501373291,
+   "gen_window_corr_v": 0.6608,
+   "gen_heldout_corr_v": 0.67
+  },
+  {
+   "t": 1789663642.2,
+   "step": 33019,
+   "games_total": 452829,
+   "gpd": 609797,
+   "gpd_5m": 625328,
+   "window": 226414,
+   "loss": 2.627696990966797,
+   "policy_acc": 0.5,
+   "gen_window_corr_v": 0.6608,
+   "gen_heldout_corr_v": 0.67
+  },
+  {
+   "t": 1789664242.5,
+   "step": 33359,
+   "games_total": 457116,
+   "gpd": 609255,
+   "gpd_5m": 620721,
+   "window": 228558,
+   "loss": 2.489407539367676,
+   "policy_acc": 0.5475409626960754,
+   "gen_window_corr_v": 0.6608,
+   "gen_heldout_corr_v": 0.67
+  },
+  {
+   "t": 1789664847.1,
+   "step": 33679,
+   "games_total": 461267,
+   "gpd": 605251,
+   "gpd_5m": 592767,
+   "window": 230633,
+   "loss": 2.4675509929656982,
+   "policy_acc": 0.5432525873184204,
+   "gen_window_corr_v": 0.6414,
+   "gen_heldout_corr_v": 0.6689
+  },
+  {
+   "t": 1789665451.6,
+   "step": 34019,
+   "games_total": 465455,
+   "gpd": 606128,
+   "gpd_5m": 604400,
+   "window": 232727,
+   "loss": 2.543356418609619,
+   "policy_acc": 0.5740072131156921,
+   "gen_window_corr_v": 0.6414,
+   "gen_heldout_corr_v": 0.6689
+  },
+  {
+   "t": 1789666161.8,
+   "step": 34259,
+   "games_total": 468692,
+   "gpd": 0,
+   "gpd_5m": 176409,
+   "window": 234346,
+   "loss": null,
+   "policy_acc": null,
+   "gen_window_corr_v": null,
+   "gen_heldout_corr_v": null
+  },
+  {
+   "t": 1789666766.4,
+   "step": 34647,
+   "games_total": 473797,
+   "gpd": 729483,
+   "gpd_5m": 777341,
+   "window": 236898,
+   "loss": 2.486736536026001,
+   "policy_acc": 0.5947712659835815,
+   "gen_window_corr_v": 0.6201,
+   "gen_heldout_corr_v": 0.642
+  },
+  {
+   "t": 1789667369.3,
+   "step": 35088,
+   "games_total": 479052,
+   "gpd": 741280,
+   "gpd_5m": 751430,
+   "window": 239526,
+   "loss": 2.4102067947387695,
+   "policy_acc": 0.6454849243164062,
+   "gen_window_corr_v": 0.6201,
+   "gen_heldout_corr_v": 0.642
+  },
+  {
+   "t": 1789667972.2,
+   "step": 35487,
+   "games_total": 483955,
+   "gpd": 728418,
+   "gpd_5m": 707380,
+   "window": 241977,
+   "loss": 2.526671886444092,
+   "policy_acc": 0.5484949946403503,
+   "gen_window_corr_v": 0.6709,
+   "gen_heldout_corr_v": 0.6425
+  },
+  {
+   "t": 1789668575.0,
+   "step": 36131,
+   "games_total": 491701,
+   "gpd": 823795,
+   "gpd_5m": 1502224,
+   "window": 245850,
+   "loss": 2.60019588470459,
+   "policy_acc": 0.5051546096801758,
+   "gen_window_corr_v": 0.6709,
+   "gen_heldout_corr_v": 0.6425
+  },
+  {
+   "t": 1789669177.5,
+   "step": 37315,
+   "games_total": 506325,
+   "gpd": 1078169,
+   "gpd_5m": 2114669,
+   "window": 253162,
+   "loss": 2.597346067428589,
+   "policy_acc": 0.5234656929969788,
+   "gen_window_corr_v": 0.6547,
+   "gen_heldout_corr_v": 0.6773
+  },
+  {
+   "t": 1789669781.5,
+   "step": 38502,
+   "games_total": 520857,
+   "gpd": 1252062,
+   "gpd_5m": 2108934,
+   "window": 260428,
+   "loss": 2.538616895675659,
+   "policy_acc": 0.5766423344612122,
+   "gen_window_corr_v": 0.6547,
+   "gen_heldout_corr_v": 0.6497
+  },
+  {
+   "t": 1789670387.4,
+   "step": 39681,
+   "games_total": 535278,
+   "gpd": 1473215,
+   "gpd_5m": 2015619,
+   "window": 267639,
+   "loss": 2.4834940433502197,
+   "policy_acc": 0.619528591632843,
+   "gen_window_corr_v": 0.6547,
+   "gen_heldout_corr_v": 0.6497
+  },
+  {
+   "t": 1789670991.3,
+   "step": 40881,
+   "games_total": 549878,
+   "gpd": 1697704,
+   "gpd_5m": 2113530,
+   "window": 274939,
+   "loss": 2.4579131603240967,
+   "policy_acc": 0.5551601648330688,
+   "gen_window_corr_v": 0.6233,
+   "gen_heldout_corr_v": 0.6555
+  },
+  {
+   "t": 1789671600.5,
+   "step": 42055,
+   "games_total": 564081,
+   "gpd": 1918026,
+   "gpd_5m": 2032000,
+   "window": 282040,
+   "loss": 2.5044636726379395,
+   "policy_acc": 0.5635738968849182,
+   "gen_window_corr_v": 0.6367,
+   "gen_heldout_corr_v": 0.6588
+  },
+  {
+   "t": 1789672205.7,
+   "step": 43260,
+   "games_total": 578644,
+   "gpd": 2069357,
+   "gpd_5m": 2026374,
+   "window": 289322,
+   "loss": 2.523861885070801,
+   "policy_acc": 0.564748227596283,
+   "gen_window_corr_v": 0.6367,
+   "gen_heldout_corr_v": 0.6588
+  },
+  {
+   "t": 1789672812.8,
+   "step": 44443,
+   "games_total": 592909,
+   "gpd": 2058748,
+   "gpd_5m": 1997328,
+   "window": 296454,
+   "loss": 2.5554518699645996,
+   "policy_acc": 0.5378788113594055,
+   "gen_window_corr_v": 0.6377,
+   "gen_heldout_corr_v": 0.6732
+  },
+  {
+   "t": 1789673417.2,
+   "step": 45633,
+   "games_total": 606988,
+   "gpd": 2047181,
+   "gpd_5m": 1973921,
+   "window": 303494,
+   "loss": 2.4582479000091553,
+   "policy_acc": 0.5601503849029541,
+   "gen_window_corr_v": 0.6397,
+   "gen_heldout_corr_v": 0.6506
+  },
+  {
+   "t": 1789674020.2,
+   "step": 46847,
+   "games_total": 621297,
+   "gpd": 2045985,
+   "gpd_5m": 1988172,
+   "window": 310648,
+   "loss": 2.4374399185180664,
+   "policy_acc": 0.6107142567634583,
+   "gen_window_corr_v": 0.6653,
+   "gen_heldout_corr_v": 0.6378
+  },
+  {
+   "t": 1789674626.6,
+   "step": 48058,
+   "games_total": 635528,
+   "gpd": 2035706,
+   "gpd_5m": 2016284,
+   "window": 317764,
+   "loss": 2.5731520652770996,
+   "policy_acc": 0.541218638420105,
+   "gen_window_corr_v": 0.6653,
+   "gen_heldout_corr_v": 0.6378
+  },
+  {
+   "t": 1789675227.6,
+   "step": 49264,
+   "games_total": 649632,
+   "gpd": 2037503,
+   "gpd_5m": 2009109,
+   "window": 324816,
+   "loss": 2.3947536945343018,
+   "policy_acc": 0.5758620500564575,
+   "gen_window_corr_v": 0.6783,
+   "gen_heldout_corr_v": 0.6653
+  },
+  {
+   "t": 1789675834.1,
+   "step": 50481,
+   "games_total": 663849,
+   "gpd": 2029248,
+   "gpd_5m": 1950721,
+   "window": 331924,
+   "loss": 2.3693699836730957,
+   "policy_acc": 0.6020066738128662,
+   "gen_window_corr_v": 0.657,
+   "gen_heldout_corr_v": 0.6541
+  },
+  {
+   "t": 1789676434.7,
+   "step": 51703,
+   "games_total": 678035,
+   "gpd": 2033057,
+   "gpd_5m": 2003732,
+   "window": 339017,
+   "loss": 2.4413065910339355,
+   "policy_acc": 0.5957446694374084,
+   "gen_window_corr_v": 0.657,
+   "gen_heldout_corr_v": 0.6541
+  },
+  {
+   "t": 1789677038.6,
+   "step": 52928,
+   "games_total": 692136,
+   "gpd": 2025036,
+   "gpd_5m": 2003183,
+   "window": 346068,
+   "loss": 2.4516687393188477,
+   "policy_acc": 0.5551331043243408,
+   "gen_window_corr_v": 0.6637,
+   "gen_heldout_corr_v": 0.6668
+  },
+  {
+   "t": 1789677645.6,
+   "step": 54117,
+   "games_total": 705933,
+   "gpd": 2016876,
+   "gpd_5m": 1892058,
+   "window": 352966,
+   "loss": 2.40012526512146,
+   "policy_acc": 0.5980392098426819,
+   "gen_window_corr_v": 0.635,
+   "gen_heldout_corr_v": 0.66
+  },
+  {
+   "t": 1789678249.5,
+   "step": 55361,
+   "games_total": 720155,
+   "gpd": 2019897,
+   "gpd_5m": 2031915,
+   "window": 360077,
+   "loss": 2.376882791519165,
+   "policy_acc": 0.6104868650436401,
+   "gen_window_corr_v": 0.635,
+   "gen_heldout_corr_v": 0.66
+  },
+  {
+   "t": 1789678851.6,
+   "step": 56584,
+   "games_total": 734198,
+   "gpd": 2016096,
+   "gpd_5m": 2071414,
+   "window": 367099,
+   "loss": 2.3891448974609375,
+   "policy_acc": 0.6206896305084229,
+   "gen_window_corr_v": 0.6547,
+   "gen_heldout_corr_v": 0.655
+  },
+  {
+   "t": 1789679456.2,
+   "step": 57802,
+   "games_total": 748095,
+   "gpd": 2009292,
+   "gpd_5m": 2033617,
+   "window": 374047,
+   "loss": 2.497546672821045,
+   "policy_acc": 0.6028881072998047,
+   "gen_window_corr_v": 0.6702,
+   "gen_heldout_corr_v": 0.6543
+  },
+  {
+   "t": 1789680057.4,
+   "step": 59050,
+   "games_total": 762217,
+   "gpd": 2001421,
+   "gpd_5m": 2053794,
+   "window": 381108,
+   "loss": 2.4455161094665527,
+   "policy_acc": 0.5807560086250305,
+   "gen_window_corr_v": 0.6392,
+   "gen_heldout_corr_v": 0.6458
+  },
+  {
+   "t": 1789680660.0,
+   "step": 60286,
+   "games_total": 776157,
+   "gpd": 2006056,
+   "gpd_5m": 2025330,
+   "window": 388078,
+   "loss": 2.515578508377075,
+   "policy_acc": 0.5639097690582275,
+   "gen_window_corr_v": 0.6392,
+   "gen_heldout_corr_v": 0.6458
+  },
+  {
+   "t": 1789681264.3,
+   "step": 61519,
+   "games_total": 790126,
+   "gpd": 2005284,
+   "gpd_5m": 2038336,
+   "window": 395063,
+   "loss": 2.422802448272705,
+   "policy_acc": 0.5897436141967773,
+   "gen_window_corr_v": 0.6659,
+   "gen_heldout_corr_v": 0.6579
+  },
+  {
+   "t": 1789681867.5,
+   "step": 62729,
+   "games_total": 803736,
+   "gpd": 1998295,
+   "gpd_5m": 1874668,
+   "window": 401868,
+   "loss": 2.504837989807129,
+   "policy_acc": 0.5821917653083801,
+   "gen_window_corr_v": 0.6656,
+   "gen_heldout_corr_v": 0.6518
+  },
+  {
+   "t": 1789682472.5,
+   "step": 63869,
+   "games_total": 816677,
+   "gpd": 1971174,
+   "gpd_5m": 1846001,
+   "window": 408338,
+   "loss": 2.345276117324829,
+   "policy_acc": 0.591911792755127,
+   "gen_window_corr_v": 0.6656,
+   "gen_heldout_corr_v": 0.6518
+  },
+  {
+   "t": 1789683083.6,
+   "step": 65032,
+   "games_total": 829503,
+   "gpd": 1938028,
+   "gpd_5m": 1840954,
+   "window": 414751,
+   "loss": 2.3868489265441895,
+   "policy_acc": 0.6060606241226196,
+   "gen_window_corr_v": 0.6717,
+   "gen_heldout_corr_v": 0.6545
+  },
+  {
+   "t": 1789683690.0,
+   "step": 66193,
+   "games_total": 842458,
+   "gpd": 1906820,
+   "gpd_5m": 1852045,
+   "window": 421229,
+   "loss": 2.3096745014190674,
+   "policy_acc": 0.5636363625526428,
+   "gen_window_corr_v": 0.6552,
+   "gen_heldout_corr_v": 0.6342
+  },
+  {
+   "t": 1789684290.5,
+   "step": 67372,
+   "games_total": 855608,
+   "gpd": 1890828,
+   "gpd_5m": 1972186,
+   "window": 427804,
+   "loss": 2.4729692935943604,
+   "policy_acc": 0.5490909218788147,
+   "gen_window_corr_v": 0.6552,
+   "gen_heldout_corr_v": 0.6342
+  },
+  {
+   "t": 1789684893.7,
+   "step": 68624,
+   "games_total": 869532,
+   "gpd": 1889438,
+   "gpd_5m": 2037471,
+   "window": 434766,
+   "loss": 2.4131314754486084,
+   "policy_acc": 0.5507246255874634,
+   "gen_window_corr_v": 0.6495,
+   "gen_heldout_corr_v": 0.642
+  },
+  {
+   "t": 1789685496.3,
+   "step": 69863,
+   "games_total": 883276,
+   "gpd": 1894538,
+   "gpd_5m": 1989129,
+   "window": 441638,
+   "loss": 2.3528249263763428,
+   "policy_acc": 0.5761589407920837,
+   "gen_window_corr_v": 0.6673,
+   "gen_heldout_corr_v": 0.6497
+  },
+  {
+   "t": 1789686097.9,
+   "step": 71123,
+   "games_total": 897221,
+   "gpd": 1920063,
+   "gpd_5m": 2032621,
+   "window": 448610,
+   "loss": 2.4216432571411133,
+   "policy_acc": 0.5174825191497803,
+   "gen_window_corr_v": 0.6673,
+   "gen_heldout_corr_v": 0.6497
+  },
+  {
+   "t": 1789686699.2,
+   "step": 71936,
+   "games_total": 906320,
+   "gpd": 1835809,
+   "gpd_5m": 709100,
+   "window": 453160,
+   "loss": 2.5773730278015137,
+   "policy_acc": 0.5574913024902344,
+   "gen_window_corr_v": 0.6539,
+   "gen_heldout_corr_v": 0.6292
+  },
+  {
+   "t": 1789687336.3,
+   "step": 72373,
+   "games_total": 911279,
+   "gpd": 1626330,
+   "gpd_5m": 671970,
+   "window": 455639,
+   "loss": 2.425549030303955,
+   "policy_acc": 0.5663082599639893,
+   "gen_window_corr_v": 0.6539,
+   "gen_heldout_corr_v": 0.6292
+  },
+  {
+   "t": 1789687964.6,
+   "step": 72810,
+   "games_total": 915967,
+   "gpd": 1406616,
+   "gpd_5m": 649550,
+   "window": 457983,
+   "loss": 2.5118916034698486,
+   "policy_acc": 0.6007194519042969,
+   "gen_window_corr_v": 0.6539,
+   "gen_heldout_corr_v": 0.6292
+  },
+  {
+   "t": 1789688612.0,
+   "step": 73224,
+   "games_total": 920746,
+   "gpd": 1164826,
+   "gpd_5m": 651355,
+   "window": 460373,
+   "loss": 2.486029624938965,
+   "policy_acc": 0.5785714387893677,
+   "gen_window_corr_v": 0.6358,
+   "gen_heldout_corr_v": 0.6366
+  },
+  {
+   "t": 1789689267.0,
+   "step": 73661,
+   "games_total": 925673,
+   "gpd": 920614,
+   "gpd_5m": 681102,
+   "window": 462836,
+   "loss": 2.389708995819092,
+   "policy_acc": 0.5857142806053162,
+   "gen_window_corr_v": 0.6358,
+   "gen_heldout_corr_v": 0.6366
+  },
+  {
+   "t": 1789689912.8,
+   "step": 74098,
+   "games_total": 930309,
+   "gpd": 667789,
+   "gpd_5m": 620769,
+   "window": 465154,
+   "loss": 2.295180559158325,
+   "policy_acc": 0.6088560819625854,
+   "gen_window_corr_v": 0.6358,
+   "gen_heldout_corr_v": 0.6366
+  },
+  {
+   "t": 1789690725.8,
+   "step": 74420,
+   "games_total": 934050,
+   "gpd": 634875,
+   "gpd_5m": 634971,
+   "window": 467025,
+   "loss": 2.5591847896575928,
+   "policy_acc": 0.5323193669319153,
+   "gen_window_corr_v": 0.6671,
+   "gen_heldout_corr_v": 0.6388
+  },
+  {
+   "t": 1789691332.7,
+   "step": 74788,
+   "games_total": 938343,
+   "gpd": 619276,
+   "gpd_5m": 524145,
+   "window": 469171,
+   "loss": 2.3034751415252686,
+   "policy_acc": 0.5859649181365967,
+   "gen_window_corr_v": 0.6671,
+   "gen_heldout_corr_v": 0.6388
+  },
+  {
+   "t": 1789691946.9,
+   "step": 74995,
+   "games_total": 940483,
+   "gpd": 492029,
+   "gpd_5m": 234674,
+   "window": 470241,
+   "loss": 2.5275259017944336,
+   "policy_acc": 0.5185185074806213,
+   "gen_window_corr_v": 0.6516,
+   "gen_heldout_corr_v": 0.6539
+  },
+  {
+   "t": 1789692525.2,
+   "step": 75156,
+   "games_total": 942237,
+   "gpd": 0,
+   "gpd_5m": 263167,
+   "window": 471118,
+   "loss": null,
+   "policy_acc": null,
+   "gen_window_corr_v": null,
+   "gen_heldout_corr_v": null
+  }
+ ],
+ "review": {
+  "time": "2026-09-18 09:48:46",
+  "run": "ls",
+  "items": [
+   {
+    "name": "M1 一般化（本将棋の価値の相関）",
+    "verdict": "注意",
+    "why": "held-out の相関が 200,000 局で -0.000（上がっていない）",
+    "values": {
+     "heldout_corr_first": 0.6543,
+     "heldout_corr_last": 0.6539,
+     "window_corr_last": 0.6516,
+     "gap": -0.0023000000000000798,
+     "n_rows": 12
+    }
+   },
+   {
+    "name": "M2 最強比",
+    "verdict": "続ける",
+    "why": "step 62426 が最強を更新（+277.9 Elo、区間 [250.6, 308.5]）",
+    "values": {
+     "step": 62426,
+     "best_step": 28908,
+     "elo_vs_best": 277.9,
+     "ci95": [
+      250.6,
+      308.5
+     ],
+     "improved": true,
+     "stall": 0
+    }
+   },
+   {
+    "name": "M3 基準比",
+    "verdict": "続ける",
+    "why": "step 62426 は基準 step 28908 に +277.9 Elo（累積 +936.5、区間 [909.2, 967.1]）",
+    "values": {
+     "step": 62426,
+     "anchor_step": 28908,
+     "elo_vs_anchor": 277.9,
+     "elo": 936.5,
+     "ci95": [
+      909.2,
+      967.1
+     ]
+    }
+   },
+   {
+    "name": "M4 参照 ckpt_000646699.pt",
+    "verdict": "続ける",
+    "why": "対 ckpt_000646699.pt: +275.5 → +386.6 Elo（400,000 局で +111.1）",
+    "values": {
+     "last": {
+      "t": 1789683720.0076613,
+      "step": 62426,
+      "games": 843124,
+      "ref": "ckpt_000646699.pt",
+      "ref_step": 646699,
+      "n": 200,
+      "score_new": 0.9025,
+      "elo": 386.6,
+      "ci95": [
+       317.4,
+       489.4
+      ]
+     },
+     "n_recent": 2
+    }
+   },
+   {
+    "name": "M4 参照 win1m.pt",
+    "verdict": "続ける",
+    "why": "対 win1m.pt: +31.4 → +240.8 Elo（400,000 局で +209.4）",
+    "values": {
+     "last": {
+      "t": 1789684140.3971748,
+      "step": 62426,
+      "games": 852010,
+      "ref": "win1m.pt",
+      "ref_step": null,
+      "n": 200,
+      "score_new": 0.8,
+      "elo": 240.8,
+      "ci95": [
+       185.8,
+       308.9
+      ]
+     },
+     "n_recent": 2
+    }
+   },
+   {
+    "name": "局/日（1 時間平均）",
+    "verdict": "続ける",
+    "why": "0",
+    "values": {
+     "gpd": 0
+    }
+   }
+  ],
+  "verdict": "注意",
+  "thresholds": {
+   "gen_games": 200000,
+   "gen_min_rise": 0.0,
+   "gen_max_gap": 0.1,
+   "best_stall_alert": 3,
+   "reference_games": 400000,
+   "gpd_min": 0
+  }
+ }
+}
