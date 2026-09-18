@@ -70,7 +70,34 @@ def test_stitch_puts_two_references_on_one_scale():
     # 帯の中で重なりが無い参照は目盛りを合わせられないので落とす
     lone = {"A.pt": refs["A.pt"], "C.pt": [{"games": 800000, "elo": 10.0, "score": 0.5, "in_band": True, "ci95": None, "n": 200, "step": 9}]}
     assert stitch(lone)["dropped"] == ["C.pt"]
-    assert stitch({}) == {"base": None, "points": [], "offsets": {}, "dropped": []}
+    assert stitch({}) == {"base": None, "points": [], "offsets": {}, "dropped": [], "via": {}}
+
+
+def test_stitch_chains_through_a_middle_reference():
+    """古い参照 A と新しい参照 C が直に重ならなくても、間の B を経由して 1 本の目盛りに乗る。
+
+    参照は強くなるたびに入れ替えるので、A（天井に着いて外す）と C（新しく足す）が同じ局数で
+    両方とも帯の中に入ることは無い。ここで落としてしまうと、参照を入れ替えた時点で曲線が伸びなくなる。"""
+    def pt(games, elo, score, step):
+        return {"games": games, "elo": elo, "score": score, "in_band": 0.2 <= score <= 0.8,
+                "ci95": None, "n": 200, "step": step}
+    refs = {
+        # A は古く弱い参照。40 万局で天井（0.90）に着く
+        "A.pt": [pt(100000, 0.0, 0.50, 1), pt(200000, 150.0, 0.70, 2), pt(400000, 260.0, 0.90, 3)],
+        # B は真ん中。A の 20 万・40 万局と帯の中で重なる（A − B = 300）
+        "B.pt": [pt(200000, -150.0, 0.30, 2), pt(400000, -40.0, 0.44, 3), pt(800000, 90.0, 0.62, 4)],
+        # C は新しく強い参照。A とは重ならず、B の 80 万局とだけ重なる（B − C = 250）
+        "C.pt": [pt(800000, -160.0, 0.28, 4), pt(1600000, -20.0, 0.47, 5)],
+    }
+    st = stitch(refs)
+    assert st["dropped"] == []                       # C は B をたどって乗る
+    assert st["base"] == "B.pt"                      # 帯の中の点が 3 つでいちばん多い
+    assert st["offsets"] == {"B.pt": 0.0, "A.pt": -300.0, "C.pt": 250.0}
+    assert st["via"] == {"B.pt": None, "A.pt": "B.pt", "C.pt": "B.pt"}
+    # C の 160 万局の点が B の目盛りで +230 として曲線の先に乗る
+    assert [(p["games"], p["elo"], p["ref"]) for p in st["points"]] == [
+        (100000, -300.0, "A.pt"), (200000, -150.0, "A.pt"), (400000, -40.0, "B.pt"),
+        (800000, 90.0, "B.pt"), (1600000, 230.0, "C.pt")]
 
 
 def test_scaling_reads_the_run_and_warns_on_ceiling(tmp_path):
@@ -174,3 +201,30 @@ def test_progress_snapshot_carries_the_curve(tmp_path):
     assert s["scaling"]["outlook"]["games_now"] == 800000
     md = format_md(s)
     assert "局を 2 倍にしたときの伸び" in md and "+150.0 Elo / 2 倍" in md and "100 万局の買い足しの見込み" in md
+
+
+def test_new_reference_from_own_archive_joins_the_scale(tmp_path):
+    """新しく足した参照（この run 自身の archive）は、古い参照が天井に着いていても目盛りに乗る。
+
+    足した時点の重み ＝ その参照なので「自分対自分 ＝ 0 Elo」の点が測らずに分かる。これが無いと、
+    古い参照 B（既に得点 0.8 超）と新しい参照 C が帯の中で重ならず、C が曲線から落ちる。"""
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    _metrics(sd, [(0, 0), (1000, 100000), (2000, 200000), (4000, 400000), (8000, 800000), (16000, 1600000)])
+    (sd.root / "checkpoints" / "archive").mkdir(parents=True, exist_ok=True)
+    (sd.root / "checkpoints" / "archive" / "ckpt_000008000.pt").write_bytes(b"")  # 80 万局の archive
+    _reference(sd, [
+        (1.0, 2000, "B.pt", -150.0, 0.30), (2.0, 4000, "B.pt", 0.0, 0.50),
+        (3.0, 8000, "B.pt", 240.0, 0.80),
+        # 160 万局で初めて C を測る。このとき B は得点 0.88 で天井に着いている
+        (4.0, 16000, "B.pt", 350.0, 0.88), (4.1, 16000, "ckpt_000008000.pt", 90.0, 0.62),
+    ])
+    pts = reference_points(sd)
+    me = pts["ckpt_000008000.pt"]
+    assert [(p["games"], p["elo"], p.get("self")) for p in me] == [(800000, 0.0, True), (1600000, 90.0, None)]
+    c = scaling(sd, cost_per_1m=8.0)["curve"]
+    assert c["base"] == "B.pt" and c["dropped"] == []
+    assert c["offsets"]["ckpt_000008000.pt"] == 240.0      # 80 万局で B は +240、C は 0
+    assert [(p["games"], p["elo"], p["ref"]) for p in c["points"]] == [
+        (200000, -150.0, "B.pt"), (400000, 0.0, "B.pt"),
+        (800000, 240.0, "ckpt_000008000.pt"), (1600000, 330.0, "ckpt_000008000.pt")]

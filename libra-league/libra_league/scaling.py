@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 
-from .auto import collect_reference, load_metrics
+from .auto import ckpt_step, collect_reference, load_metrics
 from .state import StateDir
 
 # 得点がこの範囲の外だと Elo が縮む（200 局で得点 0.8 の区間は既に ±60 Elo）。出所は自分の判断で、
@@ -62,6 +62,23 @@ def _point(r: dict, g_of, band: tuple[float, float]) -> dict:
     }
 
 
+def _self_point(sd: StateDir, ref: str, g_of) -> dict | None:
+    """参照がこの run 自身の archive なら、その局数での「自分対自分 ＝ 0 Elo」の点。
+
+    測らなくても正しい点なので、参照を入れ替えたときに**新しい参照を古い目盛りに必ずつなげる**。
+    新しい参照は足した時点では強すぎて（古い参照が天井に着いている）、他の参照と帯の中で重なる
+    点が取れないことがあるため（9/18 の 80 万局の archive を 3 つ目の参照に足したときの実例）。"""
+    f = sd.root / "checkpoints" / "archive" / ref
+    step = ckpt_step(ref)
+    if step is None or not f.exists():
+        return None
+    games = g_of(step)
+    if games is None:
+        return None
+    return {"step": step, "games": games, "elo": 0.0, "ci95": [0.0, 0.0], "n": 0,
+            "score": 0.5, "in_band": True, "self": True}
+
+
 def reference_points(sd: StateDir, band: tuple[float, float] = BAND) -> dict[str, list[dict]]:
     """参照ごとの点（総局数の順）。"""
     g_of = games_of_step(load_metrics(sd, 100000))
@@ -74,7 +91,10 @@ def reference_points(sd: StateDir, band: tuple[float, float] = BAND) -> dict[str
         if p["games"] is None:
             continue
         out.setdefault(ref, []).append(p)
-    for pts in out.values():
+    for ref, pts in out.items():
+        sp = _self_point(sd, ref, g_of)
+        if sp is not None and all(q["games"] != sp["games"] for q in pts):
+            pts.append(sp)
         pts.sort(key=lambda p: p["games"])
     return out
 
@@ -118,23 +138,39 @@ def fit(pts: list[dict]) -> dict | None:
             "games_from": min(p["games"] for p in pts), "games_to": max(p["games"] for p in pts)}
 
 
+def _pair_offset(a_pts: list[dict], b_pts: list[dict]) -> float | None:
+    """2 つの参照の目盛りの差（a − b）。**両方が帯の中にある**同じ局数の点の差の平均。
+
+    片方が天井・床の点は使わない（縮んだ Elo から出した差は小さく出る。9/18 の実測で +290 が +146 に潰れた）。
+    重なりが無ければ None。"""
+    by = {p["games"]: p for p in a_pts if p["in_band"]}
+    ds = [float(by[p["games"]]["elo"]) - float(p["elo"]) for p in b_pts if p["in_band"] and p["games"] in by]
+    return sum(ds) / len(ds) if ds else None
+
+
 def stitch(refs: dict[str, list[dict]]) -> dict:
     """複数の参照を 1 本の曲線にする。BAND の中の点がいちばん多い参照を目盛りの土台にし、
-    他の参照は「両方が BAND の中にある局数での差」の平均だけずらす。差が測れない参照は落とす。"""
+    他の参照はその差だけずらす。
+
+    差は**間の参照をたどって**求める（A と C が直に重ならなくても、A−B と B−C が測れていれば C は乗る）。
+    参照は強くなるたびに入れ替える（弱くなったものは天井に着いて外す）ので、古い参照と新しい参照が
+    同じ局数で両方とも帯の中に入ることは無くなる。どこにもつながらない参照だけ落とす。"""
     if not refs:
-        return {"base": None, "points": [], "offsets": {}, "dropped": []}
-    base = max(refs, key=lambda k: (sum(1 for p in refs[k] if p["in_band"]), len(refs[k])))
-    by_games = {p["games"]: p for p in refs[base]}
-    offsets, dropped = {base: 0.0}, []
-    for ref, pts in refs.items():
-        if ref == base:
-            continue
-        ds = [float(by_games[p["games"]]["elo"]) - float(p["elo"])
-              for p in pts if p["in_band"] and p["games"] in by_games and by_games[p["games"]]["in_band"]]
-        if ds:
-            offsets[ref] = round(sum(ds) / len(ds), 1)
-        else:
-            dropped.append(ref)
+        return {"base": None, "points": [], "offsets": {}, "dropped": [], "via": {}}
+    base = max(sorted(refs), key=lambda k: (sum(1 for p in refs[k] if p["in_band"]), len(refs[k])))
+    offsets, via, frontier = {base: 0.0}, {base: None}, [base]
+    while frontier:
+        cur = frontier.pop(0)
+        for ref in sorted(refs):
+            if ref in offsets:
+                continue
+            d = _pair_offset(refs[cur], refs[ref])  # cur − ref
+            if d is None:
+                continue
+            offsets[ref] = round(offsets[cur] + d, 1)
+            via[ref] = cur
+            frontier.append(ref)
+    dropped = [r for r in sorted(refs) if r not in offsets]
     merged: dict[int, dict] = {}
     for ref, pts in refs.items():
         if ref in dropped:
@@ -150,7 +186,8 @@ def stitch(refs: dict[str, list[dict]]) -> dict:
             old = merged.get(p["games"])
             if old is None or rank < (abs(float(old["score"]) - 0.5), old["ref"] != base):
                 merged[p["games"]] = q
-    return {"base": base, "points": [merged[g] for g in sorted(merged)], "offsets": offsets, "dropped": dropped}
+    return {"base": base, "points": [merged[g] for g in sorted(merged)], "offsets": offsets,
+            "dropped": dropped, "via": via}
 
 
 def scaling(sd: StateDir, cost_per_1m: float = COST_PER_1M_USD, band: tuple[float, float] = BAND) -> dict:
@@ -162,7 +199,7 @@ def scaling(sd: StateDir, cost_per_1m: float = COST_PER_1M_USD, band: tuple[floa
         "cost_per_1m_usd": cost_per_1m,
         "references": {ref: {"points": pts, "intervals": intervals(pts), "fit": fit([p for p in pts if p["in_band"]])}
                        for ref, pts in refs.items()},
-        "curve": {"base": st["base"], "offsets": st["offsets"], "dropped": st["dropped"],
+        "curve": {"base": st["base"], "offsets": st["offsets"], "dropped": st["dropped"], "via": st["via"],
                   "points": curve, "intervals": intervals(curve), "fit": fit(curve)},
         "outlook": None,
         "notes": [],
@@ -186,6 +223,10 @@ def scaling(sd: StateDir, cost_per_1m: float = COST_PER_1M_USD, band: tuple[floa
     elif ib[-1]["elo_per_doubling"] is not None and ib[0]["elo_per_doubling"] is not None:
         if ib[-1]["elo_per_doubling"] < ib[0]["elo_per_doubling"] * 0.6:
             out["notes"].append("直近の 2 倍あたりの Elo が最初の区間の 6 割を下回った（局を足す効きが落ちている）")
+    for ref in st["dropped"]:
+        out["notes"].append(
+            f"参照 {ref} は他のどの参照とも帯の中で重ならないので曲線に乗せられない"
+            "（重なる局数で両方を測るか、間をつなぐ参照を残す）")
     for ref, r in out["references"].items():
         last = r["points"][-1] if r["points"] else None
         if last and not last["in_band"]:
@@ -221,6 +262,9 @@ def render(res: dict) -> str:
     c = res["curve"]
     if c["points"]:
         L.append(f"== 1 本にした曲線（目盛りは参照 {c['base']}。ずらし {c['offsets']}）==")
+        chain = {k: v for k, v in (c.get("via") or {}).items() if v is not None and v != c["base"]}
+        if chain:
+            L.append("  間の参照をたどったずらし: " + "、".join(f"{k} ← {v}" for k, v in chain.items()))
         for p in c["points"]:
             L.append(f"{p['games']:>11,} | {float(p['elo']):+7.1f} | 得点 {p['score']} | {p['ref']}")
         for iv in c["intervals"]:

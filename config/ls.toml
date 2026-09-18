@@ -82,9 +82,11 @@ anchor_games = 1000         # 100 → 1,000（幅 ±22 Elo）
 anchor_rebaseline = 0.85
 best_games = 1000           # 最強比（新規）
 best_stall_alert = 3
-# 固定の参照。3 つ目は 80 万局の archive（2026-09-18 に追加）。前の 2 つには勝率 90%・80% で天井に着き、
-# このままでは伸びていても曲線が寝て見えるため（docs/scaling-2026-09-18.md §6.4）。80% 以上勝つようになったら足す
-reference_ckpts = ["~/libra-run/ls-v1/checkpoints/archive/ckpt_000646699.pt", "~/libra-run/experiments/2026-09-17-window/win1m.pt", "~/libra-run/ls/checkpoints/archive/ckpt_000062426.pt"]
+# 固定の参照。80 万局の点で勝率が 80% を超えた参照は外す（縮んだ Elo で曲線を寝かせるだけで、
+# 過去の行は eval/reference.jsonl に残るので曲線は短くならない。docs/scaling-2026-09-18.md §6.4）。
+# ls-v1 は 90.25% で外した（2026-09-18）。win1m はちょうど 80% で、旧い点との橋なので 1 節目だけ残す。
+# 3 つ目は 80 万局の archive。これから主に使う参照で、80% を超えたら次の archive を足して外す
+reference_ckpts = ["~/libra-run/experiments/2026-09-17-window/win1m.pt", "~/libra-run/ls/checkpoints/archive/ckpt_000062426.pt"]
 reference_games = 200
 match_games = 10             # 外部の AI との計測は得点 0 に張り付くので煙テストでは回さない。本番で 10 に戻す
 
