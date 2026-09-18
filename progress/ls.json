@@ -1,21 +1,28 @@
 {
  "schema": 1,
  "run": "ls",
- "generated": "2026-09-18 13:11:17",
- "t": 1789704677.2,
+ "generated": "2026-09-18 13:27:49",
+ "t": 1789705669.7,
  "process": "running",
  "flags": [],
  "now": {
-  "step": 81919,
-  "generation": 105,
-  "games_total": 1017659,
+  "step": 83067,
+  "generation": 107,
+  "games_total": 1030586,
   "games_per_day_1h": 0,
-  "window_games": 508829,
+  "window_games": 515793,
   "active_games": 512,
-  "elapsed_h": 16.5,
+  "elapsed_h": 16.76,
   "heldout_games": 20000,
-  "status_time": "2026-09-18 13:11:15",
-  "train": null,
+  "status_time": "2026-09-18 13:27:43",
+  "train": {
+   "loss": 2.3986454010009766,
+   "policy": 1.611199140548706,
+   "value": 0.5881649851799011,
+   "v41": 0.39856263995170593,
+   "policy_acc": 0.5855513215065002,
+   "lr": 0.0002
+  },
   "gen": null
  },
  "auto": {
@@ -1663,22 +1670,46 @@
    "policy_acc": null,
    "gen_window_corr_v": null,
    "gen_heldout_corr_v": null
+  },
+  {
+   "t": 1789705296.1,
+   "step": 82575,
+   "games_total": 1024966,
+   "gpd": 1017521,
+   "gpd_5m": 1435026,
+   "window": 512483,
+   "loss": 2.439601182937622,
+   "policy_acc": 0.613382875919342,
+   "gen_window_corr_v": 0.6575,
+   "gen_heldout_corr_v": 0.6553
+  },
+  {
+   "t": 1789705663.7,
+   "step": 83158,
+   "games_total": 1031586,
+   "gpd": 0,
+   "gpd_5m": 1555952,
+   "window": 515793,
+   "loss": 2.3986454010009766,
+   "policy_acc": 0.5855513215065002,
+   "gen_window_corr_v": null,
+   "gen_heldout_corr_v": null
   }
  ],
  "review": {
-  "time": "2026-09-18 13:11:17",
+  "time": "2026-09-18 13:27:49",
   "run": "ls",
   "items": [
    {
     "name": "M1 一般化（本将棋の価値の相関）",
-    "verdict": "注意",
-    "why": "held-out の相関が 200,000 局で -0.028（上がっていない）",
+    "verdict": "続ける",
+    "why": "held-out の相関 0.6342 → 0.6553（200,000 局）、窓の中との差 +0.002",
     "values": {
-     "heldout_corr_first": 0.6545,
-     "heldout_corr_last": 0.6266,
-     "window_corr_last": 0.6552,
-     "gap": 0.02859999999999996,
-     "n_rows": 13
+     "heldout_corr_first": 0.6342,
+     "heldout_corr_last": 0.6553,
+     "window_corr_last": 0.6575,
+     "gap": 0.0021999999999999797,
+     "n_rows": 14
     }
    },
    {
@@ -1765,7 +1796,7 @@
     }
    }
   ],
-  "verdict": "注意",
+  "verdict": "続ける",
   "thresholds": {
    "gen_games": 200000,
    "gen_min_rise": 0.0,
