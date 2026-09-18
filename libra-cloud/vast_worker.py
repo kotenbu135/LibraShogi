@@ -30,6 +30,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from libra_cloud import hosts  # noqa: E402
 from libra_cloud.bench import MAX_INET_COST, annotate_price, offer_query, offer_rejects, pick_offers, worker_threads  # noqa: E402
 from vast_bench import IMAGE, KEY, ONSTART, image_cuda, log, try_create, wait_ssh  # noqa: E402
 
@@ -97,12 +98,17 @@ def main() -> int:
     offers = v.search_offers(query=offer_query(a.gpu, a.min_rel, min_cuda, a.disk), type=a.rent, order="dph_total", limit=100,
                              storage=a.disk) or []
     offers = annotate_price(offers, a.rent, a.bid_margin)
+    # 過去のセッションの実測から見込みの局/日を付け、見込みの 100 万局あたりの費用の安い順に借りる（hosts.py）
+    past = hosts.scan_sessions(out.parent)
+    offers = hosts.annotate(offers, hosts.speed_table(past), "dph_eff")
     cond = dict(max_dph=a.max_dph, min_cores=a.min_cores, min_cpu_ghz=a.min_cpu_ghz, min_cuda=min_cuda, min_rel=a.min_rel, max_inet_cost=a.max_inet_cost,
                 price_key="dph_eff")
     cands = pick_offers(offers, **cond)
-    log(f"{len(offers)} offers ({a.rent}), {len(cands)} usable; cheapest: "
+    log(f"{len(offers)} offers ({a.rent}), {len(cands)} usable, {len(past)} past sessions measured; best value: "
         + ", ".join(f"#{o['id']} ${o['dph_eff']:.3f}/h{' bid $' + format(o['bid'], '.4f') if o.get('bid') else ''} "
-                    f"cpu {o.get('cpu_cores_effective')} {str(o.get('cpu_name'))[:28]} "
+                    + (f"est ${o['est_usd_per_1m']:.2f}/1M ({hosts.SOURCE_LABELS.get(o['est_from'], '中央値')}) "
+                       if o.get('est_usd_per_1m') else "est - ")
+                    + f"cpu {o.get('cpu_cores_effective')} {str(o.get('cpu_name'))[:28]} "
                     f"{o.get('geolocation', '')}" for o in cands[:3]))
     if offers and not cands:  # 借りられなかった理由を launcher.log に残す（管理コンソールの「候補を見る」と同じ判定）
         counts: dict[str, int] = {}
@@ -143,9 +149,11 @@ def main() -> int:
             log(f"create #{offer['id']} ${offer['dph_eff']:.3f}/h{' bid $' + format(offer['bid'], '.4f') if offer.get('bid') else ''} -> instance {iid} {why}")
             if not iid:
                 continue
-            result["offer"] = {k: offer.get(k) for k in ("id", "dph_total", "dph_eff", "bid", "min_bid", "is_bid", "gpu_name", "cpu_name",
-                                                        "cpu_cores_effective", "cpu_ghz", "reliability2", "geolocation", "cuda_max_good",
-                                                        "inet_up_cost", "inet_down_cost")}
+            # machine_id・host_id は次に借りるときの実績の鍵（hosts.keys_of）。est_* はこのとき見込んだ値
+            result["offer"] = {k: offer.get(k) for k in ("id", "machine_id", "host_id", "dph_total", "dph_eff", "bid", "min_bid", "is_bid",
+                                                        "gpu_name", "cpu_name", "cpu_cores_effective", "cpu_ghz", "reliability2", "geolocation",
+                                                        "cuda_max_good", "inet_up_cost", "inet_down_cost", "est_games_per_day", "est_usd_per_1m",
+                                                        "est_from")}
             result["rent"] = a.rent
             result["instance"] = iid
             t_rent = time.time()

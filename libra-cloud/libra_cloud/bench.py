@@ -12,6 +12,8 @@ import math
 import sys
 from pathlib import Path
 
+from libra_cloud import hosts
+
 # 転送料（$/GB）の上限。対局の書き出しと重みの取得で月に数十〜数百 GB になるので高いホストは避ける
 MAX_INET_COST = 0.02
 
@@ -19,13 +21,16 @@ MAX_INET_COST = 0.02
 def pick_offers(offers: list[dict], *, max_dph: float, price_key: str = "dph_total", min_cores: int = 8, min_down: float = 200.0,
                 min_rel: float = 0.98, min_cuda: float = 12.8, max_inet_cost: float = MAX_INET_COST,
                 min_cpu_ghz: float = 0.0) -> list[dict]:
-    """条件を満たす 1 GPU のオファーを安い順（同じ値段なら CPU の多い順）に返す。
+    """条件を満たす 1 GPU のオファーを借りる順に返す。
+
+    並びは見込みの 100 万局あたりの費用の安い順（hosts.annotate で見込みを付けてから渡したとき）。
+    見込みが無ければこれまで通り値段の安い順、同じ値段なら CPU の多い順。
 
     min_cpu_ghz: CPU の最大周波数（vast.ai の cpu_ghz）の下限。自己対局の探索の反映（apply）は 1 スレッドの速さで決まり、
     2016 年ごろのサーバー CPU（2.4 GHz 前後）では GPU が半分遊んだ（measurements.md 2026-09-14）。"""
     ok = [o for o in offers if not offer_rejects(o, max_dph=max_dph, price_key=price_key, min_cores=min_cores, min_down=min_down, min_rel=min_rel,
                                                  min_cuda=min_cuda, max_inet_cost=max_inet_cost, min_cpu_ghz=min_cpu_ghz)]
-    return sorted(ok, key=lambda o: (o[price_key], -(o.get("cpu_cores_effective") or 0)))
+    return hosts.rank(ok, price_key)
 
 
 def annotate_price(offers: list[dict], rent: str, bid_margin: float) -> list[dict]:
