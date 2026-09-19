@@ -577,3 +577,31 @@ def test_match_skips_stale_onnx_snapshot(tmp_path):
     arch = sd.checkpoints / "archive" / "ckpt_000028908.pt"
     assert job["args"][job["args"].index("--ckpt") + 1] == str(arch)
     assert not arch.with_suffix(".onnx").exists()
+
+
+def test_enqueue_match_passes_the_handicap_settings(tmp_path):
+    """相手だけ別の go（match_go_opp）と Libra への setoption（match_libra_opt）を計測ジョブに渡す。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    cfg = load_config(None)
+    cfg["auto"].update({"enabled": True, "every_games": 1000, "match_games": 2,
+                        "match_go": "nodes 400", "match_go_opp": "movetime 1000",
+                        "match_libra_opt": "Threads=1, Sims_Normal=400"})
+    state: dict = {}
+    AutoJobs(sd, cfg, state, lambda _m: None).enqueue_match()
+    args = state["auto"]["queue"][0]["args"]
+    assert args[:6] == ["match", "--games", "2", "--go", "nodes 400", "--out"]
+    assert ["--go-opp", "movetime 1000"] == args[args.index("--go-opp"):args.index("--go-opp") + 2]
+    assert [args[i + 1] for i, v in enumerate(args) if v == "--libra-opt"] == ["Threads=1", "Sims_Normal=400"]
+
+
+def test_enqueue_match_omits_the_handicap_settings_when_empty(tmp_path):
+    """既定（空）では今までどおりの引数（両者に同じ go、Libra に setoption なし）。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    cfg = load_config(None)
+    cfg["auto"].update({"enabled": True, "every_games": 1000, "match_games": 2})
+    state: dict = {}
+    AutoJobs(sd, cfg, state, lambda _m: None).enqueue_match()
+    args = state["auto"]["queue"][0]["args"]
+    assert "--go-opp" not in args and "--libra-opt" not in args
