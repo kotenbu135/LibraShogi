@@ -181,6 +181,12 @@ def format_md(s: dict) -> str:
     if rc:
         L.append(f"| 全部の対局から出した伸び | {_fmt(rc.get('elo_per_doubling'), plus=True)} Elo / 2 倍"
                  f"（{_fmt(rc.get('n'))} 点、残差 {_fmt(rc.get('rms_resid'))}。Bradley-Terry） |")
+    # 学習の初めは伸び方が違うので、頭打ちかどうかは「最近の伸び」で見る（全部の点の当てはめは残差が大きい）
+    rr = (rt.get("curve") or {}).get("fit_recent")
+    if rr and rr is not rc and rr != rc:
+        d = (rt.get("curve") or {}).get("recent_doublings")
+        L.append(f"| 最近の伸び（直近 {_fmt(d)} 回の倍化） | {_fmt(rr.get('elo_per_doubling'), plus=True)} Elo / 2 倍"
+                 f"（{_fmt(rr.get('n'))} 点、残差 {_fmt(rr.get('rms_resid'))}。頭打ちかはこちらで見る） |")
     rf = rt.get("fit") or {}
     if rf.get("chi2_per_df") is not None:
         L.append(f"| じゃんけん度（当てはまり） | χ²/自由度 {_fmt(rf.get('chi2_per_df'), 2)}"

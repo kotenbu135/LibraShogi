@@ -690,42 +690,46 @@ function Get-Range {
         default { return [datetime]::MinValue }
     }
 }
-function Get-XAxis($series, [datetime]$t0, [bool]$xGames, [datetime]$now) {
+function Get-XAxis($series, [datetime]$t0, [bool]$xGames, [datetime]$now, [bool]$xLog = $false) {
     # 横軸の範囲。総局数の軸は局数（games_at）の付いた点が 1 つでもあるときだけで、無ければ時間の軸に落ちる。
-    # 返すのは @{ games; min; max; span; n }（n は描ける点の数。0 なら「データなし」）
+    # 返すのは @{ games; log; min; max; span; n }（min・max は描く座標＝対数の軸なら log2。n は描ける点の数）
     $useGames = $false
     if ($xGames) {
         foreach ($s in $series) { foreach ($p in $s.pts) { if ($null -ne $p.g) { $useGames = $true; break } }; if ($useGames) { break } }
     }
+    # 対数にできるのは総局数の軸だけ（時間の Unix 秒を対数にしても読めない）
+    $useLog = ($xLog -and $useGames)
     $min = $null; $max = $null; $n = 0
     foreach ($s in $series) {
         foreach ($p in $s.pts) {
             if ($p.t -lt $t0) { continue }
-            $xv = Pt-XVal $p $useGames
+            $xv = X-Scale (Pt-XVal $p $useGames) $useLog
             if ($null -eq $xv) { continue }
             $n++
             if ($null -eq $min -or $xv -lt $min) { $min = $xv }
             if ($null -eq $max -or $xv -gt $max) { $max = $xv }
         }
     }
-    if ($n -eq 0) { return @{ games = $useGames; min = 0.0; max = 1.0; span = 1.0; n = 0 } }
+    if ($n -eq 0) { return @{ games = $useGames; log = $useLog; min = 0.0; max = 1.0; span = 1.0; n = 0 } }
     if ($useGames) {
         # 測った点のところまで（右に「今」までの空白を作らない）
-        if ($max - $min -lt 1) { $min = [Math]::Max(0.0, $max - 1) }
+        $floor = if ($useLog) { 0.5 } else { 1.0 }   # 対数の軸は幅が「何倍か」なので 1 局ぶんでは足りない
+        if ($max - $min -lt $floor) { $min = [Math]::Max(0.0, $max - $floor) }
     } else {
         # 時間の軸は右端を「今」にして、いつの値かが分かるようにする
         $max = [double]([System.DateTimeOffset]::new($now).ToUnixTimeMilliseconds() / 1000.0)
         if ($t0 -gt [datetime]::MinValue) { $min = [double]([System.DateTimeOffset]::new($t0).ToUnixTimeMilliseconds() / 1000.0) }
         if ($max - $min -lt 600) { $min = $max - 600 }
     }
-    return @{ games = $useGames; min = $min; max = $max; span = [Math]::Max(1.0, $max - $min); n = $n }
+    $minSpan = if ($useLog) { 0.5 } else { 1.0 }
+    return @{ games = $useGames; log = $useLog; min = $min; max = $max; span = [Math]::Max($minSpan, $max - $min); n = $n }
 }
 function Show-Elo-Detail {
     # Elo のグラフに相手ごとの線（基準比・鏡・対 …）も出すか。既定は出さない
     if ($null -eq $script:chkEloDetail) { return $false }
     return [bool]$script:chkEloDetail.Checked
 }
-function Format-Elo-Note([bool]$detail, [bool]$haveRating, [bool]$useGames) {
+function Format-Elo-Note([bool]$detail, [bool]$haveRating, [bool]$useGames, $trendFit = $null, [bool]$useLog = $false) {
     # グラフの下の注記（純関数。tools/windows/tests/console-format.tests.ps1 が試す）
     $n = if (-not $haveRating) {
         "目盛りがまだ出せないので相手ごとの線を出している。「基準比」の 0 は系列の最初の重み、「対 …」の 0 はその参照と互角で、0 の意味が違う"
@@ -734,15 +738,28 @@ function Format-Elo-Note([bool]$detail, [bool]$haveRating, [bool]$useGames) {
     } else {
         "「強さの目盛り」＝ 全部の対局をまとめて 1 本にした Elo。0 はいちばん古い重み。相手ごとの線は「内訳を出す」で足せる"
     }
+    # 目安の線の読み方。これが「頭打ちか」の答えになる
+    if ($null -ne $trendFit -and $null -ne $trendFit.elo_per_doubling) {
+        $n += "。点線は目安で、最近の伸び（局数 2 倍あたり {0:+0;-0;0} Elo）をそのまま延ばしたもの。**点が点線に乗っているかぎり頭打ちではない**（下に離れていけば頭打ち）" -f [double]$trendFit.elo_per_doubling
+        if (-not $useLog) { $n += "。横軸を「総局数（対数）」にすると点線が直線になり、ずれが見やすい" }
+    }
     $n += "。全期間を表示"
     if (-not $useGames) { $n += "。横軸が時間だと止めた間も伸びが寝て見えるので、ふだんは「総局数」で見る" }
+    elseif ($useLog) { $n += "。横軸は総局数の対数（右へ 1 目盛りで局数が 2 倍）。伸びは局数の対数にほぼ比例するので、ふつうの横軸では一定の伸びでも右で寝て見える" }
     return $n
 }
 function Use-GamesAxis {
     # Elo と 対外対局 の横軸。学習を進めるのは時間ではなく局数（止めている間・GPU を分け合う間は
-    # 同じ時間でも進みが違う）ので、既定は総局数。$cmbAxis がまだ無い起動直後も総局数
+    # 同じ時間でも進みが違う）ので、既定は総局数。$cmbAxis がまだ無い起動直後も総局数。
+    # 並びは 0 総局数 / 1 時間 / 2 総局数（対数）。**2 を末尾に足したのは**、
+    # console-layout.json に番号で残っているため（0 と 1 の意味を動かさない）
     if ($null -eq $script:cmbAxis) { return $true }
     return ($script:cmbAxis.SelectedIndex -ne 1)
+}
+function Use-LogAxis {
+    # 横軸を総局数の対数にするか。一定の伸びが直線になるので、頭打ちかどうかが形で読める
+    if ($null -eq $script:cmbAxis) { return $false }
+    return ($script:cmbAxis.SelectedIndex -eq 2)
 }
 function New-Series([string]$name, $color, [bool]$marker = $false, [bool]$dash = $false, [single]$width = 2) {
     return @{ name = $name; color = $color; pts = (New-Object System.Collections.ArrayList); marker = $marker; dash = $dash; gap = $false; width = $width }
@@ -750,6 +767,19 @@ function New-Series([string]$name, $color, [bool]$marker = $false, [bool]$dash =
 function Add-Pt($series, [datetime]$t, [double]$y, $lo = $null, $hi = $null, [string]$label = "", $g = $null) {
     # g は「その重みを保存した時点の総局数」（status --history の games_at）。横軸を総局数にするときに使う
     [void]$series.pts.Add(@{ t = $t; y = $y; lo = $lo; hi = $hi; label = $label; g = $g })
+}
+function X-Scale($v, [bool]$log) {
+    # 横軸の値を描く座標に直す。対数なら log2（局数は正）。伸びは局数の対数にほぼ比例する
+    # （AlphaZero 系。docs/scaling-2026-09-18.md）ので、対数の軸なら**一定の伸びが直線**になり、
+    # 頭打ちかどうかが形で読める。ふつうの軸では同じ伸びでも必ず右で寝て見える
+    if ($null -eq $v) { return $null }
+    if (-not $log) { return [double]$v }
+    return [Math]::Log([Math]::Max(1.0, [double]$v), 2)
+}
+function X-Unscale([double]$v, [bool]$log) {
+    # 目盛りの文字にするとき、描く座標から元の値に戻す
+    if (-not $log) { return $v }
+    return [Math]::Pow(2, $v)
 }
 function Pt-XVal($p, [bool]$useGames) {
     # 横軸の値。総局数の軸なら局数、時間の軸なら Unix 秒。総局数が分からない点は総局数の軸では描かない
@@ -775,11 +805,33 @@ function Build-Rating-Series([string]$name, $color, $rating) {
     }
     return $s
 }
+function Build-Trend-Series([string]$name, $color, $fit, $points) {
+    # 「目安の線」。`rating.curve_fit`（log2(総局数) に対する Elo の直線当てはめ）を描く。
+    # **点がこの線に乗っているかぎり、伸びは初めからの傾きのまま**で、頭打ちではない。
+    # 伸びは局数の対数にほぼ比例するので、ふつうの横軸では一定の伸びでも必ず右で寝て見え、
+    # グラフの形だけでは頭打ちか区別が付かない（2026-09-19 のユーザーの「初期に比べると伸びが
+    # 緩やかなので頭打ちなのかグラフからわかりにくい」）。対数の横軸ならこの線が直線になる
+    $s = New-Series $name $color $false $true 1.5
+    if ($null -eq $fit -or $null -eq $fit.elo_per_doubling -or $null -eq $fit.intercept) { return $s }
+    $from = $fit.games_from; $to = $fit.games_to
+    if ($null -eq $from -or $null -eq $to -or [double]$from -lt 1 -or [double]$to -le [double]$from) { return $s }
+    # 線を引く時刻は実際の点のものを使う（時間の横軸で置く場所が要る。無ければ描かない）
+    $pts = @(@($points) | Where-Object { $null -ne $_ -and $null -ne $_.t })
+    if ($pts.Count -eq 0) { return $s }
+    $t0 = From-Unix $pts[0].t
+    $b = [double]$fit.elo_per_doubling; $a = [double]$fit.intercept
+    $lo = [Math]::Log([double]$from, 2); $hi = [Math]::Log([double]$to, 2)
+    for ($k = 0; $k -le 40; $k++) {
+        $x = $lo + ($hi - $lo) * $k / 40.0
+        Add-Pt $s $t0 ($a + $b * $x) $null $null "" ([Math]::Round([Math]::Pow(2, $x)))
+    }
+    return $s
+}
 function Run-Color([string]$run, [int]$i = 0) {
     if ($script:Colors.ContainsKey($run)) { return $script:Colors[$run] }
     return $script:Palette[$i % $script:Palette.Length]
 }
-function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt, [bool]$zeroBase, [string]$note, [bool]$allTime = $false, [bool]$xGames = $false) {
+function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt, [bool]$zeroBase, [string]$note, [bool]$allTime = $false, [bool]$xGames = $false, [bool]$xLog = $false) {
     $g.SmoothingMode = "AntiAlias"
     $g.Clear([System.Drawing.Color]::White)
     $font = New-Object System.Drawing.Font("Yu Gothic UI", 8)
@@ -789,8 +841,9 @@ function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt
     $g.DrawString($title, $font, $black, 6, 3)
     # 1 日 1 回の計測（Elo・対外対局）は、期間の選択が短いと前回の点が外れて推移が見えないので常に全期間を描く
     $t0 = if ($allTime) { [datetime]::MinValue } else { Get-Range }
-    $ax = Get-XAxis $series $t0 $xGames ([datetime]::Now)
+    $ax = Get-XAxis $series $t0 $xGames ([datetime]::Now) $xLog
     $useGames = [bool]$ax.games
+    $useLog = [bool]$ax.log
     $xmin = [double]$ax.min; $xmax = [double]$ax.max; $xspan = [double]$ax.span
     if ([int]$ax.n -eq 0) {
         $g.DrawString("（データなし）", $font, $gray, $left, $top + 10)
@@ -841,7 +894,7 @@ function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt
     $fmt = if ($xspan -gt 3 * 86400) { "MM/dd" } else { "MM/dd HH:mm" }
     $xlab = {
         param([double]$v)
-        if ($useGames) { return (Format-Int $v) }
+        if ($useGames) { return (Format-Int (X-Unscale $v $useLog)) }
         return (From-Unix $v).ToString($fmt)
     }
     $g.DrawString((& $xlab $xmin), $font, $gray, $left, $h - $bottom + 4)
@@ -868,7 +921,7 @@ function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt
         $prevT = $null
         foreach ($p in $s.pts) {
             if ($p.t -lt $t0) { continue }
-            $xv = Pt-XVal $p $useGames
+            $xv = X-Scale (Pt-XVal $p $useGames) $useLog
             if ($null -eq $xv) { continue }
             if ($null -ne $prevT -and ($p.t - $prevT).TotalSeconds -gt $gapSec) {
                 if ($pts.Count -ge 2) { $g.DrawLines($rp, [System.Drawing.PointF[]]$pts.ToArray()) }
@@ -942,11 +995,21 @@ function Build-Series([string]$tab) {
             $all = $true; $xg = $true
             $i = 0
             $haveRating = $false
+            $trendFit = $null
             foreach ($r in $Runs) {
                 if ($script:Data.ContainsKey($r)) {
                     $rt = $script:Data[$r].rating
                     $rs = Build-Rating-Series ($r + " 強さの目盛り") (Run-Color $r $i) $rt
-                    if ($rs.pts.Count -gt 0) { $series += $rs; $haveRating = $true }
+                    if ($rs.pts.Count -gt 0) {
+                        $series += $rs; $haveRating = $true
+                        # 最近の伸びをそのまま延ばした目安の線。点がこれに乗っていれば頭打ちではない。
+                        # 全部の点に当てはめた curve_fit は、学習の初めの伸び方が違うぶん形が合わない
+                        # （実データで残差 88、最新の点が +62 上に出て「加速している」と誤読させる）ので使わない
+                        $tf = $rt.curve_fit_recent
+                        if ($null -eq $tf) { $tf = $rt.curve_fit }
+                        $ts = Build-Trend-Series ($r + " 目安（2 倍あたり）") ([System.Drawing.Color]::FromArgb(130, (Run-Color $r $i))) $tf $rt.points
+                        if ($ts.pts.Count -gt 0) { $series += $ts; if ($null -eq $trendFit) { $trendFit = $tf } }
+                    }
                 }
                 $i++
             }
@@ -991,7 +1054,7 @@ function Build-Series([string]$tab) {
                     $i++
                 }
             }
-            $note = Format-Elo-Note $detail $haveRating (Use-GamesAxis)
+            $note = Format-Elo-Note $detail $haveRating (Use-GamesAxis) $trendFit (Use-LogAxis)
         }
         "対外対局" {
             $title = "外部エンジン（fuseki_usi_server.py = 方策ネット＋やねうら王/水匠5）との勝率"
@@ -1142,7 +1205,8 @@ function Build-Series([string]$tab) {
     }
     # 5 分ごとの metrics（とコンソールの 30 秒観測）から作る系列は、観測の途切れで線を切る
     if (@("局/日", "学習", "学習目標", "較正", "処理時間", "終局内訳", "手数") -contains $tab) { foreach ($s in $series) { $s.gap = $true } }
-    return @{ title = $title; series = $series; yfmt = $yfmt; zero = $zero; note = $note; all = $all; xgames = ($xg -and (Use-GamesAxis)) }
+    return @{ title = $title; series = $series; yfmt = $yfmt; zero = $zero; note = $note; all = $all;
+              xgames = ($xg -and (Use-GamesAxis)); xlog = ($xg -and (Use-GamesAxis) -and (Use-LogAxis)) }
 }
 
 # グラフは 1 組だけ作り、選んでいる run のタブの下半分（chartSlot）に Move-Charts が付け替える
@@ -1164,8 +1228,8 @@ $cbar.Controls.Add($cmbRange)
 # Elo と 対外対局 の横軸。既定は総局数（伸びを決めるのは時間ではなく局数。時間だと止めた間も寝て見える）
 $cbar.Controls.Add((New-Label "Elo の横軸" 2))
 $script:cmbAxis = New-Object System.Windows.Forms.ComboBox
-$script:cmbAxis.DropDownStyle = "DropDownList"; $script:cmbAxis.Width = 80
-[void]$script:cmbAxis.Items.AddRange(@("総局数", "時間"))
+$script:cmbAxis.DropDownStyle = "DropDownList"; $script:cmbAxis.Width = 118
+[void]$script:cmbAxis.Items.AddRange(@("総局数", "時間", "総局数（対数）"))
 $script:cmbAxis.SelectedIndex = 0
 $script:cmbAxis.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
 $script:cmbAxis.Add_SelectedIndexChanged({ $tabs.Invalidate($true) })
@@ -1193,7 +1257,7 @@ foreach ($name in $script:TabNames) {
     $panel.Add_Paint({
         param($s, $e)
         $b = Build-Series ([string]$s.Tag)
-        Draw-Chart $e.Graphics $s.ClientSize.Width $s.ClientSize.Height $b.title $b.series $b.yfmt $b.zero $b.note ([bool]$b.all) ([bool]$b.xgames)
+        Draw-Chart $e.Graphics $s.ClientSize.Width $s.ClientSize.Height $b.title $b.series $b.yfmt $b.zero $b.note ([bool]$b.all) ([bool]$b.xgames) ([bool]$b.xlog)
     })
     $panel.Add_Resize({ param($s, $e) $s.Invalidate() })
     $page.Controls.Add($panel)

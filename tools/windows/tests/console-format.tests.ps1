@@ -11,7 +11,7 @@ if ($errors.Count -gt 0) {
     $errors | ForEach-Object { Write-Host ("構文エラー {0}:{1} {2}" -f $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber, $_.Message) }
     exit 1
 }
-$want = @("Format-Int", "Format-Ago", "From-Unix", "Ci-Val", "Format-Ci", "Format-Pct", "Format-Saturated", "New-Series", "Add-Pt", "Pt-XVal", "Get-XAxis", "Format-Elo-Anchor", "Format-Elo-Best", "Format-Elo-References", "Format-Elo-Rating", "Format-Elo-Note", "Build-Rating-Series")
+$want = @("Format-Int", "Format-Ago", "From-Unix", "Ci-Val", "Format-Ci", "Format-Pct", "Format-Saturated", "New-Series", "Add-Pt", "Pt-XVal", "Get-XAxis", "Format-Elo-Anchor", "Format-Elo-Best", "Format-Elo-References", "Format-Elo-Rating", "Format-Elo-Note", "Build-Rating-Series", "Build-Trend-Series", "X-Scale", "X-Unscale")
 $found = @{}
 foreach ($f in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
     if ($want -contains $f.Name) { $found[$f.Name] = $true; . ([scriptblock]::Create($f.Extent.Text)) }
@@ -98,14 +98,45 @@ Check "欠けた点は描かない" (Build-Rating-Series "s" 0 $holes).pts.Count
 Check "目盛りの系列（項目なし）" (Build-Rating-Series "s" 0 $null).pts.Count 0
 
 # --- グラフの注記: 既定は目盛りだけ、内訳を出したとき、目盛りがまだ無いとき ---
-Check "注記（既定）" (Format-Elo-Note $false $true $true) (
-    "「強さの目盛り」＝ 全部の対局をまとめて 1 本にした Elo。0 はいちばん古い重み。相手ごとの線は「内訳を出す」で足せる。全期間を表示")
+$scale = "「強さの目盛り」＝ 全部の対局をまとめて 1 本にした Elo。0 はいちばん古い重み。相手ごとの線は「内訳を出す」で足せる"
+Check "注記（既定）" (Format-Elo-Note $false $true $true) ($scale + "。全期間を表示")
 Check "注記（内訳）" (Format-Elo-Note $true $true $true) (
     "太い線が「強さの目盛り」（全部の対局をまとめて 1 本にした Elo）。相手ごとの線は 1 点 200 局で幅が広く、練習相手の入れ替えと相性で上下するので、目盛りのほうで伸びを見る。全期間を表示")
 Check "注記（目盛りがまだ無い）" (Format-Elo-Note $false $false $true) (
     "目盛りがまだ出せないので相手ごとの線を出している。「基準比」の 0 は系列の最初の重み、「対 …」の 0 はその参照と互角で、0 の意味が違う。全期間を表示")
 Check "注記（横軸が時間）" (Format-Elo-Note $false $true $false) (
-    "「強さの目盛り」＝ 全部の対局をまとめて 1 本にした Elo。0 はいちばん古い重み。相手ごとの線は「内訳を出す」で足せる。全期間を表示。横軸が時間だと止めた間も伸びが寝て見えるので、ふだんは「総局数」で見る")
+    $scale + "。全期間を表示。横軸が時間だと止めた間も伸びが寝て見えるので、ふだんは「総局数」で見る")
+# 目安の線があるときは「頭打ちか」の読み方を出す。ふつうの横軸なら対数の勧めも付ける
+$tfit = [pscustomobject]@{ elo_per_doubling = 140.1; intercept = -1841.9; n = 11; games_from = 4738; games_to = 2000241 }
+Check "注記（目安の線あり）" (Format-Elo-Note $false $true $true $tfit) (
+    $scale + "。点線は目安で、最近の伸び（局数 2 倍あたり +140 Elo）をそのまま延ばしたもの。**点が点線に乗っているかぎり頭打ちではない**（下に離れていけば頭打ち）。横軸を「総局数（対数）」にすると点線が直線になり、ずれが見やすい。全期間を表示")
+Check "注記（目安の線あり・対数）" (Format-Elo-Note $false $true $true $tfit $true) (
+    $scale + "。点線は目安で、最近の伸び（局数 2 倍あたり +140 Elo）をそのまま延ばしたもの。**点が点線に乗っているかぎり頭打ちではない**（下に離れていけば頭打ち）。全期間を表示。横軸は総局数の対数（右へ 1 目盛りで局数が 2 倍）。伸びは局数の対数にほぼ比例するので、ふつうの横軸では一定の伸びでも右で寝て見える")
+
+# --- 目安の線: log2(局数) に対する直線を 41 点で描く ---
+$trend = Build-Trend-Series "ls 目安" 0 $tfit @([pscustomobject]@{ t = $now; games = 4738; elo = 0.0 })
+Check "目安の線の点の数" $trend.pts.Count 41
+Check "目安の線は点線" $trend.dash $true
+Check "目安の線に印は付けない" $trend.marker $false
+# 端は当てはめた直線そのもの: a + b*log2(games)
+Check "目安の線の左端" ([Math]::Round($trend.pts[0].y, 1)) ([Math]::Round(-1841.9 + 140.1 * [Math]::Log(4738, 2), 1))
+Check "目安の線の右端" ([Math]::Round($trend.pts[40].y, 1)) ([Math]::Round(-1841.9 + 140.1 * [Math]::Log(2000241, 2), 1))
+Check "目安の線の左端の局数" $trend.pts[0].g 4738
+Check "目安の線の右端の局数" $trend.pts[40].g 2000241
+Check "目安の線に区間は付けない" $trend.pts[0].lo $null
+# 当てはめが無い・点が無い・範囲が壊れているときは描かない
+Check "目安の線（当てはめなし）" (Build-Trend-Series "s" 0 $null @([pscustomobject]@{ t = $now })).pts.Count 0
+Check "目安の線（点なし）" (Build-Trend-Series "s" 0 $tfit @()).pts.Count 0
+$bad = [pscustomobject]@{ elo_per_doubling = 1.0; intercept = 0.0; games_from = 100; games_to = 100 }
+Check "目安の線（幅なし）" (Build-Trend-Series "s" 0 $bad @([pscustomobject]@{ t = $now })).pts.Count 0
+
+# --- 横軸の拡大縮小（対数） ---
+Check "対数にしない" (X-Scale 1000 $false) 1000
+Check "対数にする" (X-Scale 1024 $true) 10
+Check "対数は 1 局より下に行かない" (X-Scale 0 $true) 0
+Check "対数（値なし）" (X-Scale $null $true) $null
+Check "対数から戻す" ([Math]::Round((X-Unscale 10 $true))) 1024
+Check "対数でなければそのまま戻す" (X-Unscale 1000 $false) 1000
 
 # --- 区間が無い（古い行）でも落ちない ---
 Check "区間なし" (Format-Ci $null) ""
@@ -143,6 +174,21 @@ Check "点が無い" $e2.n 0
 # 局数が 1 点だけでも幅 0 で割らない
 $f = Get-XAxis (Mk @(@{t=60; y=2; g=800281})) $min $true $now
 Check "1 点でも幅がある" ($f.span -ge 1) $true
+
+# --- 対数の横軸: 端は log2(局数)。時間の軸では対数にしない ---
+$L = Get-XAxis (Mk @(@{t=600; y=1; g=1024}, @{t=60; y=2; g=1048576})) $min $true $now $true
+Check "対数の軸" ("{0} {1} {2} {3}" -f $L.games, $L.log, $L.min, $L.max) "True True 10 20"
+Check "対数の軸の幅" $L.span 10
+# 総局数の軸のままなら対数にしない
+$N = Get-XAxis (Mk @(@{t=600; y=1; g=1024}, @{t=60; y=2; g=1048576})) $min $true $now $false
+Check "対数を頼まなければそのまま" ("{0} {1}" -f $N.log, $N.max) "False 1048576"
+# 時間の軸に落ちたら対数にしない（Unix 秒の対数は読めない）
+$T = Get-XAxis (Mk @(@{t=600; y=1; g=$null}, @{t=60; y=2; g=$null})) $min $true $now $true
+Check "時間の軸では対数にしない" ("{0} {1}" -f $T.games, $T.log) "False False"
+# 1 点だけでも幅 0 で割らない（対数は「何倍か」なので 1 局ぶんでは足りない）
+$L1 = Get-XAxis (Mk @(@{t=60; y=2; g=1048576})) $min $true $now $true
+Check "対数で 1 点でも幅がある" ($L1.span -ge 0.5) $true
+Check "対数で 1 点の右端" $L1.max 20
 
 if ($fails -gt 0) { Write-Host "`n$fails 件 失敗"; exit 1 }
 Write-Host "`nすべて通過"

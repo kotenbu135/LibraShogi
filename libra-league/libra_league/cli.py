@@ -515,6 +515,8 @@ def main(argv: list[str] | None = None) -> int:
                     _cv = rating_curve(sd, _rt, g_of=g_of, t_of=time_of_step(_m))
                     out["rating"] = {"anchor": _rt.get("anchor"), "fit": _rt.get("fit"),
                                      "points": _cv.get("points"), "curve_fit": _cv.get("fit"),
+                                     "curve_fit_recent": _cv.get("fit_recent"),
+                                     "recent_doublings": _cv.get("recent_doublings"),
                                      "thin": _cv.get("thin")}
                 except Exception as e:  # 目盛りが出せなくても status は返す
                     out["rating"] = {"error": f"{type(e).__name__}: {e}"}
