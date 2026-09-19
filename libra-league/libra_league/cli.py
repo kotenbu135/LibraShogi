@@ -559,7 +559,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"session: games {eng.get('games')}  avg plies {eng.get('plies_sum', 0) / g:.1f}  "
                       f"sente/draw/gote {eng.get('sente_wins')}/{eng.get('draws')}/{eng.get('gote_wins')}  "
                       f"ruling41 {eng.get('ruling41')}  mate {eng.get('no_legal_move')}  sennichite {eng.get('sennichite')}  "
-                      f"perpetual {eng.get('perpetual_check')}  max_ply {eng.get('max_ply')}  sims/move {eng.get('sims', 0) / max(1, eng.get('moves', 1)):.1f}")
+                      f"perpetual {eng.get('perpetual_check')}  max_ply {eng.get('max_ply')}"
+                      + (f"  resign {eng.get('resign')}" if eng.get("resign") else "")
+                      + f"  sims/move {eng.get('sims', 0) / max(1, eng.get('moves', 1)):.1f}")
             if st.get("train"):
                 print("train:", json.dumps(st["train"]))
             if st.get("timing"):
