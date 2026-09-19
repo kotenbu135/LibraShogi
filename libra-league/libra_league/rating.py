@@ -278,17 +278,23 @@ def render(r: dict) -> str:
     return "\n".join(L)
 
 
-def curve(sd: StateDir, r: dict | None = None) -> dict:
+# 曲線に載せる点の最低局数。これより少ない点は Elo の幅が広すぎて、区間の「2 倍あたり」が壊れる
+# （2026-09-19 の step 74,627 は 10 局で区間 ±287 Elo。曲線に入れると −190 Elo / 2 倍という区間が出た）
+CURVE_MIN_GAMES = 200
+
+
+def curve(sd: StateDir, r: dict | None = None, min_games: int = CURVE_MIN_GAMES) -> dict:
     """この run の archive の Elo を総局数の順に並べ、伸びの傾き（2 倍あたりの Elo）を出す。
 
-    目盛りは `fit` が全部の対局から一度に決めたもので、参照を入れ替えても鎖を継ぎ足さない。"""
+    目盛りは `fit` が全部の対局から一度に決めたもので、参照を入れ替えても鎖を継ぎ足さない。
+    対局が `min_games` に満たない点は曲線から外す（`thin` に名前を残す）。"""
     from .auto import load_metrics
     from .scaling import fit as line_fit
     from .scaling import games_of_step, intervals
 
     r = rating(sd) if r is None else r
     g_of = games_of_step(load_metrics(sd, 100000))
-    pts = []
+    pts, thin = [], []
     for nm, v in (r.get("nodes") or {}).items():
         st = v.get("step")
         if st is None:
@@ -296,8 +302,11 @@ def curve(sd: StateDir, r: dict | None = None) -> dict:
         g = g_of(st)
         if g is None:
             continue
+        if int(v.get("games") or 0) < min_games:
+            thin.append(nm)
+            continue
         pts.append({"step": st, "games": g, "elo": v["elo"], "ci95": v["ci95"], "n": v["games"],
                     "opponents": v["opponents"], "score": 0.5, "in_band": True, "node": nm})
     pts.sort(key=lambda p: p["games"])
-    return {"points": pts, "intervals": intervals(pts), "fit": line_fit(pts),
-            "anchor": r.get("anchor"), "misfit": (r.get("fit") or {}).get("chi2_per_df")}
+    return {"points": pts, "intervals": intervals(pts), "fit": line_fit(pts), "thin": sorted(thin),
+            "min_games": min_games, "anchor": r.get("anchor"), "misfit": (r.get("fit") or {}).get("chi2_per_df")}

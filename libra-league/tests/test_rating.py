@@ -106,3 +106,29 @@ def test_rating_and_curve_over_a_run(tmp_path):
     assert all(abs(iv["elo_per_doubling"] - 400 * math.log10(3)) < 1.0 for iv in c["intervals"])
     assert abs(c["fit"]["elo_per_doubling"] - 400 * math.log10(3)) < 1.0
     assert node_step(c["points"][0]["node"]) == 400
+    assert c["thin"] == [] and c["min_games"] == 200
+
+
+def test_curve_drops_points_with_too_few_games(tmp_path):
+    """対局が少なすぎる点は曲線から外す。
+
+    2026-09-19 の step 74,627 は外部計測の 10 局しか無く、区間 ±287 Elo だったのに曲線に載り、
+    「2 倍あたり −190 Elo」という区間を作っていた。"""
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    with open(sd.root / "metrics.jsonl", "w", encoding="utf-8") as f:
+        for step, games in [(400, 100000), (600, 150000), (800, 200000)]:
+            f.write(json.dumps({"t": float(step), "step": step, "games_total": games}) + "\n")
+    _w(sd, "best.jsonl", [{"t": 1.0, "step": 800, "best_step": 400, "n": 1000, "score_new": 0.75}])
+    (sd.root / "matches").mkdir(exist_ok=True)
+    (sd.root / "matches" / "a.summary.json").write_text(json.dumps(
+        {"n": 10, "a_points": 3.0, "b": "外部エンジン", "libra_options": {"DNN_Model": "/x/ckpt_000000600.onnx"}}),
+        encoding="utf-8")
+    (sd.root / "matches" / "b.summary.json").write_text(json.dumps(
+        {"n": 10, "a_points": 8.0, "b": "外部エンジン", "libra_options": {"DNN_Model": "/x/ckpt_000000800.onnx"}}),
+        encoding="utf-8")
+    c = curve(sd)
+    assert c["thin"] == ["step 600"]                      # 10 局しか無いので外す
+    assert [p["step"] for p in c["points"]] == [400, 800]
+    # 少ない点を入れない指定にすれば戻る
+    assert [p["step"] for p in curve(sd, min_games=1)["points"]] == [400, 600, 800]

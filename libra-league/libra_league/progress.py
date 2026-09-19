@@ -97,6 +97,9 @@ def snapshot(sd: StateDir, cfg: dict | None = None, points: int = 120, now: floa
             "best_step": best.get("step"), "best_stall": auto.get("best_stall"),
             "queue": len(auto.get("queue") or []), "running": running.get("kind"),
             "last_archive_games": auto.get("last_archive_games"),
+            # 今の固定の参照と、勝ちすぎて自動で外したもの（reference_rotate。docs/runbook.md §6）
+            "references": [Path(x).name for x in (auto.get("references") or [])],
+            "references_retired": [Path(x).name for x in (auto.get("references_retired") or [])],
         },
         "auto_cfg": {k: acfg.get(k) for k in ("enabled", "every_hours", "every_games", "eval_games", "eval_sims", "anchor_games",
                                               "best_games", "reference_games", "reference_ckpts", "match_games", "match_go")},
