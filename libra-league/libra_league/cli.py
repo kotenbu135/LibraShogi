@@ -116,6 +116,12 @@ def main(argv: list[str] | None = None) -> int:
     p_ca.add_argument("--games", type=int, default=20000, help="新しい側から何局使うか（書き出し済みのチャンクから）")
     p_ca.add_argument("--bins", type=int, default=10)
     p_ca.add_argument("--json", action="store_true")
+    p_rg = sub.add_parser("resign", help="自己対局に投了を入れたら評価を何割減らせるか（と誤投了の割合）を、打ち終わった棋譜から見積もる")
+    p_rg.add_argument("--games", type=int, default=20000, help="新しい側から何局使うか（書き出し済みのチャンクから）")
+    p_rg.add_argument("--thresholds", default=None, help="しきい値（コンマ区切り。既定 0.90,0.95,0.98,0.99）")
+    p_rg.add_argument("--runs", default=None, help="連続で何手続いたら投了するか（コンマ区切り。既定 1,2,3）")
+    p_rg.add_argument("--min-move", type=int, default=None, help="この添字より前では投了しない（既定: 布石の終わり 38）")
+    p_rg.add_argument("--json", action="store_true")
     p_gp = sub.add_parser("genprof", help="一般化の物差し: 保存済みの重みを、リプレイの指定チャンクの局面で測る（価値の相関・二乗誤差、方策の交差エントロピー）")
     p_gp.add_argument("--ckpt", default=None, help="既定: <run>/checkpoints/latest.pt")
     p_gp.add_argument("--chunks", default=None, help="チャンク番号（コンマ区切り。既定: 最新から 1,000 チャンクごとに 6 点）")
@@ -225,6 +231,18 @@ def main(argv: list[str] | None = None) -> int:
         state = sd.read_state() if sd.state_json.exists() else {}
         row = make_row(newest_games(sd.replay, a.games), state.get("step"), state.get("generation"), a.bins)
         print(json.dumps(row, ensure_ascii=False) if a.json else format_table(row))
+        return 0
+    if a.cmd == "resign":
+        from .calibrate import newest_games
+        from .config import load_config
+        from .resign import DEFAULT_RUNS, DEFAULT_THRESHOLDS, FUSEKI_MOVES, format_table, resign_scan
+
+        search = load_config(sd.config_toml if sd.config_toml.exists() else None)["search"]
+        thr = tuple(float(x) for x in a.thresholds.split(",")) if a.thresholds else DEFAULT_THRESHOLDS
+        runs = tuple(int(x) for x in a.runs.split(",")) if a.runs else DEFAULT_RUNS
+        res = resign_scan(newest_games(sd.replay, a.games), int(search["full_sims"]), int(search["fast_sims"]),
+                          thr, runs, FUSEKI_MOVES if a.min_move is None else a.min_move)
+        print(json.dumps(res, ensure_ascii=False) if a.json else format_table(res))
         return 0
     if a.cmd == "config":
         from .runconfig import adopt, local_path, repo_config_path, resolve
