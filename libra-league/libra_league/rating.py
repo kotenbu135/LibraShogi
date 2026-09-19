@@ -283,17 +283,22 @@ def render(r: dict) -> str:
 CURVE_MIN_GAMES = 200
 
 
-def curve(sd: StateDir, r: dict | None = None, min_games: int = CURVE_MIN_GAMES) -> dict:
+def curve(sd: StateDir, r: dict | None = None, min_games: int = CURVE_MIN_GAMES,
+          g_of=None, t_of=None) -> dict:
     """この run の archive の Elo を総局数の順に並べ、伸びの傾き（2 倍あたりの Elo）を出す。
 
     目盛りは `fit` が全部の対局から一度に決めたもので、参照を入れ替えても鎖を継ぎ足さない。
     対局が `min_games` に満たない点は曲線から外す（`thin` に名前を残す）。"""
     from .auto import load_metrics
     from .scaling import fit as line_fit
-    from .scaling import games_of_step, intervals
+    from .scaling import games_of_step, intervals, time_of_step
 
     r = rating(sd) if r is None else r
-    g_of = games_of_step(load_metrics(sd, 100000))
+    if g_of is None or t_of is None:
+        # 呼ぶ側が既に metrics を読んでいれば g_of・t_of をもらう（`libra status --history` は同じものを使う）
+        _m = load_metrics(sd, 100000)
+        g_of = games_of_step(_m) if g_of is None else g_of
+        t_of = time_of_step(_m) if t_of is None else t_of
     pts, thin = [], []
     for nm, v in (r.get("nodes") or {}).items():
         st = v.get("step")
@@ -305,7 +310,7 @@ def curve(sd: StateDir, r: dict | None = None, min_games: int = CURVE_MIN_GAMES)
         if int(v.get("games") or 0) < min_games:
             thin.append(nm)
             continue
-        pts.append({"step": st, "games": g, "elo": v["elo"], "ci95": v["ci95"], "n": v["games"],
+        pts.append({"step": st, "games": g, "t": t_of(st), "elo": v["elo"], "ci95": v["ci95"], "n": v["games"],
                     "opponents": v["opponents"], "score": 0.5, "in_band": True, "node": nm})
     pts.sort(key=lambda p: p["games"])
     return {"points": pts, "intervals": intervals(pts), "fit": line_fit(pts), "thin": sorted(thin),

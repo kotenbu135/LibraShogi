@@ -4,7 +4,7 @@ import json
 import math
 
 from libra_league.cli import main
-from libra_league.scaling import fit, games_of_step, intervals, reference_points, scaling, stitch
+from libra_league.scaling import fit, games_of_step, intervals, reference_points, scaling, stitch, time_of_step
 from libra_league.state import StateDir
 
 
@@ -31,6 +31,18 @@ def test_games_of_step_interpolates():
     assert games_of_step([])(100) is None
     # 同じ step が 2 行あっても割り算で落ちない
     assert games_of_step([{"step": 5, "games_total": 10}, {"step": 5, "games_total": 20}])(5) == 10
+
+
+def test_time_of_step_interpolates():
+    """step → 時刻。管理コンソールの Elo のグラフで横軸を「時間」にしたときに使う。"""
+    t = time_of_step([{"step": 100, "t": 1000.0}, {"step": 200, "t": 3000.0}])
+    assert t(100) == 1000.0 and t(200) == 3000.0
+    assert t(150) == 2000.0          # 間は直線
+    assert t(50) == 1000.0 and t(999) == 3000.0  # 外は端の値
+    assert t(None) is None
+    assert time_of_step([])(100) is None
+    assert time_of_step([{"step": 5, "t": 1.0}, {"step": 5, "t": 2.0}])(5) == 1.0   # 同じ step が 2 行でも落ちない
+    assert time_of_step([{"step": 1, "games_total": 2}])(1) is None                 # t が無い行は使わない
 
 
 def test_intervals_and_fit():

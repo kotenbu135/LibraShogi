@@ -97,6 +97,7 @@ $script:Last = @{}      # run -> 直近の status オブジェクト
 $script:Notes = @{}     # run -> @{text; error; until}（操作の結果。ステータスバーに until まで出す）
 $script:StartCheck = @{} # run -> 起動を押した後、稼働を確かめる期限
 $script:Ui = @{}        # run -> @{vals; log; buttons; autoButtons; autoTips}
+$script:chkEloDetail = $null  # Elo のグラフに相手ごとの線も出すか（画面を作る前は $null ＝ 出さない）
 $script:NextFetch = [datetime]::MinValue
 $script:NextHistory = [datetime]::MinValue
 $script:ShotDone = $false
@@ -171,6 +172,21 @@ function Format-Elo-Best($row) {
     $tail = if ($row.improved) { "最強を更新" } else { "最強を抜けず、足踏み {0} 回" -f $row.stall }
     return "最強比 {0:+0.0;-0.0;0}{1}（step {2} が step {3} に {4}{5}で{6}、{7}）" -f [double]$row.elo_vs_best, (Format-Ci $row.ci95),
         (Format-Int $row.step), (Format-Int $row.best_step), (Format-Pct $row.score_new), (Format-Saturated $row.score_new), $tail, (Format-Ago (From-Unix $row.t))
+}
+function Format-Elo-Rating($rating) {
+    # 強さの目盛り（全部の対局をまとめて 1 本にした Bradley-Terry の Elo）。いちばん新しい点と、その前の点との差。
+    # 相手ごとの値（基準比・最強比・対 …）と違って、練習相手を入れ替えても 0 の意味が動かない
+    if ($null -eq $rating) { return $null }
+    $pts = @(@($rating.points) | Where-Object { $null -ne $_ -and $null -ne $_.elo -and $null -ne $_.games })
+    if ($pts.Count -eq 0) { return $null }
+    $last = $pts[$pts.Count - 1]
+    $out = "目盛り {0:+0.0;-0.0;0}{1}（step {2}、{3} 局の時点）" -f [double]$last.elo, (Format-Ci $last.ci95),
+        (Format-Int $last.step), (Format-Int $last.games)
+    if ($pts.Count -gt 1) {
+        $prev = $pts[$pts.Count - 2]
+        $out += "、前の点（{0} 局）から {1:+0.0;-0.0;0}" -f (Format-Int $prev.games), ([double]$last.elo - [double]$prev.elo)
+    }
+    return $out
 }
 function Format-Elo-References($rows) {
     # 固定の参照は run をまたいで同じ相手なので絶対の物差しになる（docs/restart-plan.md §3 M4）。参照ごとに最新の 1 行だけ出す
@@ -597,7 +613,7 @@ $script:Keys = @(
     @("gpd", "局/日（1 時間平均）"), @("measured", "局/日（実測）"), @("active", "同時局数"), @("elapsed", "稼働 / セッション局数"),
     @("results", "先手 / 引分 / 後手"), @("plies", "平均手数 / sims/手"), @("loss", "loss / policy / value"),
     @("lr", "lr / 学習 1 回"), @("gpu", "GPU メモリ"), @("ckpt", "最終チェックポイント"), @("exploiter", "対本体 勝率"), @("restarts", "再起動"),
-    @("elo", "強さ（基準比 Elo）"), @("reference", "強さ（固定の参照 Elo）"), @("match", "対外対局 勝率"), @("auto", "自動計測")
+    @("elo", "強さ（Elo）"), @("reference", "強さ（固定の参照 Elo）"), @("match", "対外対局 勝率"), @("auto", "自動計測")
 )
 function New-RunPanel([string]$run) {
     # 上から 状態の表 / ボタン / グラフ（Move-Charts が選んでいる run の chartSlot に付け替える。log.txt の末尾はグラフの「ログ」タブ）
@@ -704,14 +720,32 @@ function Get-XAxis($series, [datetime]$t0, [bool]$xGames, [datetime]$now) {
     }
     return @{ games = $useGames; min = $min; max = $max; span = [Math]::Max(1.0, $max - $min); n = $n }
 }
+function Show-Elo-Detail {
+    # Elo のグラフに相手ごとの線（基準比・鏡・対 …）も出すか。既定は出さない
+    if ($null -eq $script:chkEloDetail) { return $false }
+    return [bool]$script:chkEloDetail.Checked
+}
+function Format-Elo-Note([bool]$detail, [bool]$haveRating, [bool]$useGames) {
+    # グラフの下の注記（純関数。tools/windows/tests/console-format.tests.ps1 が試す）
+    $n = if (-not $haveRating) {
+        "目盛りがまだ出せないので相手ごとの線を出している。「基準比」の 0 は系列の最初の重み、「対 …」の 0 はその参照と互角で、0 の意味が違う"
+    } elseif ($detail) {
+        "太い線が「強さの目盛り」（全部の対局をまとめて 1 本にした Elo）。相手ごとの線は 1 点 200 局で幅が広く、練習相手の入れ替えと相性で上下するので、目盛りのほうで伸びを見る"
+    } else {
+        "「強さの目盛り」＝ 全部の対局をまとめて 1 本にした Elo。0 はいちばん古い重み。相手ごとの線は「内訳を出す」で足せる"
+    }
+    $n += "。全期間を表示"
+    if (-not $useGames) { $n += "。横軸が時間だと止めた間も伸びが寝て見えるので、ふだんは「総局数」で見る" }
+    return $n
+}
 function Use-GamesAxis {
     # Elo と 対外対局 の横軸。学習を進めるのは時間ではなく局数（止めている間・GPU を分け合う間は
     # 同じ時間でも進みが違う）ので、既定は総局数。$cmbAxis がまだ無い起動直後も総局数
     if ($null -eq $script:cmbAxis) { return $true }
     return ($script:cmbAxis.SelectedIndex -ne 1)
 }
-function New-Series([string]$name, $color, [bool]$marker = $false, [bool]$dash = $false) {
-    return @{ name = $name; color = $color; pts = (New-Object System.Collections.ArrayList); marker = $marker; dash = $dash; gap = $false }
+function New-Series([string]$name, $color, [bool]$marker = $false, [bool]$dash = $false, [single]$width = 2) {
+    return @{ name = $name; color = $color; pts = (New-Object System.Collections.ArrayList); marker = $marker; dash = $dash; gap = $false; width = $width }
 }
 function Add-Pt($series, [datetime]$t, [double]$y, $lo = $null, $hi = $null, [string]$label = "", $g = $null) {
     # g は「その重みを保存した時点の総局数」（status --history の games_at）。横軸を総局数にするときに使う
@@ -724,6 +758,22 @@ function Pt-XVal($p, [bool]$useGames) {
         return [double]$p.g
     }
     return [double]([System.DateTimeOffset]::new($p.t).ToUnixTimeMilliseconds() / 1000.0)
+}
+function Build-Rating-Series([string]$name, $color, $rating) {
+    # 「強さの目盛り」の系列。status --history の rating.points（全部の対局をまとめて 1 本にした
+    # Bradley-Terry の Elo）から作る。相手ごとの線は 1 点 200 局で幅が広く、参照の入れ替えと
+    # じゃんけん（非推移性）で上下するので、下がっていないのに下がって見える。目盛りは全部の
+    # 対局を一度に当てはめるので、参照を入れ替えても 0 の意味が動かない（2026-09-19 のユーザーの
+    # 「Elo さがってませんか」から）
+    $s = New-Series $name $color $true $false 3.5
+    if ($null -eq $rating) { return $s }
+    foreach ($p in @($rating.points)) {
+        # t が無い点は時間の横軸で置く場所が決まらないので描かない（step から引き直せた点だけ出す）
+        if ($null -eq $p -or $null -eq $p.elo -or $null -eq $p.t -or $null -eq $p.games) { continue }
+        Add-Pt $s (From-Unix $p.t) ([double]$p.elo) (Ci-Val $p.ci95 0) (Ci-Val $p.ci95 1) `
+            ("目盛り step " + (Format-Int $p.step)) $p.games
+    }
+    return $s
 }
 function Run-Color([string]$run, [int]$i = 0) {
     if ($script:Colors.ContainsKey($run)) { return $script:Colors[$run] }
@@ -802,7 +852,9 @@ function Draw-Chart($g, [int]$w, [int]$h, [string]$title, $series, [string]$yfmt
     $ly = 3 + $lineH * $legendRow
     foreach ($s in $shown) {
         $brush = New-Object System.Drawing.SolidBrush($s.color)
-        $rp = New-Object System.Drawing.Pen($s.color, 2)
+        # 線の太さ。強さの目盛りだけ太くして主役にする（古い系列に width が無くても既定の 2 で描く）
+        $lw = if ($null -ne $s.width) { [single]$s.width } else { [single]2 }
+        $rp = New-Object System.Drawing.Pen($s.color, $lw)
         if ($s.dash) { $rp.DashStyle = [System.Drawing.Drawing2D.DashStyle]::Dash }
         $pts = New-Object System.Collections.ArrayList
         $last = $null
@@ -882,49 +934,64 @@ function Build-Series([string]$tab) {
             }
         }
         "Elo" {
-            $title = "強さの推移（Elo。縦線は 95% 区間）"
+            # 既定は「強さの目盛り」1 本だけ。相手ごとの線は 1 点 200 局で幅が広く、参照の入れ替えと
+            # じゃんけんで上下するので、並べると下がっていないのに下がって見える（2026-09-19 のユーザーの
+            # 「Elo さがってませんか？線がいっぱいあってよくわからない」）。内訳は「内訳を出す」で足す
+            $detail = Show-Elo-Detail
+            $title = if ($detail) { "強さの推移（Elo。縦線は 95% 区間）" } else { "強さの推移（Elo の目盛り。縦線は 95% 区間）" }
             $all = $true; $xg = $true
             $i = 0
+            $haveRating = $false
             foreach ($r in $Runs) {
-                $s = New-Series ($r + " 基準比") (Run-Color $r $i) $true
                 if ($script:Data.ContainsKey($r)) {
-                    foreach ($a in @($script:Data[$r].anchor)) {
-                        $lo = Ci-Val $a.ci95 0
-                        $hi = Ci-Val $a.ci95 1
-                        Add-Pt $s (From-Unix $a.t) ([double]$a.elo) $lo $hi ("基準比 step " + (Format-Int $a.step)) $a.games_at
-                    }
-                }
-                $series += $s
-                # 鎖は同じ重みを基準比と別の方法で測った補助の値。同じ色で並ぶと基準比が下がったように見えるので薄くして名前を付ける
-                $c = New-Series ($r + " 鎖") ([System.Drawing.Color]::FromArgb(110, (Run-Color $r $i))) $false $true
-                if ($script:Data.ContainsKey($r)) {
-                    foreach ($e in @($script:Data[$r].evals)) {
-                        if ($null -eq $e.cumulative) { continue }
-                        Add-Pt $c (From-Unix $e.time) ([double]$e.cumulative) $null $null "鎖" $e.games_at
-                    }
-                }
-                $series += $c
-                # 固定の参照（[auto] reference_ckpts）との差。run をまたいで同じ相手なので絶対の物差しになる（docs/restart-plan.md §3 M4）
-                if ($script:Data.ContainsKey($r)) {
-                    # 参照ごとに RefPalette の色を割り当てる（run の色で描くと基準比と同じ青になって見分けが付かない）。run が 2 つ目以降なら破線
-                    $byRef = @{}
-                    foreach ($e in @($script:Data[$r].reference)) {
-                        if ($null -eq $e.elo) { continue }
-                        if (-not $byRef.ContainsKey([string]$e.ref)) { $byRef[[string]$e.ref] = (New-Object System.Collections.ArrayList) }
-                        [void]$byRef[[string]$e.ref].Add($e)
-                    }
-                    $j = 0
-                    foreach ($k in ($byRef.Keys | Sort-Object)) {
-                        $rs = New-Series ($r + " 対 " + $k) $script:RefPalette[$j % $script:RefPalette.Length] $true ($i -gt 0)
-                        foreach ($e in $byRef[$k]) { Add-Pt $rs (From-Unix $e.t) ([double]$e.elo) (Ci-Val $e.ci95 0) (Ci-Val $e.ci95 1) ("対 " + $k + " step " + (Format-Int $e.step)) $e.games_at }
-                        $series += $rs
-                        $j++
-                    }
+                    $rt = $script:Data[$r].rating
+                    $rs = Build-Rating-Series ($r + " 強さの目盛り") (Run-Color $r $i) $rt
+                    if ($rs.pts.Count -gt 0) { $series += $rs; $haveRating = $true }
                 }
                 $i++
             }
-            $note = "「基準比」の 0 は系列の最初の重み（基準に 85% 勝つと基準を置き換えて差を足す）。「対 …」の 0 はその参照と互角で、基準比とは 0 の意味が違う。全期間を表示"
-            if (-not (Use-GamesAxis)) { $note += "。横軸が時間だと止めた間も伸びが寝て見えるので、ふだんは「総局数」で見る" }
+            if ($detail -or -not $haveRating) {
+                $i = 0
+                foreach ($r in $Runs) {
+                    $s = New-Series ($r + " 基準比") ([System.Drawing.Color]::FromArgb(150, (Run-Color $r $i))) $true
+                    if ($script:Data.ContainsKey($r)) {
+                        foreach ($a in @($script:Data[$r].anchor)) {
+                            $lo = Ci-Val $a.ci95 0
+                            $hi = Ci-Val $a.ci95 1
+                            Add-Pt $s (From-Unix $a.t) ([double]$a.elo) $lo $hi ("基準比 step " + (Format-Int $a.step)) $a.games_at
+                        }
+                    }
+                    $series += $s
+                    # 鎖は同じ重みを基準比と別の方法で測った補助の値。同じ色で並ぶと基準比が下がったように見えるので薄くして名前を付ける
+                    $c = New-Series ($r + " 鎖") ([System.Drawing.Color]::FromArgb(110, (Run-Color $r $i))) $false $true
+                    if ($script:Data.ContainsKey($r)) {
+                        foreach ($e in @($script:Data[$r].evals)) {
+                            if ($null -eq $e.cumulative) { continue }
+                            Add-Pt $c (From-Unix $e.time) ([double]$e.cumulative) $null $null "鎖" $e.games_at
+                        }
+                    }
+                    $series += $c
+                    # 固定の参照（[auto] reference_ckpts）との差。run をまたいで同じ相手なので絶対の物差しになる（docs/restart-plan.md §3 M4）
+                    if ($script:Data.ContainsKey($r)) {
+                        # 参照ごとに RefPalette の色を割り当てる（run の色で描くと基準比と同じ青になって見分けが付かない）。run が 2 つ目以降なら破線
+                        $byRef = @{}
+                        foreach ($e in @($script:Data[$r].reference)) {
+                            if ($null -eq $e.elo) { continue }
+                            if (-not $byRef.ContainsKey([string]$e.ref)) { $byRef[[string]$e.ref] = (New-Object System.Collections.ArrayList) }
+                            [void]$byRef[[string]$e.ref].Add($e)
+                        }
+                        $j = 0
+                        foreach ($k in ($byRef.Keys | Sort-Object)) {
+                            $rfs = New-Series ($r + " 対 " + $k) $script:RefPalette[$j % $script:RefPalette.Length] $true ($i -gt 0)
+                            foreach ($e in $byRef[$k]) { Add-Pt $rfs (From-Unix $e.t) ([double]$e.elo) (Ci-Val $e.ci95 0) (Ci-Val $e.ci95 1) ("対 " + $k + " step " + (Format-Int $e.step)) $e.games_at }
+                            $series += $rfs
+                            $j++
+                        }
+                    }
+                    $i++
+                }
+            }
+            $note = Format-Elo-Note $detail $haveRating (Use-GamesAxis)
         }
         "対外対局" {
             $title = "外部エンジン（fuseki_usi_server.py = 方策ネット＋やねうら王/水匠5）との勝率"
@@ -1103,6 +1170,12 @@ $script:cmbAxis.SelectedIndex = 0
 $script:cmbAxis.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
 $script:cmbAxis.Add_SelectedIndexChanged({ $tabs.Invalidate($true) })
 $cbar.Controls.Add($script:cmbAxis)
+# Elo のグラフは既定で「強さの目盛り」1 本。相手ごとの線（基準比・鏡・対 …）はここで足す
+$script:chkEloDetail = New-Object System.Windows.Forms.CheckBox
+$script:chkEloDetail.Text = "Elo の内訳を出す"; $script:chkEloDetail.AutoSize = $true
+$script:chkEloDetail.Margin = New-Object System.Windows.Forms.Padding(2, 6, 8, 0)
+$script:chkEloDetail.Add_CheckedChanged({ $tabs.Invalidate($true) })
+$cbar.Controls.Add($script:chkEloDetail)
 $lblChartNote = New-Label "学習・学習目標・較正・処理時間・終局内訳・手数はこのタブの run、ほかは両方" 4
 $lblChartNote.ForeColor = [System.Drawing.Color]::DimGray
 $cbar.Controls.Add($lblChartNote)
@@ -1539,6 +1612,8 @@ function Update-Panel([string]$run, $obj) {
         $d = $script:Data[$run]
         $anc = @($d.anchor)
         $chain = @(@($d.evals) | Where-Object { $null -ne $_.cumulative })
+        # 目盛り（Bradley-Terry）を先頭に出す。基準比・最強比は相手が動くので、伸びはまずこの行で見る
+        $ratingText = Format-Elo-Rating $d.rating
         if ($anc.Count -gt 0) {
             $v.elo.Text = Format-Elo-Anchor $anc[$anc.Count - 1]
         } elseif ($chain.Count -gt 0) {
@@ -1551,6 +1626,7 @@ function Update-Panel([string]$run, $obj) {
         # 最強比（[auto] best_games）: どの step が、そのときの最強だった step に勝ったか（docs/restart-plan.md §3 M2）
         $bs = @($d.best)
         if ($bs.Count -gt 0) { $v.elo.Text += "`r`n" + (Format-Elo-Best $bs[$bs.Count - 1]) }
+        if ($null -ne $ratingText) { $v.elo.Text = $ratingText + "`r`n" + $v.elo.Text }
         # 固定の参照（[auto] reference_ckpts）: 基準比と違って相手が動かないので、世代をまたいで比べられる（同 §3 M4）
         $refText = Format-Elo-References $d.reference
         $v.reference.Text = if ($null -ne $refText) { $refText } else { "（まだ無い）" }
@@ -1561,7 +1637,7 @@ function Update-Panel([string]$run, $obj) {
         } else { $v.match.Text = "（まだ無い）" }
         # 自動計測が無効で結果も無い run（搾取者）では強さ・対外対局の行を隠す
         $autoCfgOn = ($null -ne $d.auto_cfg -and $d.auto_cfg.enabled)
-        Set-RowVisible $u "elo" ($autoCfgOn -or $anc.Count -gt 0 -or $chain.Count -gt 0)
+        Set-RowVisible $u "elo" ($autoCfgOn -or $anc.Count -gt 0 -or $chain.Count -gt 0 -or $null -ne $ratingText)
         Set-RowVisible $u "reference" ($null -ne $refText)
         Set-RowVisible $u "match" ($autoCfgOn -or $ms.Count -gt 0)
         $au = $d.auto; $ac = $d.auto_cfg

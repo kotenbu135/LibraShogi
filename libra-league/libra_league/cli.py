@@ -496,13 +496,28 @@ def main(argv: list[str] | None = None) -> int:
                 out["matches"] = collect_matches(sd)
                 # 計測の行に「その重みを保存した時点の総局数」を足す（管理コンソールの Elo グラフの横軸。
                 # 行の games は打ち終わった時刻の総局数で archive より後なので使えない。scaling.games_of_step と同じ）
-                from .scaling import games_of_step
+                from .scaling import games_of_step, time_of_step
 
-                g_of = games_of_step(load_metrics(sd, 100000))
+                _m = load_metrics(sd, 100000)
+                g_of = games_of_step(_m)
                 for key, step_key in (("anchor", "step"), ("best", "step"), ("reference", "step"),
                                       ("matches", "libra_step"), ("evals", "step_b")):
                     for row in out[key]:
                         row["games_at"] = g_of(row.get(step_key))
+                # 全部の対局をまとめて 1 本にした Elo の目盛り（Bradley-Terry）。管理コンソールの Elo の
+                # グラフはこれを主役にする（相手ごとの線は 200 局ずつで幅が広く、入れ替えとじゃんけんで
+                # 上下するため、下がっていないのに下がって見える。2026-09-19 のユーザーの指摘）
+                try:
+                    from .rating import curve as rating_curve
+                    from .rating import rating as rating_fit
+
+                    _rt = rating_fit(sd)
+                    _cv = rating_curve(sd, _rt, g_of=g_of, t_of=time_of_step(_m))
+                    out["rating"] = {"anchor": _rt.get("anchor"), "fit": _rt.get("fit"),
+                                     "points": _cv.get("points"), "curve_fit": _cv.get("fit"),
+                                     "thin": _cv.get("thin")}
+                except Exception as e:  # 目盛りが出せなくても status は返す
+                    out["rating"] = {"error": f"{type(e).__name__}: {e}"}
                 from .calibrate import load_calib
 
                 out["calib"] = load_calib(sd, a.history)
