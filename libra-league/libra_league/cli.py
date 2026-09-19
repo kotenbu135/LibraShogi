@@ -269,6 +269,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"この PC だけの上書き: {local_path(sd)}" + ("（あり）" if info.get("local") else "（無し）"))
         if info.get("adopt_hint"):
             print(f"リポジトリにまだ設定が無い（{info['adopt_hint']}）。`--adopt` で今の設定を写せる")
+        if info.get("unknown"):
+            print(f"WARNING 今のプログラムが知らない設定 {len(info['unknown'])} 件（無視される。`git pull` で最新にする）:")
+            for k in info["unknown"]:
+                print(f"  {k}")
         if info["changed"]:
             print(f"反映待ちの違い {len(info['changed'])} 件（コンソールの停止 → 起動で効く）:")
             for line in info["changed"]:

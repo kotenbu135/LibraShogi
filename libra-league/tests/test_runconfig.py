@@ -202,3 +202,28 @@ def test_round_trip_keeps_every_value(tmp_path):
     assert cfgx["exploiter"]["main_ckpt"] == "C:\\libra\\a.pt"
     assert load_config(sdx.config_toml) == cfgx
 
+
+
+def test_unknown_config_keys_warn_instead_of_being_ignored_silently(tmp_path):
+    """今のプログラムが知らない鍵は警告に出す。
+
+    設定は `origin/main` から読むのにプログラムは手元の作業ツリーなので、`git pull` を忘れると
+    新しい鍵が黙って無視される。2026-09-19 に `match_go_opp` がこれで効かず、相手まで 1 手 400 回に
+    なった 40 局を「勝率 100%」として記録してしまった（docs/measurements.md 同日）。
+    """
+    sd, repo = _sd(tmp_path), tmp_path / "repo"
+    _repo_config(repo, "ls", '[auto]\nmatch_games = 40\nmatch_go_opp_typo = "x"\n[nosuch]\nk = 1\n')
+    (sd.root / "config.local.toml").write_text('[train]\nnope = 1\n', encoding="utf-8")
+    logs: list[str] = []
+    cfg, info = resolve(sd, None, repo, ref="none", log=logs.append)
+    assert info["unknown"] == ["auto.match_go_opp_typo", "nosuch", "train.nope"]
+    assert any("WARNING" in m and "git pull" in m for m in logs)
+    assert cfg["auto"]["match_games"] == 40   # 知っている鍵はそのまま効く
+
+
+def test_no_warning_when_every_key_is_known(tmp_path):
+    sd, repo = _sd(tmp_path), tmp_path / "repo"
+    _repo_config(repo, "ls", '[auto]\nmatch_go = "nodes 400"\nmatch_go_opp = "movetime 1000"\n')
+    logs: list[str] = []
+    _cfg, info = resolve(sd, None, repo, ref="none", log=logs.append)
+    assert info["unknown"] == [] and not any("WARNING" in m for m in logs)

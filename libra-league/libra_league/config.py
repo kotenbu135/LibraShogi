@@ -138,6 +138,9 @@ DEFAULTS: dict[str, Any] = {
 }
 
 
+_MISSING = object()
+
+
 def _merge(base: dict, over: dict) -> dict:
     out = copy.deepcopy(base)
     for k, v in over.items():
@@ -146,6 +149,23 @@ def _merge(base: dict, over: dict) -> dict:
         else:
             out[k] = v
     return out
+
+
+def unknown_keys(parsed: dict[str, Any]) -> list[str]:
+    """設定に、今のプログラムが知らない鍵があれば `[節].鍵` の形で返す。
+
+    設定はリポジトリの `config/<run-id>.toml`（`origin/main`）から読むのに、プログラムは手元の作業ツリー
+    なので、**`git pull` を忘れると新しい鍵が黙って無視される**。2026-09-19 に `match_go_opp`（相手だけ
+    別の `go`）がこれで効かず、相手まで 1 手 400 回になった 40 局を「勝率 100%」として記録してしまった。
+    """
+    out: list[str] = []
+    for k, v in parsed.items():
+        base = DEFAULTS.get(k, _MISSING)
+        if base is _MISSING:
+            out.append(k)
+        elif isinstance(v, dict) and isinstance(base, dict):
+            out += [f"{k}.{k2}" for k2 in v if k2 not in base]
+    return sorted(out)
 
 
 def load_config(path: Path | None) -> dict[str, Any]:

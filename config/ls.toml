@@ -62,7 +62,6 @@ checkpoint_minutes = 10
 status_seconds = 30
 chunk_games = 100
 keep_checkpoints = 3
-archive_every_steps = 50000
 heldout_every_chunks = 20   # 5% のチャンクを学習に使わず held-out にする（新規）
 heldout_games = 20000
 gen_minutes = 0
