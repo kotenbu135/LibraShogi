@@ -88,6 +88,50 @@ def test_status_history_adds_games_at(tmp_path, capsys):
     assert out["evals"][0]["step_b"] == 100 and out["evals"][0]["games_at"] == 100000
 
 
+def test_status_history_adds_the_rating_scale(tmp_path, capsys):
+    """`status --history` は「強さの目盛り」（全部の対局をまとめた Bradley-Terry の Elo）も返す。
+
+    管理コンソールの Elo のグラフはこれを主役にする。相手ごとの線は 1 点 200 局で幅が広く、
+    練習相手の入れ替えと相性で上下するので、下がっていないのに下がって見えるため
+    （2026-09-19 のユーザーの「Elo さがってませんか？線がいっぱいあってよくわからない」）。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    sd.write_state({"step": 1600, "games_total": 400000})
+    (sd.root / "metrics.jsonl").write_text(
+        "".join(json.dumps({"t": float(s), "step": s, "games_total": g}) + "\n"
+                for s, g in ((400, 100000), (800, 200000), (1600, 400000))), encoding="utf-8")
+    ev = sd.root / "eval"
+    ev.mkdir(parents=True, exist_ok=True)
+    (ev / "best.jsonl").write_text(
+        json.dumps({"t": 1.0, "step": 800, "best_step": 400, "n": 1000, "score_new": 0.75,
+                    "elo_vs_best": 190.8, "ci95": [160.0, 220.0], "improved": True, "stall": 0}) + "\n"
+        + json.dumps({"t": 2.0, "step": 1600, "best_step": 800, "n": 1000, "score_new": 0.75,
+                      "elo_vs_best": 190.8, "ci95": [160.0, 220.0], "improved": True, "stall": 0}) + "\n",
+        encoding="utf-8")
+
+    assert main(["--root", str(tmp_path), "--run", "x", "status", "--json", "--history", "100"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    rt = out["rating"]
+    assert "error" not in rt
+    assert rt["anchor"] == "step 400"
+    # 点には step・総局数・時刻・区間が付く（グラフは横軸を総局数と時間で切り替える）
+    assert [(p["step"], p["games"], p["t"]) for p in rt["points"]] == [
+        (400, 100000, 400.0), (800, 200000, 800.0), (1600, 400000, 1600.0)]
+    assert rt["points"][0]["elo"] == 0.0 and rt["points"][2]["elo"] > rt["points"][1]["elo"] > 0
+    assert all(p["ci95"] is not None for p in rt["points"])
+    assert rt["curve_fit"]["elo_per_doubling"] > 0 and rt["fit"]["n_nodes"] == 3
+
+
+def test_status_history_rating_survives_a_run_with_no_games(tmp_path, capsys):
+    """対局の記録がまだ無くても status は返る（目盛りは空）。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    sd.write_state({"step": 1})
+    assert main(["--root", str(tmp_path), "--run", "x", "status", "--json", "--history", "100"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["rating"]["points"] == [] and "error" not in out["rating"]
+
+
 def test_status_history_games_at_without_metrics(tmp_path, capsys):
     """metrics.jsonl がまだ無い run では games_at は null（横軸は時間に落ちる）。"""
     sd = StateDir(tmp_path / "x")

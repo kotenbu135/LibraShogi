@@ -107,6 +107,12 @@ def test_rating_and_curve_over_a_run(tmp_path):
     assert abs(c["fit"]["elo_per_doubling"] - 400 * math.log10(3)) < 1.0
     assert node_step(c["points"][0]["node"]) == 400
     assert c["thin"] == [] and c["min_games"] == 200
+    # 点には総局数と時刻の両方を付ける（管理コンソールの Elo のグラフは横軸を切り替えられる）
+    assert [p["t"] for p in c["points"]] == [400.0, 800.0, 1600.0]
+
+    # 呼ぶ側が既に metrics を読んでいれば渡せる（status --history が二度読みしないため）
+    c2 = curve(sd, r, g_of=lambda st: 7, t_of=lambda st: 9.0)
+    assert [(p["games"], p["t"]) for p in c2["points"]] == [(7, 9.0)] * 3
 
 
 def test_curve_drops_points_with_too_few_games(tmp_path):

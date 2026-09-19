@@ -52,6 +52,31 @@ def games_of_step(metrics: list[dict]):
     return f
 
 
+def time_of_step(metrics: list[dict]):
+    """step → その step だったときの時刻（Unix 秒）。metrics.jsonl の (step, t) を直線でつなぐ。
+
+    `games_of_step` と同じ引き直し。管理コンソールの Elo のグラフで横軸を「時間」にしたときに、
+    step でしか分からない点（Bradley-Terry の目盛り）を置く場所を出すために使う。"""
+    rows = sorted(({"step": int(r["step"]), "t": float(r["t"])}
+                   for r in metrics if r.get("step") is not None and r.get("t") is not None),
+                  key=lambda r: r["step"])
+
+    def f(step: int | None) -> float | None:
+        if step is None or not rows:
+            return None
+        if step <= rows[0]["step"]:
+            return rows[0]["t"]
+        for a, b in zip(rows, rows[1:]):
+            if a["step"] <= step <= b["step"]:
+                if b["step"] == a["step"]:
+                    return a["t"]
+                w = (step - a["step"]) / (b["step"] - a["step"])
+                return round(a["t"] + w * (b["t"] - a["t"]), 1)
+        return rows[-1]["t"]
+
+    return f
+
+
 def _point(r: dict, g_of, band: tuple[float, float]) -> dict:
     score = r.get("score_new")
     games = g_of(r.get("step"))
