@@ -86,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
     p_m = sub.add_parser("match", help="計測: Libra（USI）と外部エンジンを無人対局させ棋譜を JSONL に残す")
     p_m.add_argument("--games", type=int, default=20)
     p_m.add_argument("--go", default="movetime 3000", help="go の引数（例: 'movetime 3000' / 'btime 60000 wtime 60000 byoyomi 10000'）")
+    p_m.add_argument("--go-opp", default=None, help="相手だけ別の go の引数（既定: --go と同じ）。Libra 側を減らしてハンデを付けるときに使う"
+                                                   "（例: --go 'nodes 400' --go-opp 'movetime 1000'）")
     p_m.add_argument("--opponent", default=None, help="相手エンジンの起動コマンド（既定: fuseki_usi_server.py）")
     p_m.add_argument("--opponent-cwd", default=str(Path.home() / "fuseki-shogi-ai"))
     p_m.add_argument("--opponent-opt", action="append", default=[], help="相手の setoption（name=value）")
@@ -446,11 +448,12 @@ def main(argv: list[str] | None = None) -> int:
         opp.start()
         log(f"libra: {libra.id_name}  opp: {opp.id_name}")
         try:
-            summary = run_match(libra, opp, a.games, a.go, out, log=log, first_placer=a.first_placer)
+            summary = run_match(libra, opp, a.games, a.go, out, log=log, first_placer=a.first_placer, go_args_b=a.go_opp)
         finally:
             libra.quit()
             opp.quit()
         summary["go"] = a.go
+        summary["go_opp"] = a.go_opp or a.go
         summary["libra_options"] = lopts
         summary["opponent_options"] = oopts
         summary["opponent_cmd"] = ocmd

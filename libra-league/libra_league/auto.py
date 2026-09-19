@@ -237,7 +237,10 @@ def collect_matches(sd: StateDir) -> list[dict]:
         out.append({
             "file": p.name, "time": p.stat().st_mtime, "n": n, "a_points": r.get("a_points"),
             "winrate": (round(float(r.get("a_points", 0.0)) / n, 4) if n else None),
-            "opponent": r.get("b"), "go": r.get("go"), "reasons": r.get("reasons"),
+            "opponent": r.get("b"), "go": r.get("go"), "go_opp": r.get("go_opp") or r.get("go"), "reasons": r.get("reasons"),
+            # 条件（相手の setoption と両者の go、Libra のハンデ）。強さが変わる設定は Elo の点を分けるのに要る
+            "opponent_opt": r.get("opponent_options") or {},
+            "libra_opt": {k: v for k, v in (r.get("libra_options") or {}).items() if k != "DNN_Model"},
             "libra_step": ckpt_step(str((r.get("libra_options") or {}).get("DNN_Model", ""))),
             "auto": p.name.startswith("auto-"),
         })
@@ -632,9 +635,15 @@ class AutoJobs:
         ts = time.strftime("%Y%m%d-%H%M%S")
         out = self.sd.root / "matches" / f"auto-{ts}.jsonl"
         args = ["match", "--games", str(self.acfg.get("match_games", 10)), "--go", str(self.acfg.get("match_go", "movetime 1000")), "--out", str(out)]
+        go_opp = str(self.acfg.get("match_go_opp", "")).strip()
+        if go_opp:
+            args += ["--go-opp", go_opp]
         for kv in str(self.acfg.get("match_opponent_opt", "")).split(","):
             if kv.strip():
                 args += ["--opponent-opt", kv.strip()]
+        for kv in str(self.acfg.get("match_libra_opt", "")).split(","):
+            if kv.strip():
+                args += ["--libra-opt", kv.strip()]
         if ckpt is not None:
             args += ["--ckpt", str(ckpt)]
             self.snapshot_onnx(ckpt)

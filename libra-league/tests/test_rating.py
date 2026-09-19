@@ -189,3 +189,51 @@ def test_curve_drops_points_with_too_few_games(tmp_path):
     assert [p["step"] for p in c["points"]] == [400, 800]
     # 少ない点を入れない指定にすれば戻る
     assert [p["step"] for p in curve(sd, min_games=1)["points"]] == [400, 600, 800]
+
+
+def _match(sd, name, step, n, pts, *, go="movetime 1000", go_opp=None, opp_opt=None, libra_opt=None):
+    (sd.root / "matches").mkdir(exist_ok=True)
+    r = {"n": n, "a_points": pts, "b": "外部エンジン", "go": go,
+         "libra_options": {"DNN_Model": f"/x/ckpt_{step:09d}.onnx", "Declare_Win": "true", **(libra_opt or {})}}
+    if go_opp:
+        r["go_opp"] = go_opp
+    if opp_opt:
+        r["opponent_options"] = opp_opt
+    (sd.root / "matches" / name).write_text(json.dumps(r), encoding="utf-8")
+
+
+def test_external_opponent_is_a_separate_node_per_setting(tmp_path):
+    """相手の設定（スレッド数・持ち時間）を変えたら別の点にする。同じ設定どうしは 1 点にまとまる。
+
+    相手を強くすると強さが変わるのに `id name` は同じままなので、1 点にまとめると強弱の違う相手が
+    混ざって目盛りが狂う。ルールの版（Fuseki_Rules）は強さではないので名前に入れない。
+    """
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    _match(sd, "a.summary.json", 800, 40, 36.0, opp_opt={"Threads": "2", "Fuseki_Rules": "2"})
+    _match(sd, "b.summary.json", 1600, 40, 36.0, opp_opt={"Threads": "2", "Fuseki_Rules": "2"})
+    _match(sd, "c.summary.json", 1600, 40, 20.0, opp_opt={"Threads": "8", "Fuseki_Rules": "2"})
+    opps = sorted({p["b"] for p in pairs_of(sd)})
+    assert opps == ["外部エンジン [Threads=2, movetime 1000]", "外部エンジン [Threads=8, movetime 1000]"]
+
+
+def test_handicapped_libra_is_a_separate_node(tmp_path):
+    """Libra 側だけ読む量を減らした対局は、全読みの自分と別の点にする。"""
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    _match(sd, "a.summary.json", 1600, 40, 36.0)
+    _match(sd, "b.summary.json", 1600, 40, 20.0, go="nodes 400", go_opp="movetime 1000")
+    got = sorted((p["a"], p["b"]) for p in pairs_of(sd))
+    assert got == [("step 1,600", "外部エンジン [movetime 1000]"),
+                   ("step 1,600 [nodes 400]", "外部エンジン [movetime 1000]")]
+
+
+def test_old_match_records_without_conditions_keep_the_plain_name(tmp_path):
+    """条件を記録していない古い結果は素の名前のまま（点が分かれて鎖が切れないように）。"""
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    (sd.root / "matches").mkdir(exist_ok=True)
+    (sd.root / "matches" / "a.summary.json").write_text(json.dumps(
+        {"n": 40, "a_points": 28.0, "b": "外部エンジン",
+         "libra_options": {"DNN_Model": "/x/ckpt_000001600.onnx"}}), encoding="utf-8")
+    assert [(p["a"], p["b"]) for p in pairs_of(sd)] == [("step 1,600", "外部エンジン")]

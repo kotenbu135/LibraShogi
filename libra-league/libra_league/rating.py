@@ -47,6 +47,40 @@ def node_step(name: str) -> int | None:
     return int(m.group(1).replace(",", "")) if m else None
 
 
+# 外部計測の条件のうち、強さを変えないもの（点の名前に入れない）。
+# Fuseki_Rules はルールの版で、違えば計測そのものが無効になるので強さの軸には入れない
+_OPP_SIG_SKIP = {"Fuseki_Rules"}
+_LIBRA_SIG_SKIP = {"DNN_Model", "DNN_Provider", "Declare_Win", "USI_Ponder", "Scale_Table"}
+
+
+def _sig(opts: dict | None, go: str | None, skip: set[str]) -> str:
+    """強さを変える設定を 1 行にまとめる（setoption と go）。"""
+    parts = [f"{k}={v}" for k, v in sorted((opts or {}).items()) if k not in skip]
+    if go:
+        parts.append(str(go))
+    return ", ".join(parts)
+
+
+def match_nodes(m: dict) -> tuple[str | None, str]:
+    """外部計測の 1 行を (Libra 側の点, 相手の点) にする。
+
+    **条件が違う相手は別の点にする。** 相手のスレッド数や持ち時間を変えれば強さが変わるので、同じ `id name`
+    のまま 1 点にまとめると、強さの違う相手が混ざって目盛りが狂う。Libra 側に読む量のハンデを付けたときも
+    同じで、ハンデ付きは別の点にする（そのままだと全読みの自分と同じ点に混ざる）。
+    条件を記録していない古い結果は、今までどおり素の名前にする（点が分かれて鎖が切れないように）。
+    """
+    opp = str(m.get("opponent") or "外部の相手")
+    go_libra, go_opp = m.get("go"), m.get("go_opp") or m.get("go")
+    osig = _sig(m.get("opponent_opt"), go_opp, _OPP_SIG_SKIP)
+    if osig:
+        opp = f"{opp} [{osig}]"
+    node = step_node(m.get("libra_step"))
+    lsig = _sig(m.get("libra_opt"), go_libra if go_libra != go_opp else None, _LIBRA_SIG_SKIP)
+    if node is not None and lsig:
+        node = f"{node} [{lsig}]"
+    return node, opp
+
+
 def _ref_node(sd: StateDir, name: str, ref_step: int | None) -> str:
     """参照の名前を点の名前にする。この run 自身の archive なら step の点と同じ点にまとめる
     （そうしないと「80 万局の自分」が別人として二重に並び、目盛りがつながらない）。"""
@@ -77,7 +111,8 @@ def pairs_of(sd: StateDir) -> list[dict]:
         n = m.get("n")
         pts = m.get("a_points")
         score = (float(pts) / float(n)) if (n and pts is not None) else m.get("winrate")
-        add(step_node(m.get("libra_step")), str(m.get("opponent") or "外部の相手"), n, score, m.get("time"), "match")
+        a_node, b_node = match_nodes(m)
+        add(a_node, b_node, n, score, m.get("time"), "match")
 
     out.sort(key=lambda p: p["t"])
     # 基準比が最強比の結果を写した行（同じ組・同じ局数・同じ得点）を 1 つにする

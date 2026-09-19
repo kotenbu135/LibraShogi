@@ -167,7 +167,10 @@ def format_md(s: dict) -> str:
         L.append(f"| 参照 {r.get('ref')} | step {_fmt(r.get('step'))}: {_fmt(r.get('elo'), plus=True)} Elo 区間 {r.get('ci95')}（勝ち {_fmt((r.get('score_new') or 0) * 100, 0)}%、{_fmt(r.get('n'))} 局） |")
     for m in (s.get("matches") or [])[-3:]:
         wr = m.get("winrate")
-        L.append(f"| 外部計測 {m.get('opponent')} | step {_fmt(m.get('libra_step'))}: 得点 {_fmt(wr, 3)}（{_fmt(m.get('n'))} 局、{m.get('go')}） |")
+        go = str(m.get("go"))
+        if m.get("go_opp") and m.get("go_opp") != m.get("go"):
+            go += f" / 相手 {m.get('go_opp')}"   # 読む量にハンデを付けた計測
+        L.append(f"| 外部計測 {m.get('opponent')} | step {_fmt(m.get('libra_step'))}: 得点 {_fmt(wr, 3)}（{_fmt(m.get('n'))} 局、{go}） |")
     sc = s.get("scaling") or {}
     curve = (sc.get("curve") or {}).get("fit")
     outlook = sc.get("outlook")

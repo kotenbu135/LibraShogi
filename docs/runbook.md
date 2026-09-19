@@ -148,6 +148,36 @@ metrics_points = 120      # metrics.jsonl から残す点の数
 `match` は `~/libra-run/ls/matches/<時刻>.jsonl`（1 局 1 行）と `.summary.json`、USI ログ `.log` を書く。裁定は libra-sim（docs/rules.md）。相手のバージョンとハッシュは docs/protocol.md §5。
 GPU を L-S と共有するので、計測中は ls・lx を停止するか、局/日が落ちることを承知で回す。
 
+### 7.0 勝ちすぎたとき（読む量のハンデ）
+
+**勝率が 1 に寄ると物差しとして効かなくなる。** 1 局あたりの情報は得点 p の p(1−p) に比例するので、
+40 局の 95% 区間は 5 割なら ±55 Elo、9 割で ±92 Elo、97.5% で ±176 Elo と広がり、**全勝すると Elo が
+発散して点そのものが目盛りから外れる**（`rating.fit` の強連結の条件）。
+
+そこで **Libra 側の読む量を減らして得点を 5 割に近づける**。相手の設定は変えないので、過去の計測と
+つながったまま比べられる。
+
+```bash
+# 相手は 1 手 1 秒のまま、Libra は 400 回だけ読む（＝ハンデ）
+~/LibraShogi/bin/libra match --games 40 --go "nodes 400" --go-opp "movetime 1000" \
+  --ckpt ~/libra-run/ls/checkpoints/archive/ckpt_000172923.pt \
+  --opponent-opt Threads=2 --opponent-opt Fuseki_Rules=2
+```
+
+自動計測では `config/<run-id>.toml` の `[auto]` に書く（反映はコンソールの停止 → 起動）。
+
+| 鍵 | 意味 |
+|---|---|
+| `match_go` | Libra 側の `go`。`nodes N` にすると読む回数が固定になり、GPU の混み具合で変わらない |
+| `match_go_opp` | 相手だけ別の `go`（空なら `match_go` と同じ） |
+| `match_libra_opt` | Libra への `setoption`（例 `Sims_Normal=400,Sims_Fuseki=200`）。`go nodes` を使うならふつう要らない |
+
+**条件を変えたら Elo の点も分かれる。** 相手の `setoption`（`Fuseki_Rules` を除く）と両者の `go` が
+違う結果は、`libra rating` が別の点として扱う（同じ名前で強さの違う相手が 1 点に混ざると目盛りが狂うため）。
+点の名前は `外部エンジン [Threads=2, movetime 1000]`、ハンデ付きの Libra は `step 172,923 [nodes 400]` の形。
+**ハンデ付きの点は全読みの自分とは別人**なので、全読みの目盛りに載せたいときは同じ重みどうしを
+`libra eval --a <ckpt> --b <同じ ckpt> --b-set full_sims=<ハンデ> --games 1000` で測ってハンデの Elo を出す。
+
 ## 7.1 設定値のオフライン比較（`libra abtest`）
 
 「仮」のまま残っている学習の設定値（docs/ls2-settings.md の区分「記録なし（仮）」）を決めるための手順（docs/restart-plan.md §0、同 §6 の段の条件）。

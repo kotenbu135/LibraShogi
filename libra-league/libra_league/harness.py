@@ -23,12 +23,19 @@ def cp_to_winrate(cp: int) -> float:
 
 
 class Match:
-    def __init__(self, a: UsiEngine, b: UsiEngine, go_args: str, max_ply: int, count_from_41: bool, log=None):
+    def __init__(self, a: UsiEngine, b: UsiEngine, go_args: str, max_ply: int, count_from_41: bool, log=None,
+                 go_args_b: str | None = None):
         self.a, self.b = a, b
         self.go_args = go_args
+        # b 側だけ別の `go`。読む量に差を付けて測る（ハンデ）ために使う。既定は a と同じ
+        self.go_args_b = go_args_b or go_args
         self.max_ply = max_ply
         self.count_from_41 = count_from_41
         self.log = log or (lambda s: None)
+
+    def go(self, E: UsiEngine, line: str):
+        """その側の `go` の引数で読ませる。"""
+        return E.go(line, self.go_args_b if E is self.b else self.go_args)
 
     def play(self, placer: str, game_no: int) -> dict:
         """placer: 'a' | 'b'。1 局を指して記録（dict）を返す。"""
@@ -46,7 +53,7 @@ class Match:
         # 両玉
         for ply in range(2):
             line = "position fuseki" + (" moves " + " ".join(tokens) if tokens else "")
-            bm, info = P.go(line, self.go_args)
+            bm, info = self.go(P, line)
             if not (bm.startswith("K*") and pos.is_legal(bm)):
                 illegal_by = placer
                 break
@@ -55,7 +62,7 @@ class Match:
             moves_info.append({"by": placer, "move": bm, **info})
         chosen = None
         if illegal_by is None:
-            bm, info = C.go("position fuseki moves " + " ".join(tokens), self.go_args)
+            bm, info = self.go(C, "position fuseki moves " + " ".join(tokens))
             w = info.get("winrate")
             if w is None and "cp" in info:
                 w = cp_to_winrate(info["cp"])
@@ -76,7 +83,7 @@ class Match:
             else:
                 normal = [t for t in tokens if t.startswith("n:")]
                 line = f"position sfen {self.sfen41} moves {' '.join(m[2:] for m in normal)}".rstrip()
-            bm, info = E.go(line, self.go_args)
+            bm, info = self.go(E, line)
             rec = {"by": who, "move": bm, "ply": pos.ply + 1, **info}
             if bm == "resign":
                 pos.resign(turn)
@@ -101,7 +108,7 @@ class Match:
                     if pos.is_over() and pos.outcome()[1] == "ruling41":
                         # 40 手完了で裁定に当たる: 手番（先手）に go を送って bestmove win を確かめる
                         E2 = eng[side["sente"]]
-                        bm2, _ = E2.go(f"position sfen {self.sfen41}", self.go_args)
+                        bm2, _ = self.go(E2, f"position sfen {self.sfen41}")
                         rec["ruling41_reply"] = bm2
                 else:
                     tokens.append("n:" + bm)
@@ -131,9 +138,10 @@ class Match:
 
 
 def run_match(a: UsiEngine, b: UsiEngine, n_games: int, go_args: str, out_jsonl: Path, max_ply: int = 320,
-              count_from_41: bool = True, log=None, first_placer: str = "a") -> dict:
-    m = Match(a, b, go_args, max_ply, count_from_41, log)
-    summary = {"a": a.id_name, "b": b.id_name, "n": 0, "a_points": 0.0, "by_engine_side": {}, "reasons": {}, "games": []}
+              count_from_41: bool = True, log=None, first_placer: str = "a", go_args_b: str | None = None) -> dict:
+    m = Match(a, b, go_args, max_ply, count_from_41, log, go_args_b=go_args_b)
+    summary = {"a": a.id_name, "b": b.id_name, "n": 0, "a_points": 0.0, "by_engine_side": {}, "reasons": {}, "games": [],
+               "go_a": go_args, "go_b": m.go_args_b}
     out_jsonl.parent.mkdir(parents=True, exist_ok=True)
     with open(out_jsonl, "a", encoding="utf-8") as f:
         for i in range(n_games):
