@@ -110,7 +110,6 @@ archive_every_steps = 50000
 
 [auto]
 enabled = true
-every_hours = 24.0
 every_games = 400000
 eval_games = 0
 eval_sims = 96

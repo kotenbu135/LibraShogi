@@ -1,20 +1,20 @@
 {
  "schema": 1,
  "run": "ls",
- "generated": "2026-09-19 21:15:01",
- "t": 1789820101.6,
+ "generated": "2026-09-19 21:19:20",
+ "t": 1789820360.7,
  "process": "running",
  "flags": [],
  "now": {
-  "step": 206086,
-  "generation": 273,
-  "games_total": 2356475,
+  "step": 206182,
+  "generation": 274,
+  "games_total": 2357712,
   "games_per_day_1h": 0,
-  "window_games": 1178237,
+  "window_games": 1178856,
   "active_games": 512,
-  "elapsed_h": 44.0,
+  "elapsed_h": 44.06,
   "heldout_games": 20000,
-  "status_time": "2026-09-19 21:15:00",
+  "status_time": "2026-09-19 21:19:19",
   "train": null,
   "gen": null
  },
@@ -34,7 +34,6 @@
  },
  "auto_cfg": {
   "enabled": true,
-  "every_hours": 24.0,
   "every_games": 400000,
   "eval_games": 0,
   "eval_sims": 96,
@@ -2659,12 +2658,12 @@
    "gen_heldout_fuseki_corr_v": 0.6555
   },
   {
-   "t": 1789820100.0,
-   "step": 206086,
-   "games_total": 2356475,
+   "t": 1789820359.1,
+   "step": 206182,
+   "games_total": 2357712,
    "gpd": 0,
-   "gpd_5m": null,
-   "window": 1178237,
+   "gpd_5m": 412492,
+   "window": 1178856,
    "loss": null,
    "policy_acc": null,
    "gen_window_corr_v": null,
@@ -2678,7 +2677,7 @@
   }
  ],
  "review": {
-  "time": "2026-09-19 21:15:01",
+  "time": "2026-09-19 21:19:20",
   "run": "ls",
   "items": [
    {
