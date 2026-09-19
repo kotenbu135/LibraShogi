@@ -160,6 +160,17 @@ decisions.md 2026-09-15 の同名の行。claude.ai の設計案の 1 行「分�
 
 ---
 
+### 2.11 自己対局の投了（2026-09-19 に追加。**実装したが既定は無効**）
+
+| 項目 | 今の値・形 | 出所 | 文献・計測との対応 | 区分 |
+|---|---|---|---|---|
+| 投了の規則: 手番側の探索後の値 `root_q` が −`resign_threshold` 以下の状態がその側の連続 `resign_runs` 手続いたら、その手を指した後にその側が投了する（`config/ls.toml` の `[search]`。**既定 `resign_threshold = 0.0` ＝無効**） | 未採用（実装だけ。入れる時期は**ユーザーが調整中**。2026-09-19 のユーザーの「投了は採用するが時期は要調整とする」） | AlphaGo Zero [Silver17] Methods「Self-play」の投了。**原典と 3 つ違う**（下） | 原典は「根の値**と最善の子の値**の両方が −v_resign を下回ったら投了」。Libra の棋譜には候補ごとの値を残していないので**根の値だけ**で見る（そのぶん投了しやすく、節約率も誤投了率も上限になる）。原典は連続の手数を数えず 1 手で投了するので `resign_runs = 1` が原典の形（2 以上は自分の案。出典なし）。原典は v_resign を「誤投了 5% 未満」になるよう自動で調整するが、Libra は固定値にして `bin/libra resign` で棋譜から測り直す（自分の案）。**布石では投了しない**（`resign_min_ply = 40`。布石は 40 手で必ず終わり、そこでの値は 41 手目の裁定の予想なので、投了で切っても得が無い。自分の案） | 一部（原典の形から 3 点変えていて、理由はここに書いた） |
+| 10 局に 1 局は投了させず最後まで打つ（`resign_disable_prob = 0.1`） | 同上 | AlphaGo Zero [Silver17] Methods。原典と同じ 10% | 原典と同じ目的（誤投了の割合を測り続けるため）。この見本があると `bin/libra resign` を入れた後も同じ形で測り直せる | 裏取りあり（原典と一致） |
+| 計測の対局（基準比・最強比・固定の参照・A-B）では投了しない（`evaluate.play_match` が `resign_threshold` を 0 にする） | 同上 | 自分の判断（出典なし） | 誤投了が 2.6% あるので、そのまま Elo に乗ると物差しが狂う（`libra rating` は全部の対局をまとめるので、自己対局の誤投了だけなら学習の信号の問題で済むが、計測の対局に混ざると強さの推定そのものがずれる）。原典は評価対局でも投了する。確かめる計測: 入れた後の最強比 1,000 局の Elo が、入れる前の点から曲線の見込みどおりに伸びること | 自分の判断 |
+| 効き目の見積もり（0.90・1 手 → 評価の節約 19.1%、局/日 1.24 倍、誤投了 2.61%） | `bin/libra resign`（2026-09-19、ls の最新 20,000 局） | 打ち終わった棋譜の上で数え直したもの（measurements.md 2026-09-19） | **どの設定も原典の基準（誤投了 5% 未満）の内側**。ただし**1 日に学習へ入る局面の数は増えない**（手数の節約 20.3% と局/日 1.24 倍が打ち消し合って 0.98 倍）。増えるのは 1 日に取れる勝ち負けの結果の数で、価値の学習には効くが方策には効かない。曲線（+186.5 Elo/2 倍）から出る「+57 Elo」は**上限**であって見込みではない。確かめる計測: 入れた前後で最強比 1,000 局・`gen` の held-out との差・`libra rating` の目盛りを比べる | 裏取りあり（自分の計測） |
+
+---
+
 ## 3. 読めなかった資料
 
 - Willemsen ほか 2022 の本文（PDF を読めなかった）。要旨だけを使った。
@@ -263,6 +274,7 @@ decisions.md 2026-09-15 の同名の行。claude.ai の設計案の 1 行「分�
 - [Silver18] Silver et al., A general reinforcement learning algorithm that masters chess, shogi, and Go through self-play (arXiv:1712.01815). https://ar5iv.labs.arxiv.org/html/1712.01815
 - [Wu19] Wu, Accelerating Self-Play Learning in Go (arXiv:1902.10565). https://ar5iv.labs.arxiv.org/html/1902.10565
 - [KGM] KataGo Methods. https://github.com/lightvector/KataGo/blob/master/docs/KataGoMethods.md
+- [Silver17] Silver et al., Mastering the game of Go without human knowledge (Nature 550, 354-359, 2017) Methods「Self-play」. 方法の節を読んだ（augmentingcognition.com の PDF。decisions.md 2026-09-19）. https://www.nature.com/articles/nature24270
 - [Schrittwieser20] Schrittwieser et al., Mastering Atari, Go, chess and shogi by planning with a learned model (arXiv:1911.08265). https://ar5iv.labs.arxiv.org/html/1911.08265
 - [Danihelka22] Danihelka et al., Policy improvement by planning with Gumbel (ICLR 2022). https://davidstarsilver.wordpress.com/wp-content/uploads/2025/04/gumbel-alphazero.pdf / mctx https://github.com/google-deepmind/mctx
 - [Lc0-18] Understanding Training against Q as Knowledge Distillation. https://lczero.org/blog/2018/10/understanding-training-against-q-as/

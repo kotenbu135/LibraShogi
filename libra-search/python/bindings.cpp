@@ -45,6 +45,10 @@ SearchConfig config_from_dict(const py::dict& d) {
   geti("mate_nodes_root", c.mate_nodes_root);
   geti("proof_nodes", c.proof_nodes);
   geti("proof_min_ply", c.proof_min_ply);
+  getf("resign_threshold", c.resign_threshold);
+  geti("resign_runs", c.resign_runs);
+  getf("resign_disable_prob", c.resign_disable_prob);
+  geti("resign_min_ply", c.resign_min_ply);
   getb("external", c.external);
   getb("defer_root_proof", c.defer_root_proof);
   getb("eval_cache", c.eval_cache);
@@ -275,6 +279,7 @@ PYBIND11_MODULE(_search, m) {
         d["perpetual_check"] = st.perpetual;
         d["max_ply"] = st.max_ply;
         d["timeout"] = st.timeout;
+        d["resign"] = st.resign;
         d["plies_sum"] = st.plies_sum;
         d["mate_found"] = st.mate_found;
         d["proof_found"] = st.proof_found;

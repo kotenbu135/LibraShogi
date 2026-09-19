@@ -49,6 +49,16 @@ struct SearchConfig {
   std::vector<std::vector<std::uint32_t>> openings;  // 開始局面の手順（玉 2 手を含む）。搾取者が見つけた布石を本体の分布に混ぜる
   float openings_prob = 0.0f;    // 新規対局が openings から始まる確率
   bool prune_gote_rank4 = false; // 後手玉を一〜三段目に限る（四段目は桂打ちで先手の裁定勝ち。libra-scale の剪定と同じ）
+  // 投了（AlphaGo Zero [Silver+ 2017] Methods「Resignation」）。resign_threshold <= 0 で無効（既定）。
+  // 規則: 手番側の探索後の値 root_q が −resign_threshold 以下の状態がその側の連続 resign_runs 手続いたら、
+  // その手を指した後にその側が投了する。原典は「根と最善の子の両方が下回ったら」だが、棋譜に子の値を残していないので根だけで見る
+  // （そのぶん投了しやすい。docs/decisions.md 2026-09-19）。
+  // resign_disable_prob の割合の対局は投了させず最後まで打つ（誤投了の割合を測り続けるため。原典と同じ 10%）。
+  // 無効のときは乱数を一切引かないので、入れる前と棋譜は同じ
+  float resign_threshold = 0.0f;
+  int resign_runs = 1;
+  float resign_disable_prob = 0.1f;
+  int resign_min_ply = 40;       // これ未満の手数（布石）では投了しない
 };
 
 struct Candidate {
@@ -91,6 +101,7 @@ struct SelfPlayStats {
   std::uint64_t mate_found = 0, proof_found = 0, proof_nodes = 0, proof_calls = 0;  // 証明探索の統計
   std::uint64_t results[3] = {0, 0, 0};  // 先手勝ち・引き分け・後手勝ち
   std::uint64_t ruling41 = 0, no_legal = 0, sennichite = 0, perpetual = 0, max_ply = 0, timeout = 0;
+  std::uint64_t resign = 0;  // 投了で終わった対局（resign_disable_prob の対局は数えない）
   double plies_sum = 0;
   void add(const SelfPlayStats& o);
 };
@@ -178,6 +189,8 @@ class SelfPlay {
   int use_cached(Game& g, std::uint64_t h, std::uint32_t aux);
   void finish_move(Game& g);
   void play_forced(Game& g, Move m, float value);
+  // 投了の判定。指す側の値の連続を数え、投了するなら true（指した後に Position::resign を呼ぶ）
+  bool resign_check(Game& g, Color mover, float root_q);
   void start_game(Game& g);
   void end_game(Game& g);
   Move root_proof(Game& g, float& value);  // 根の証明探索。手番側の勝ちが証明できればその手（無ければ MOVE_NONE）

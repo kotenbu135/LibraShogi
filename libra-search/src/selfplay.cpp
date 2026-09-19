@@ -105,6 +105,8 @@ struct SelfPlay::Game {
   std::vector<Move> path_moves;
   int moves_made = 0;
   int slot = 0;
+  int resign_run[2] = {0, 0};  // 投了の判定: 値が −しきい値 以下だった連続の手数（0 先手、1 後手）
+  bool resign_off = false;     // この対局は投了させず最後まで打つ（resign_disable_prob）
   bool idle = false;         // 外部駆動で局面待ち
   int forced_budget = -1;    // 外部駆動の読みの回数
   bool forced_full = true;
@@ -169,6 +171,12 @@ void SelfPlay::set_openings(std::vector<std::vector<std::uint32_t>> openings, fl
 void SelfPlay::set_active(int n) { active_ = std::max(1, std::min(n, int(games_.size()))); }
 
 void SelfPlay::start_game(Game& g) {
+  g.resign_run[0] = g.resign_run[1] = 0;
+  g.resign_off = false;
+  if (cfg_.resign_threshold > 0.0f && cfg_.resign_disable_prob > 0.0f) {
+    std::uniform_real_distribution<float> ur(0.0f, 1.0f);
+    g.resign_off = ur(g.rng) < cfg_.resign_disable_prob;
+  }
   g.eval_cache.clear();
   g.leaf_hash = 0;
   g.pos.reset(MODE_TENBIN);
@@ -271,6 +279,7 @@ void SelfPlay::end_game(Game& g) {
     case R_PERPETUAL_CHECK: g.st.perpetual++; break;
     case R_MAX_PLY: g.st.max_ply++; break;
     case R_TIMEOUT: g.st.timeout++; break;
+    case R_RESIGN: g.st.resign++; break;
     default: break;
   }
   g.done.push_back(std::move(g.rec));
@@ -375,6 +384,20 @@ static int gumbel_pick(SelfPlay::Game& g, const SearchConfig& cfg) {
   }
 }
 
+// 投了の判定（AlphaGo Zero [Silver+ 2017] Methods「Resignation」）。手番側の値が −しきい値 以下だった連続を側ごとに数え、
+// resign_runs に達したら true を返す。布石（resign_min_ply 未満）では投了しない。resign_off の対局は数えるだけで投了しない
+// （誤投了の割合を測り続けるための 10% の見本）。棋譜から見積もった効き目は docs/measurements.md 2026-09-19
+bool SelfPlay::resign_check(Game& g, Color mover, float root_q) {
+  if (cfg_.resign_threshold <= 0.0f) return false;
+  int& run = g.resign_run[mover == BLACK ? 0 : 1];
+  if (g.pos.ply() < cfg_.resign_min_ply || root_q > -cfg_.resign_threshold) {
+    run = 0;
+    return false;
+  }
+  ++run;
+  return !g.resign_off && run >= cfg_.resign_runs;
+}
+
 void SelfPlay::finish_move(Game& g) {
   const SearchConfig& cfg = cfg_for(g);  // σ は指す側の設定（記録の形は cfg_ のまま）
   Node& root = g.nodes[0];
@@ -462,10 +485,14 @@ void SelfPlay::finish_move(Game& g) {
     g.rec.v41 = mr.root_q;
     g.rec.sfen41 = g.pos.sfen();
   }
+  const float played_q = mr.root_q;
   g.rec.moves.push_back(std::move(mr));
+  const Color mover = g.pos.turn();
+  const bool resigning = resign_check(g, mover, played_q);
   g.pos.do_move(root.edges[best].move);
   g.moves_made++;
   g.st.moves++;
+  if (resigning && g.pos.outcome().result == ONGOING) g.pos.resign(mover);
   for (auto it = g.eval_cache.begin(); it != g.eval_cache.end();) {
     if (it->second.move_no + kCacheMoves <= g.moves_made) it = g.eval_cache.erase(it);
     else ++it;
@@ -550,9 +577,12 @@ void SelfPlay::play_forced(Game& g, Move m, float value) {
     g.rec.sfen41 = g.pos.sfen();
   }
   g.rec.moves.push_back(std::move(mr));
+  const Color mover = g.pos.turn();
+  const bool resigning = resign_check(g, mover, value);
   g.pos.do_move(m);
   g.moves_made++;
   g.st.moves++;
+  if (resigning && g.pos.outcome().result == ONGOING) g.pos.resign(mover);
   g.nodes.clear();
   g.table.clear();
   g.proof_cache.clear();
@@ -783,6 +813,7 @@ void SelfPlayStats::add(const SelfPlayStats& o) {
   perpetual += o.perpetual;
   max_ply += o.max_ply;
   timeout += o.timeout;
+  resign += o.resign;
   plies_sum += o.plies_sum;
 }
 
@@ -1066,7 +1097,9 @@ void SelfPlay::set_side_config(const SearchConfig& cfg) {
                     cfg.proof_min_ply == cfg_.proof_min_ply && cfg.external == cfg_.external &&
                     cfg.defer_root_proof == cfg_.defer_root_proof && cfg.eval_cache == cfg_.eval_cache &&
                     cfg.prune_gote_rank4 == cfg_.prune_gote_rank4 && cfg.king_pairs == cfg_.king_pairs &&
-                    cfg.openings == cfg_.openings && cfg.openings_prob == cfg_.openings_prob;
+                    cfg.openings == cfg_.openings && cfg.openings_prob == cfg_.openings_prob &&
+                    cfg.resign_threshold == cfg_.resign_threshold && cfg.resign_runs == cfg_.resign_runs &&
+                    cfg.resign_disable_prob == cfg_.resign_disable_prob && cfg.resign_min_ply == cfg_.resign_min_ply;
   if (!same)
     throw std::invalid_argument("SelfPlay::set_side_config: 側ごとに変えられるのは full_sims・fast_sims・full_prob・gumbel_m_full・"
                                 "gumbel_m_fast・c_visit・c_scale・gumbel_rescale・gumbel_noise・cpuct だけ");

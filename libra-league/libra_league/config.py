@@ -31,6 +31,15 @@ DEFAULTS: dict[str, Any] = {
         "mate_nodes_root": 200,
         "proof_nodes": 1000,
         "proof_min_ply": 36,
+        # 投了（AlphaGo Zero [Silver+ 2017] Methods「Resignation」）。0 で無効（既定）。
+        # 手番側の探索後の値が −resign_threshold 以下の状態がその側の連続 resign_runs 手続いたら、その手を指した後に投了する。
+        # resign_disable_prob の対局は投了させず最後まで打つ（誤投了の割合を測り続けるため。原典と同じ 10%）。
+        # 棋譜からの見積もりは `bin/libra resign`。0.90・1 手で評価の節約 19%・局/日 1.24 倍・誤投了 2.61%（docs/measurements.md 2026-09-19）。
+        # 入れると 1 局が約 2 割短くなるので、リプレイの窓（局数で数えている）とセットで見る
+        "resign_threshold": 0.0,
+        "resign_runs": 1,
+        "resign_disable_prob": 0.1,
+        "resign_min_ply": 40,
         "defer_root_proof": True,  # 根の証明探索を GPU の評価中に解く（棋譜は変わらない。false で apply の中で解く）
     },
     "selfplay": {

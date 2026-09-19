@@ -48,7 +48,7 @@ def _kill_job_group(pid: int, out: str) -> None:
             time.sleep(0.1)
 
 METRIC_ENGINE_KEYS = ("games", "moves", "sims", "sente_wins", "draws", "gote_wins", "ruling41", "no_legal_move",
-                      "sennichite", "perpetual_check", "max_ply", "plies_sum", "mate_found", "proof_found")
+                      "sennichite", "perpetual_check", "max_ply", "resign", "plies_sum", "mate_found", "proof_found")
 
 
 def ckpt_step(p: Path | str) -> int | None:
