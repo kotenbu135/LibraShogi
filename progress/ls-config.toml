@@ -106,7 +106,6 @@ heldout_games = 20000
 gen_minutes = 0
 gen_games = 20000
 gen_positions = 4000
-archive_every_steps = 50000
 
 [auto]
 enabled = true
@@ -126,8 +125,9 @@ reference_rotate = 0.8
 reference_min = 1
 match_games = 40
 match_go = "nodes 400"
-match_opponent_opt = "Threads=2,Fuseki_Rules=2"
 match_go_opp = "movetime 1000"
+match_opponent_opt = "Threads=2,Fuseki_Rules=2"
+match_libra_opt = ""
 
 [progress]
 enabled = true
