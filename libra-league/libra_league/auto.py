@@ -298,7 +298,7 @@ class AutoJobs:
         st = self._st()
         games = int(self.state.get("games_total") or 0)
         eval_now = self.sd.flag("EVAL_NOW")
-        if eval_now or st["last_archive"] is None or self._due(st["last_archive"], st.get("last_archive_games"), now, games):
+        if eval_now or st["last_archive"] is None or self._due(st.get("last_archive_games"), games):
             prev = list_archives(self.sd)
             new = archive_checkpoint(self.sd, ckpt)
             st["last_archive"] = now
@@ -313,7 +313,7 @@ class AutoJobs:
             if eval_now:
                 self.sd.clear_flag("EVAL_NOW")
         match_now = self.sd.flag("MATCH_NOW")
-        if int(self.acfg.get("match_games", 0)) > 0 and (match_now or st["last_match"] is None or self._due(st["last_match"], st.get("last_match_games"), now, games)):
+        if int(self.acfg.get("match_games", 0)) > 0 and (match_now or st["last_match"] is None or self._due(st.get("last_match_games"), games)):
             arch = archive_dir(self.sd) / ckpt.name  # 節目の写しがあればそれを使う（計測待ちの間も消えない）
             self.enqueue_match(arch if arch.exists() else ckpt)
             st["last_match"] = now
@@ -321,14 +321,14 @@ class AutoJobs:
             if match_now:
                 self.sd.clear_flag("MATCH_NOW")
 
-    def _due(self, last_t: float | None, last_games: int | None, now: float, games: int) -> bool:
-        """次の計測の時期か。every_games > 0 なら局数で（PC の利用状況で局/日が変わっても、判断に要る局数がたまったときに測る。
-        2026-09-17 のユーザーの指示）、そうでなければ every_hours で。両方 0 なら最初の 1 回と eval-now / match-now だけ。"""
+    def _due(self, last_games: int | None, games: int) -> bool:
+        """次の計測の時期か。総局数が every_games の倍数を越えたら（PC の利用状況で局/日が変わっても、
+        判断に要る局数がたまったときに測る。2026-09-17 のユーザーの指示）。0 なら最初の 1 回と eval-now / match-now だけ。
+        時間区切り（every_hours）は 2026-09-19 に廃止した（docs/decisions.md）。"""
         every_games = int(self.acfg.get("every_games", 0))
-        if every_games > 0:
-            return crossed_games_multiple(last_games, games, every_games)
-        every = float(self.acfg.get("every_hours", 0.0)) * 3600
-        return every > 0 and (last_t is None or now - float(last_t) >= every)
+        if every_games <= 0:
+            return False
+        return crossed_games_multiple(last_games, games, every_games)
 
     def enqueue_eval(self, a: Path, b: Path) -> None:
         ts = time.strftime("%Y%m%d-%H%M%S")

@@ -61,7 +61,7 @@ libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX �
 - **設定は Claude が持つ**（2026-09-18 のユーザーの依頼「config.toml を毎回私が編集するのは面倒。あなたが編集・管理できるようにして」）。稼働中のランの設定の正は**リポジトリの `config/<run-id>.toml`** で、`~/libra-run/<run>/config.toml` はそこから起動のたびに作り直される写し（docs/runbook.md §設定の管理）。**ユーザーに TOML を編集させない**。設定を変えるときは `config/<run-id>.toml` を直して main に入れ、コンソールの停止 → 起動だけを頼む。今効いている設定は `progress` ブランチの `progress/<run-id>-config.toml` で読める。学習データに関わる値は 11 に従う。
 - **ls・lx を監視しない**。バックグラウンドタスク・待機ループ・ポーリングで ls・lx の稼働状態や自動計測の終了を待たない。状態が要るときは `bin/libra [--run lx] status` を 1 回読むだけにして、待たずに作業を終える。結果は次にユーザーから聞かれたときに読む。**ls・lx 以外のジョブ（玉配置表の検証対局 `libra-scale seq`、vast.ai のセッションなど）は監視してよい**（2026-09-15 のユーザーの決定「ls・lx 以外は監視を許可」）。アラート・失敗・節目を Monitor で拾い、課金が続くものは特に起動と同時に置く。
 - 本体 L-S は `~/libra-run/ls`、搾取者 lx は `~/libra-run/lx` で常時稼働。2026-09-13 から二飛香（docs/rules.md §3.2）の系列（ls は旧 ls の step 229,590 の重みから、lx はゼロから）。旧ルールの系列は `~/libra-run/ls-v0`・`lx-v0` に残し再開しない（docs/runbook.md 冒頭）。ネットの形（[net]）は変えない（変えるなら新しい run-id）。
-- ls は `[auto]` で 24 時間ごとに archive → 基準比の自己評価 100 局 → 外部計測 10 局を別プロセスで回す（docs/runbook.md §6）。結果は管理コンソールの Elo / 対外対局タブと `~/libra-run/ls/eval`・`matches`。
+- ls は `[auto]` で総局数 40 万局ごと（`every_games`。時間区切りは 2026-09-19 に廃止）に archive → 最強比・基準比の自己評価 1,000 局と固定の参照 200 局 → 外部計測 40 局を別プロセスで回す（docs/runbook.md §6）。結果は管理コンソールの Elo / 対外対局タブと `~/libra-run/ls/eval`・`matches`。
 - GPU を使う計測（速度比較など）はユーザーにコンソールから ls・lx を停止してもらってから行い、終わったら起動を依頼する。玉配置表（libra-scale）の作り直しは止めずに GPU を共有して回す（2026-09-15 のユーザーの決定、docs/runbook.md §玉配置表）。長い GPU 作業を共有のまま回したときは局/日が落ちる旨を measurements.md に書く。
 - 1 週間の局/日（9/18 ごろ）、2 週間ごとの 20 局計測、10 月中旬の基準値マッチ 20 局、12 月の 100 局は docs/libra-local.md §5 の予定に従う。
 - Windows 側の操作（デスクトップの bat、タスク スケジューラ「LibraShogi run」「LibraShogi run lx」）は docs/runbook.md §3。自動ログオンと GPU 電力上限は設定しない（ユーザーの決定）。

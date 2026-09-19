@@ -71,7 +71,6 @@ gen_positions = 4000
 
 [auto]
 enabled = true
-every_hours = 0.0
 every_games = 400000        # 40 万局ごとに archive と計測（本番。2026-09-18 に煙テスト合格で 100000 から。総局数の倍数で区切る）
 eval_games = 0              # 直前比の 100 局はやめる（向きを逆に出した 9/16 の再発防止）
 chain_eval = false

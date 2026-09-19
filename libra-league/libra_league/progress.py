@@ -101,7 +101,7 @@ def snapshot(sd: StateDir, cfg: dict | None = None, points: int = 120, now: floa
             "references": [Path(x).name for x in (auto.get("references") or [])],
             "references_retired": [Path(x).name for x in (auto.get("references_retired") or [])],
         },
-        "auto_cfg": {k: acfg.get(k) for k in ("enabled", "every_hours", "every_games", "eval_games", "eval_sims", "anchor_games",
+        "auto_cfg": {k: acfg.get(k) for k in ("enabled", "every_games", "eval_games", "eval_sims", "anchor_games",
                                               "best_games", "reference_games", "reference_ckpts", "match_games", "match_go")},
         "best": collect_best(sd),
         "anchor": collect_anchor(sd),
