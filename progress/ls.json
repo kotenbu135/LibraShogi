@@ -1,20 +1,20 @@
 {
  "schema": 1,
  "run": "ls",
- "generated": "2026-09-19 22:03:44",
- "t": 1789823024.3,
+ "generated": "2026-09-20 01:52:33",
+ "t": 1789836753.3,
  "process": "running",
  "flags": [],
  "now": {
-  "step": 207358,
-  "generation": 278,
-  "games_total": 2370435,
+  "step": 207598,
+  "generation": 279,
+  "games_total": 2373016,
   "games_per_day_1h": 0,
-  "window_games": 1185217,
+  "window_games": 1186508,
   "active_games": 512,
-  "elapsed_h": 44.6,
+  "elapsed_h": 44.75,
   "heldout_games": 20000,
-  "status_time": "2026-09-19 22:03:42",
+  "status_time": "2026-09-20 01:52:32",
   "train": null,
   "gen": null
  },
@@ -2692,22 +2692,40 @@
    "gen_heldout_policy_acc": null,
    "gen_heldout_policy_ce": null,
    "gen_heldout_fuseki_corr_v": null
+  },
+  {
+   "t": 1789836752.3,
+   "step": 207598,
+   "games_total": 2373016,
+   "gpd": 0,
+   "gpd_5m": null,
+   "window": 1186508,
+   "loss": null,
+   "policy_acc": null,
+   "gen_window_corr_v": null,
+   "gen_window_policy_acc": null,
+   "gen_window_policy_ce": null,
+   "gen_window_fuseki_corr_v": null,
+   "gen_heldout_corr_v": null,
+   "gen_heldout_policy_acc": null,
+   "gen_heldout_policy_ce": null,
+   "gen_heldout_fuseki_corr_v": null
   }
  ],
  "review": {
-  "time": "2026-09-19 22:03:44",
+  "time": "2026-09-20 01:52:33",
   "run": "ls",
   "items": [
    {
     "name": "M1 一般化（本将棋の価値の相関）",
     "verdict": "続ける",
-    "why": "held-out の相関 0.6857 → 0.6895（200,000 局。横ばいは想定どおりで、伸びは M2・M4 で見る）、窓の中との差 -0.013",
+    "why": "held-out の相関 0.6808 → 0.692（200,000 局。横ばいは想定どおりで、伸びは M2・M4 で見る）、窓の中との差 -0.033",
     "values": {
-     "heldout_corr_first": 0.6857,
-     "heldout_corr_last": 0.6895,
-     "window_corr_last": 0.6761,
-     "gap": -0.013399999999999967,
-     "fall": 0.0038000000000000256,
+     "heldout_corr_first": 0.6808,
+     "heldout_corr_last": 0.692,
+     "window_corr_last": 0.6588,
+     "gap": -0.033199999999999896,
+     "fall": 0.011199999999999988,
      "heldout_corr_best": 0.7084,
      "n_rows": 13
     }
