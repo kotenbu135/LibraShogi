@@ -191,13 +191,15 @@ Check "対数で 1 点でも幅がある" ($L1.span -ge 0.5) $true
 Check "対数で 1 点の右端" $L1.max 20
 
 # --- 自動計測の行: 節目は総局数で決まる（時間区切りは 2026-09-19 に廃止） ---
+# ここより上で $now は横軸の試験用の [datetime] に置き換わっているので、Unix 秒は取り直す
+$nowSec = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 Check "自動計測（無効）" (Format-Auto-Status ([pscustomobject]@{ enabled = $false; every_games = 400000 }) $null 2000168 0) `
     "無効（config.toml の [auto]）"
 Check "自動計測（次の節目）" (Format-Auto-Status ([pscustomobject]@{ enabled = $true; every_games = 400000 }) ([pscustomobject]@{ running = $null }) 2000168 0) `
     "待機（次の自己評価は総局数 2,400,000、あと 399,832 局、40 万局ごと、待ち 0 件）"
 Check "自動計測（待ちあり）" (Format-Auto-Status ([pscustomobject]@{ enabled = $true; every_games = 400000 }) ([pscustomobject]@{ running = $null }) 2400000 2) `
     "待機（次の自己評価は総局数 2,800,000、あと 400,000 局、40 万局ごと、待ち 2 件）"
-Check "自動計測（実行中）" (Strip (Format-Auto-Status ([pscustomobject]@{ enabled = $true; every_games = 400000 }) ([pscustomobject]@{ running = [pscustomobject]@{ kind = "match"; started = $now } }) 2000168 1)) `
+Check "自動計測（実行中）" (Strip (Format-Auto-Status ([pscustomobject]@{ enabled = $true; every_games = 400000 }) ([pscustomobject]@{ running = [pscustomobject]@{ kind = "match"; started = $nowSec } }) 2000168 1)) `
     "match 実行中（<いつ>）"
 Check "自動計測（節目なし）" (Format-Auto-Status ([pscustomobject]@{ enabled = $true; every_games = 0 }) ([pscustomobject]@{ running = $null }) 2000168 0) `
     "節目なし（[auto] every_games が 0。eval-now / match-now のときだけ測る、待ち 0 件）"
