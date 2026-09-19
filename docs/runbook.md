@@ -112,6 +112,7 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 **稼働中のランの設定の正は、リポジトリの `config/<run-id>.toml`。** `~/libra-run/<run>/config.toml` は起動のたびにそこから作り直される写しで、手で直しても次の起動で上書きされる（2026-09-18 のユーザーの依頼。手で直すのが面倒で、PC を入れ替えると設定が失われるため）。
 
 - **直すのは Claude、反映はユーザー**。`config/<run-id>.toml` を直して main に入れ、ユーザーがコンソールの停止 → 起動を押すと効く。**手元のチェックアウトが古くても効く**（ランナーは `git fetch` して `origin/main:config/<run-id>.toml` の中身だけを読む。作業ツリー・HEAD・ローカルのブランチには触れない）。
+- **ただし効くのは「今のプログラムが知っている鍵」だけ。** 設定は `origin/main` から読むのに**プログラムは手元の作業ツリー**なので、コードも要る変更（新しい鍵）では `git pull` を忘れるとその鍵だけが黙って無視される。2026-09-19 に `match_go_opp` がこれで効かず、相手まで 1 手 400 回になった 40 局を「勝率 100%」として記録した（measurements.md 同日）。**知らない鍵があれば起動時に log.txt と `bin/libra config` に WARNING を出す**（`config.unknown_keys`）。**設定の変更を頼むときは、既定で「`cd ~/LibraShogi && git pull` → コンソールの停止 → 起動」を頼む**（コードが要る変更かどうかを毎回見分けるより確実）。
 - 読む順（後が勝つ）: 既定値 → `config/<run-id>.toml`（`origin/main` → 取れなければ作業ツリー）→ `~/libra-run/<run>/config.local.toml`（**その PC だけの上書き**。置き場所など。リポジトリには入れない）。`libra run --config <path>` を付けたときはこれまで通りそのファイルだけを読む（1 回きりの起動）。
 - 作り直すとき、前の `config.toml` は `config.toml.bak-<時刻>` に残し、変わったキーを log.txt に並べる。ブリッジ（libra-cloud）・ワーカーの束・`libra status` などはこれまで通り `<run>/config.toml` を読むので、影響しない。
 - **見るとき**: `bin/libra [--run lx] config`（設定の正・その PC の上書き・**反映待ちの違い**を出す。書き換えない）。`--json` もある。

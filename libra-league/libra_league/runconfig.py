@@ -28,7 +28,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .config import DEFAULTS, _merge, dump_toml, load_config
+from .config import DEFAULTS, _merge, dump_toml, load_config, unknown_keys
 from .state import StateDir
 
 CONFIG_DIR = "config"
@@ -104,7 +104,7 @@ def resolve(sd: StateDir, explicit: Path | None = None, repo: Path | None = None
     repo = repo or repo_root()
     ref = ref if ref is not None else os.environ.get("LIBRA_CONFIG_REF", DEFAULT_REF)
     info: dict = {"run": run_id, "source": None, "ref": None, "local": False, "adopt_hint": None,
-                  "changed": [], "backup": None}
+                  "changed": [], "backup": None, "unknown": []}
 
     if explicit is not None:
         info["source"] = str(explicit)
@@ -131,11 +131,20 @@ def resolve(sd: StateDir, explicit: Path | None = None, repo: Path | None = None
         info["source"] = "DEFAULTS"
         return load_config(None), info
 
-    cfg = _merge(DEFAULTS, _parse(text))
+    parsed = _parse(text)
+    cfg = _merge(DEFAULTS, parsed)
     lp = local_path(sd)
+    local_parsed: dict = {}
     if lp.exists():
-        cfg = _merge(cfg, _parse(lp.read_text(encoding="utf-8")))
+        local_parsed = _parse(lp.read_text(encoding="utf-8"))
+        cfg = _merge(cfg, local_parsed)
         info["local"] = True
+    # 設定は origin/main から読むのにプログラムは手元の作業ツリーなので、`git pull` を忘れると新しい鍵が
+    # 黙って無視される（2026-09-19 に match_go_opp がこれで効かず、無効な計測を 1 回記録した）
+    info["unknown"] = sorted(set(unknown_keys(parsed)) | set(unknown_keys(local_parsed)))
+    if info["unknown"]:
+        log(f"config: WARNING 今のプログラムが知らない設定がある（無視される）: {', '.join(info['unknown'])}"
+            f" — `cd {repo} && git pull` で最新にしてから起動し直してください")
 
     info["changed"] = changed_keys(live, cfg) if live is not None else []
     src = info["source"] if not info["ref"] else f"{info['ref']}:{CONFIG_DIR}/{run_id}.toml"
