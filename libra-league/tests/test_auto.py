@@ -83,7 +83,7 @@ def test_autojobs_runs_subprocess(tmp_path):
     fake.write_text("import sys, json, pathlib\no = pathlib.Path(sys.argv[sys.argv.index('--out') + 1])\n"
                     "o.parent.mkdir(parents=True, exist_ok=True)\no.write_text(json.dumps({'kind': sys.argv[1]}))\n")
     cfg = load_config(None)
-    cfg["auto"].update({"enabled": True, "every_hours": 1.0, "match_games": 2})
+    cfg["auto"].update({"enabled": True, "every_games": 1000, "match_games": 2})
     state = {}
     logs = []
     jobs = AutoJobs(sd, cfg, state, logs.append, cmd_prefix=[sys.executable, str(fake)])
@@ -94,7 +94,7 @@ def test_autojobs_runs_subprocess(tmp_path):
     assert [j["kind"] for j in state["auto"]["queue"]] == ["match"]
     c1 = sd.checkpoints / "ckpt_000000020.pt"
     c1.write_bytes(b"b")
-    jobs.on_checkpoint(c1, now=1000.0 + 1800)  # 期限前: 何もしない
+    jobs.on_checkpoint(c1, now=1000.0 + 1800)  # 節目の前（局数が増えていない）: 何もしない
     assert len(list_archives(sd)) == 1
     sd.set_flag("EVAL_NOW")
     jobs.on_checkpoint(c1, now=1000.0 + 1800)  # フラグで前倒し
@@ -141,15 +141,22 @@ def _anchor_jobs(tmp_path, **acfg):
         "o.write_text(json.dumps({'a': a, 'b': b, 'n': 100, 'score_a': score, 'elo_a_minus_b': elo,\n"
         "                         'elo_ci95': [elo - 70, elo + 70]}))\n")
     cfg = load_config(None)
-    cfg["auto"].update({"enabled": True, "every_hours": 1.0, "match_games": 0, "chain_eval": False})
+    cfg["auto"].update({"enabled": True, "every_games": 1000, "match_games": 0, "chain_eval": False})
     cfg["auto"].update(acfg)
     state = {}
     jobs = AutoJobs(sd, cfg, state, print, cmd_prefix=[sys.executable, str(fake)])
     return sd, jobs, state
 
 
-def _archive(sd, jobs, step, now, elo=-100.0, score=0.3):
-    """step の世代を archive に足して on_checkpoint を呼ぶ。elo/score は「その世代を基準にしたときの結果」。"""
+def _archive(sd, jobs, step, now, elo=-100.0, score=0.3, advance=None):
+    """step の世代を archive に足して on_checkpoint を呼ぶ。elo/score は「その世代を基準にしたときの結果」。
+
+    節目は総局数で決まる（[auto] every_games）ので、既定では呼ぶたびに every_games ぶん総局数を進める。
+    局数を自分で置く試験は advance=0 を渡す。"""
+    if advance is None:
+        advance = int(jobs.acfg.get("every_games", 0))
+    if advance:
+        jobs.state["games_total"] = int(jobs.state.get("games_total") or 0) + advance
     p = sd.checkpoints / f"ckpt_{step:09d}.pt"
     p.write_bytes(b"x" * 8)
     (sd.checkpoints / "archive").mkdir(parents=True, exist_ok=True)
@@ -216,7 +223,7 @@ def test_no_spawn_while_suspended(tmp_path):
     fake = tmp_path / "fake.py"
     fake.write_text("import sys, json, pathlib, time\ntime.sleep(30)\n")
     cfg = load_config(None)
-    cfg["auto"].update({"enabled": True, "every_hours": 1.0, "match_games": 2})
+    cfg["auto"].update({"enabled": True, "every_games": 1000, "match_games": 2})
     state: dict = {}
     jobs = AutoJobs(sd, cfg, state, lambda _m: None, cmd_prefix=[sys.executable, str(fake)])
 
@@ -255,7 +262,7 @@ def _crash_setup(tmp_path):
     fake.write_text("import sys, pathlib, time\no = pathlib.Path(sys.argv[sys.argv.index('--out') + 1])\n"
                     "o.parent.mkdir(parents=True, exist_ok=True)\no.write_text('partial\\n')\ntime.sleep(60)\n")
     cfg = load_config(None)
-    cfg["auto"].update({"enabled": True, "every_hours": 1.0, "match_games": 2})
+    cfg["auto"].update({"enabled": True, "every_games": 1000, "match_games": 2})
     return sd, cfg, [sys.executable, str(fake)]
 
 
@@ -414,38 +421,38 @@ def test_reference_rotates_when_it_is_beaten_too_often(tmp_path):
 
 
 def test_every_games_triggers_by_games_not_time(tmp_path):
-    """every_games > 0 なら、総局数がその分たまるごとに archive と計測を積む（時間は見ない）。行には games が入る。"""
+    """節目は総局数だけで決まる（every_games の倍数を越えたら archive と計測を積む）。時間は見ない。行には games が入る。"""
     from libra_league.auto import collect_best
 
-    sd, jobs, state = _anchor_jobs(tmp_path, anchor_games=0, best_games=100, every_games=1000, every_hours=0.0)
+    sd, jobs, state = _anchor_jobs(tmp_path, anchor_games=0, best_games=100, every_games=1000)
     state["games_total"] = 0
-    _archive(sd, jobs, 100, 1000.0)                  # 最初は必ず
+    _archive(sd, jobs, 100, 1000.0, advance=0)                  # 最初は必ず
     assert state["auto"]["best"]["step"] == 100 and state["auto"]["last_archive_games"] == 0
     state["games_total"] = 900
-    _archive(sd, jobs, 200, 1000.0 + 86400)          # 1 日たっても 900 局では積まない
+    _archive(sd, jobs, 200, 1000.0 + 86400, advance=0)          # 1 日たっても 900 局では積まない
     assert [p.name for p in list_archives(sd)] == ["ckpt_000000100.pt"]
     state["games_total"] = 1000
-    _archive(sd, jobs, 300, 1000.0 + 86400 + 1, elo=-100.0, score=0.3)  # 1,000 局で積む
+    _archive(sd, jobs, 300, 1000.0 + 86400 + 1, elo=-100.0, score=0.3, advance=0)  # 1,000 局で積む
     assert [p.name for p in list_archives(sd)] == ["ckpt_000000100.pt", "ckpt_000000300.pt"]
     rows = collect_best(sd)
     assert rows[-1]["games"] == 1000 and rows[-1]["improved"]
     # 区切りは every_games の倍数（1,000・2,000…）。前回が半端（1,870）でも次は 2,000 局で積む（2026-09-17 のユーザーの希望）
     state["auto"]["last_archive_games"] = 1870
     state["games_total"] = 1999
-    _archive(sd, jobs, 400, 1000.0 + 86400 + 2)
+    _archive(sd, jobs, 400, 1000.0 + 86400 + 2, advance=0)
     assert len(list_archives(sd)) == 2
     state["games_total"] = 2003
-    _archive(sd, jobs, 500, 1000.0 + 86400 + 3, elo=-100.0, score=0.3)
+    _archive(sd, jobs, 500, 1000.0 + 86400 + 3, elo=-100.0, score=0.3, advance=0)
     assert len(list_archives(sd)) == 3 and state["auto"]["last_archive_games"] == 2003
-    # every_hours だけの run は今までどおり時間で
-    sd2, jobs2, state2 = _anchor_jobs(tmp_path / "h", anchor_games=0, best_games=100, every_hours=1.0)
+    # every_games = 0 の run は最初の 1 回だけ（時間区切りは 2026-09-19 に廃止した）
+    sd2, jobs2, state2 = _anchor_jobs(tmp_path / "h", anchor_games=0, best_games=100, every_games=0)
     state2["games_total"] = 0
-    _archive(sd2, jobs2, 100, 1000.0)
-    _archive(sd2, jobs2, 200, 1000.0 + 1800)
+    _archive(sd2, jobs2, 100, 1000.0, advance=0)
+    _archive(sd2, jobs2, 200, 1000.0 + 1800, advance=0)
+    state2["games_total"] = 10**6
+    _archive(sd2, jobs2, 300, 1000.0 + 86400, elo=-100.0, score=0.3, advance=0)
     assert len(list_archives(sd2)) == 1
-    _archive(sd2, jobs2, 300, 1000.0 + 3600, elo=-100.0, score=0.3)
-    assert len(list_archives(sd2)) == 2
-    # ランナーは倍数を越えたら 10 分を待たずにチェックポイントを取る（games_due）。前回が無い・時間区切りの run では見ない
+    # ランナーは倍数を越えたら 10 分を待たずにチェックポイントを取る（games_due）。前回が無い・節目なしの run では見ない
     assert not jobs.games_due(2999) and jobs.games_due(3000)
     state["auto"]["last_archive_games"] = None
     assert not jobs.games_due(3000)
@@ -485,6 +492,7 @@ def test_anchor_offset_uses_the_opponent_actually_played_when_jobs_back_up(tmp_p
         (sd.checkpoints / "archive").mkdir(parents=True, exist_ok=True)
         (sd.checkpoints / "archive" / f"ckpt_{step:09d}.pt.elo").write_text(str(elo))
         (sd.checkpoints / "archive" / f"ckpt_{step:09d}.pt.score").write_text(str(score))
+        state["games_total"] = int(state.get("games_total") or 0) + 1000   # 節目は総局数で決まる
         jobs.on_checkpoint(p, now=1000.0 + now)                        # 2 つとも基準 1000 で積む
     for _ in range(400):
         jobs.poll()
@@ -531,7 +539,7 @@ def test_match_uses_archived_weights(tmp_path):
     sd = StateDir(tmp_path / "x")
     sd.create()
     cfg = load_config(None)
-    cfg["auto"].update({"enabled": True, "every_hours": 1.0, "match_games": 10, "anchor_games": 0, "best_games": 0, "chain_eval": False})
+    cfg["auto"].update({"enabled": True, "every_games": 1000, "match_games": 10, "anchor_games": 0, "best_games": 0, "chain_eval": False})
     state = {}
     jobs = AutoJobs(sd, cfg, state, lambda s: None)
     ck = sd.checkpoints / "ckpt_000028908.pt"
@@ -555,7 +563,7 @@ def test_match_skips_stale_onnx_snapshot(tmp_path):
     sd = StateDir(tmp_path / "x")
     sd.create()
     cfg = load_config(None)
-    cfg["auto"].update({"enabled": True, "every_hours": 1.0, "match_games": 10, "anchor_games": 0, "best_games": 0, "chain_eval": False})
+    cfg["auto"].update({"enabled": True, "every_games": 1000, "match_games": 10, "anchor_games": 0, "best_games": 0, "chain_eval": False})
     state = {}
     jobs = AutoJobs(sd, cfg, state, lambda s: None)
     latest = sd.checkpoints / "latest.onnx"

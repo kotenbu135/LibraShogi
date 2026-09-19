@@ -748,6 +748,21 @@ function Format-Elo-Note([bool]$detail, [bool]$haveRating, [bool]$useGames, $tre
     elseif ($useLog) { $n += "。横軸は総局数の対数（右へ 1 目盛りで局数が 2 倍）。伸びは局数の対数にほぼ比例するので、ふつうの横軸では一定の伸びでも右で寝て見える" }
     return $n
 }
+function Format-Auto-Status($ac, $au, $games, [int]$queued) {
+    # 「自動計測」の行（純関数。tools/windows/tests/console-format.tests.ps1 が試す）。
+    # 節目は総局数の倍数で決まる（[auto] every_games）。時間区切りは 2026-09-19 に廃止したので、
+    # 「あと何局で次の計測か」を出す（時刻は局/日で変わるので出さない）
+    if ($null -eq $ac -or -not $ac.enabled) { return "無効（config.toml の [auto]）" }
+    if ($null -ne $au -and $null -ne $au.running) { return "{0} 実行中（{1}）" -f $au.running.kind, (Format-Ago (From-Unix $au.running.started)) }
+    $every = if ($null -ne $ac.every_games) { [double]$ac.every_games } else { 0 }
+    if ($every -le 0) { return "節目なし（[auto] every_games が 0。eval-now / match-now のときだけ測る、待ち {0} 件）" -f $queued }
+    # 40 万局は「40 万局ごと」と読みやすく出す（万で割り切れないときはそのまま局で）
+    $unit = if ($every -ge 10000 -and ($every % 10000) -eq 0) { (Format-Int ($every / 10000)) + " 万局ごと" } else { (Format-Int $every) + " 局ごと" }
+    if ($null -eq $games) { return "待機（{0}、待ち {1} 件）" -f $unit, $queued }
+    $g = [double]$games
+    $next = ([math]::Floor($g / $every) + 1) * $every
+    return "待機（次の自己評価は総局数 {0}、あと {1} 局、{2}、待ち {3} 件）" -f (Format-Int $next), (Format-Int ($next - $g)), $unit, $queued
+}
 function Use-GamesAxis {
     # Elo と 対外対局 の横軸。学習を進めるのは時間ではなく局数（止めている間・GPU を分け合う間は
     # 同じ時間でも進みが違う）ので、既定は総局数。$cmbAxis がまだ無い起動直後も総局数。
@@ -1705,13 +1720,8 @@ function Update-Panel([string]$run, $obj) {
         Set-RowVisible $u "reference" ($null -ne $refText)
         Set-RowVisible $u "match" ($autoCfgOn -or $ms.Count -gt 0)
         $au = $d.auto; $ac = $d.auto_cfg
-        if ($null -eq $ac -or -not $ac.enabled) { $v.auto.Text = "無効（config.toml の [auto]）" }
-        elseif ($null -ne $au -and $null -ne $au.running) { $v.auto.Text = "{0} 実行中（{1}）" -f $au.running.kind, (Format-Ago (From-Unix $au.running.started)) }
-        else {
-            $q = if ($null -ne $au) { @($au.queue).Count } else { 0 }
-            $next = if ($null -ne $au -and $null -ne $au.last_archive) { (From-Unix $au.last_archive).AddHours([double]$ac.every_hours).ToString("MM/dd HH:mm") } else { "次のチェックポイント" }
-            $v.auto.Text = "待機（次の自己評価 {0}、待ち {1} 件、{2} 時間ごと）" -f $next, $q, $ac.every_hours
-        }
+        $q = if ($null -ne $au) { @($au.queue).Count } else { 0 }
+        $v.auto.Text = Format-Auto-Status $ac $au $st.games_total $q
     }
     # クラウドのタブを見ている間はグラフにハンドルが無く SelectedTab が null
     if ($null -ne $tabs.SelectedTab) { $tabs.SelectedTab.Controls[0].Invalidate() }
