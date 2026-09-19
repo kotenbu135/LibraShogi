@@ -61,6 +61,7 @@ def play_match(model_a: LibraNet, model_b: LibraNet, search_cfg: dict, n_games: 
                device: torch.device, dtype: torch.dtype = torch.float16, log=None, search_cfg_b: dict | None = None) -> dict:
     cfg = dict(search_cfg)
     cfg["full_prob"] = 1.0  # 評価は全読みで固定
+    cfg["resign_threshold"] = 0.0  # 計測の対局では投了しない（誤投了が Elo に乗ると物差しが狂う。自己対局だけで使う）
     eng = librasearch.SelfPlay(cfg, concurrent, seed, threads)
     if search_cfg_b is not None:
         cfg_b = {**cfg, **search_cfg_b, "full_prob": 1.0}
