@@ -29,6 +29,10 @@ max_moves_per_game = 400
 mate_nodes_root = 200
 proof_nodes = 1000
 proof_min_ply = 36
+resign_threshold = 0.0
+resign_runs = 1
+resign_disable_prob = 0.1
+resign_min_ply = 40
 defer_root_proof = true
 
 [selfplay]
@@ -72,7 +76,7 @@ warmup_steps = 1000
 replay_ratio = 1.0
 window_games = 100000
 window_frac = 0.5
-window_games_max = 1200000
+window_games_max = 2000000
 min_window_games = 2000
 train_every_games = 256
 policy_weight = 1.0
