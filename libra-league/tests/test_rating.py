@@ -115,6 +115,57 @@ def test_rating_and_curve_over_a_run(tmp_path):
     assert [(p["games"], p["t"]) for p in c2["points"]] == [(7, 9.0)] * 3
 
 
+def test_curve_fits_the_recent_stretch_separately(tmp_path):
+    """「最近の伸び」は最後の点から 4 回の倍化ぶんだけに当てはめる。
+
+    学習の初めは基本を覚えるぶん伸び方が違うので、全部の点に 1 本の直線を当てはめると形が合わない。
+    コンソールの Elo のグラフの「目安の線」はこちらを使う（2026-09-19 のユーザーの「初期に比べると
+    伸びが緩やかなので頭打ちなのかグラフからわかりにくい」）。"""
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    # 2026-09-19 の ls の実データの形: 初めの 2 点だけ傾きが違い、120 万局以降は log2 に対して直線
+    real = [(402, 4738, 0.0), (1416, 18720, 163.5), (8144, 120171, 375.5), (13807, 200361, 470.7),
+            (21270, 300500, 624.5), (28908, 400021, 744.3), (62426, 800281, 916.2),
+            (98604, 1200126, 1029.8), (117436, 1402864, 1091.9), (135740, 1600085, 1106.0),
+            (172923, 2000241, 1151.8)]
+    with open(sd.root / "metrics.jsonl", "w", encoding="utf-8") as f:
+        for step, games, _ in real:
+            f.write(json.dumps({"t": float(step), "step": step, "games_total": games}) + "\n")
+    # 目盛りそのものは fit が決めるので、ここは curve の当てはめだけを見る
+    nodes = {step_node(st): {"elo": elo, "ci95": [elo - 30, elo + 30], "games": 1000,
+                             "opponents": 3, "step": st} for st, _, elo in real}
+    c = curve(sd, {"nodes": nodes, "anchor": step_node(402)})
+
+    assert [p["games"] for p in c["points"]] == [g for _, g, _ in real]
+    assert c["recent_doublings"] == 4
+    # 全部の点: 初めの 2 点に引っ張られて傾きが浅く、残差が大きい
+    assert abs(c["fit"]["elo_per_doubling"] - 140.1) < 1.0
+    assert c["fit"]["rms_resid"] > 80
+    assert c["fit"]["n"] == 11
+    # 最近の伸び: 200 万局 / 2^4 = 12.5 万局以降の 8 点。傾きは倍、残差は 4 分の 1 以下
+    assert c["fit_recent"]["n"] == 8
+    assert c["fit_recent"]["games_from"] == 200361
+    assert abs(c["fit_recent"]["elo_per_doubling"] - 203.1) < 1.0
+    assert c["fit_recent"]["rms_resid"] < 25
+    # **最新の点は目安の線の下**（全部の点だと +62 上に出て「加速している」と誤読させる）
+    import math
+    pred = c["fit_recent"]["intercept"] + c["fit_recent"]["elo_per_doubling"] * math.log2(2000241)
+    assert -40 < 1151.8 - pred < 0
+
+
+def test_curve_fit_recent_falls_back_while_points_are_few(tmp_path):
+    """点が 4 つに満たないうちは全部の点に当てはめる（学習の初め）。"""
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    with open(sd.root / "metrics.jsonl", "w", encoding="utf-8") as f:
+        for step, games in [(400, 100000), (800, 200000), (1600, 400000)]:
+            f.write(json.dumps({"t": float(step), "step": step, "games_total": games}) + "\n")
+    _w(sd, "best.jsonl", [{"t": 1.0, "step": 800, "best_step": 400, "n": 1000, "score_new": 0.75},
+                          {"t": 2.0, "step": 1600, "best_step": 800, "n": 1000, "score_new": 0.75}])
+    c = curve(sd)
+    assert c["fit_recent"] == c["fit"] and c["fit"]["n"] == 3
+
+
 def test_curve_drops_points_with_too_few_games(tmp_path):
     """対局が少なすぎる点は曲線から外す。
 

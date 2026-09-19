@@ -120,6 +120,8 @@ def test_status_history_adds_the_rating_scale(tmp_path, capsys):
     assert rt["points"][0]["elo"] == 0.0 and rt["points"][2]["elo"] > rt["points"][1]["elo"] > 0
     assert all(p["ci95"] is not None for p in rt["points"])
     assert rt["curve_fit"]["elo_per_doubling"] > 0 and rt["fit"]["n_nodes"] == 3
+    # 「目安の線」はこちらを使う。点が 4 つに満たないうちは全部の点と同じ
+    assert rt["recent_doublings"] == 4 and rt["curve_fit_recent"] == rt["curve_fit"]
 
 
 def test_status_history_rating_survives_a_run_with_no_games(tmp_path, capsys):

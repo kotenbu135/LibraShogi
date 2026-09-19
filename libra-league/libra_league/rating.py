@@ -282,6 +282,15 @@ def render(r: dict) -> str:
 # （2026-09-19 の step 74,627 は 10 局で区間 ±287 Elo。曲線に入れると −190 Elo / 2 倍という区間が出た）
 CURVE_MIN_GAMES = 200
 
+# 「最近の伸び」を当てはめる範囲。最後の点から数えてこの回数ぶんの倍化まで遡る（局数が最大の 1/2^4）。
+# 学習の初めは基本を覚えるぶん伸び方が違い、全部の点で 1 本の直線に当てはめると形が合わない:
+# 2026-09-19 の実データ（11 点）で全部だと傾き +140.1 / 2 倍・残差 87.9、残差は +132 → −154 → +62 と
+# 大きく振れ、「目安の線」として使うと最新の点が +62 上に出て「加速している」と誤読させる。
+# この範囲（8 点）なら +203.1 / 2 倍・残差 21.3 で、40 万局以降どの節目で当てはめても傾きは 203〜213 に収まる。
+# 点が RECENT_MIN_POINTS に満たないときは全部の点に当てはめる（学習の初め）。出典なし（自分の案）
+RECENT_DOUBLINGS = 4
+RECENT_MIN_POINTS = 4
+
 
 def curve(sd: StateDir, r: dict | None = None, min_games: int = CURVE_MIN_GAMES,
           g_of=None, t_of=None) -> dict:
@@ -313,5 +322,13 @@ def curve(sd: StateDir, r: dict | None = None, min_games: int = CURVE_MIN_GAMES,
         pts.append({"step": st, "games": g, "t": t_of(st), "elo": v["elo"], "ci95": v["ci95"], "n": v["games"],
                     "opponents": v["opponents"], "score": 0.5, "in_band": True, "node": nm})
     pts.sort(key=lambda p: p["games"])
-    return {"points": pts, "intervals": intervals(pts), "fit": line_fit(pts), "thin": sorted(thin),
+    # 「最近の伸び」: 最後の点から RECENT_DOUBLINGS 回の倍化まで。点が足りなければ全部に当てはめる
+    recent = pts
+    if pts:
+        cut = pts[-1]["games"] / (2 ** RECENT_DOUBLINGS)
+        tail = [q for q in pts if q["games"] >= cut]
+        if len(tail) >= RECENT_MIN_POINTS:
+            recent = tail
+    return {"points": pts, "intervals": intervals(pts), "fit": line_fit(pts), "fit_recent": line_fit(recent),
+            "recent_doublings": RECENT_DOUBLINGS, "thin": sorted(thin),
             "min_games": min_games, "anchor": r.get("anchor"), "misfit": (r.get("fit") or {}).get("chi2_per_df")}
