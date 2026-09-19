@@ -125,8 +125,9 @@ reference_games = 200
 reference_rotate = 0.8
 reference_min = 1
 match_games = 40
-match_go = "movetime 1000"
+match_go = "nodes 400"
 match_opponent_opt = "Threads=2,Fuseki_Rules=2"
+match_go_opp = "movetime 1000"
 
 [progress]
 enabled = true

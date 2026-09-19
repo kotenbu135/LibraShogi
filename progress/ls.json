@@ -1,20 +1,20 @@
 {
  "schema": 1,
  "run": "ls",
- "generated": "2026-09-19 21:19:20",
- "t": 1789820360.7,
+ "generated": "2026-09-19 22:03:44",
+ "t": 1789823024.3,
  "process": "running",
  "flags": [],
  "now": {
-  "step": 206182,
-  "generation": 274,
-  "games_total": 2357712,
+  "step": 207358,
+  "generation": 278,
+  "games_total": 2370435,
   "games_per_day_1h": 0,
-  "window_games": 1178856,
+  "window_games": 1185217,
   "active_games": 512,
-  "elapsed_h": 44.06,
+  "elapsed_h": 44.6,
   "heldout_games": 20000,
-  "status_time": "2026-09-19 21:19:19",
+  "status_time": "2026-09-19 22:03:42",
   "train": null,
   "gen": null
  },
@@ -45,7 +45,7 @@
    "~ckpt_000062426.pt"
   ],
   "match_games": 40,
-  "match_go": "movetime 1000"
+  "match_go": "nodes 400"
  },
  "best": [
   {
@@ -2658,12 +2658,30 @@
    "gen_heldout_fuseki_corr_v": 0.6555
   },
   {
-   "t": 1789820359.1,
-   "step": 206182,
-   "games_total": 2357712,
+   "t": 1789820964.7,
+   "step": 206638,
+   "games_total": 2362578,
+   "gpd": 694279,
+   "gpd_5m": 726681,
+   "window": 1181289,
+   "loss": 2.1908106803894043,
+   "policy_acc": 0.6375839114189148,
+   "gen_window_corr_v": 0.6761,
+   "gen_window_policy_acc": 0.6434,
+   "gen_window_policy_ce": 1.1232,
+   "gen_window_fuseki_corr_v": 0.6379,
+   "gen_heldout_corr_v": 0.6895,
+   "gen_heldout_policy_acc": 0.5845,
+   "gen_heldout_policy_ce": 1.2535,
+   "gen_heldout_fuseki_corr_v": 0.6337
+  },
+  {
+   "t": 1789823022.1,
+   "step": 207358,
+   "games_total": 2370435,
    "gpd": 0,
-   "gpd_5m": 412492,
-   "window": 1178856,
+   "gpd_5m": 14128,
+   "window": 1185217,
    "loss": null,
    "policy_acc": null,
    "gen_window_corr_v": null,
@@ -2677,21 +2695,21 @@
   }
  ],
  "review": {
-  "time": "2026-09-19 21:19:20",
+  "time": "2026-09-19 22:03:44",
   "run": "ls",
   "items": [
    {
     "name": "M1 一般化（本将棋の価値の相関）",
     "verdict": "続ける",
-    "why": "held-out の相関 0.6857 → 0.6976（200,000 局。横ばいは想定どおりで、伸びは M2・M4 で見る）、窓の中との差 -0.001",
+    "why": "held-out の相関 0.6857 → 0.6895（200,000 局。横ばいは想定どおりで、伸びは M2・M4 で見る）、窓の中との差 -0.013",
     "values": {
      "heldout_corr_first": 0.6857,
-     "heldout_corr_last": 0.6976,
-     "window_corr_last": 0.6839,
-     "gap": -0.0009000000000000119,
-     "fall": 0.011900000000000022,
+     "heldout_corr_last": 0.6895,
+     "window_corr_last": 0.6761,
+     "gap": -0.013399999999999967,
+     "fall": 0.0038000000000000256,
      "heldout_corr_best": 0.7084,
-     "n_rows": 11
+     "n_rows": 13
     }
    },
    {
