@@ -124,10 +124,15 @@ reference_games = 200
 reference_rotate = 0.8
 reference_min = 1
 match_games = 40
-match_go = "nodes 400"
-match_go_opp = "movetime 1000"
-match_opponent_opt = "Threads=2,Fuseki_Rules=2"
-match_libra_opt = ""
+match_go = "nodes 96"
+match_go_opp = "nodes 1000, nodes 10000, nodes 100000, nodes 1000000"
+match_opponent_opt = "EvalDir=vendor/yaneuraou_eval,Threads=1,USI_Hash=256,USI_OwnBook=false,BookFile=no_book,EnteringKingRule=CSARule27"
+match_libra_opt = "Mate_Nodes=200"
+match_fuseki = "self"
+match_opponent = "~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc"
+match_opponent_cwd = "~/fuseki-shogi-ai"
+match_libra_standard = true
+match_use_best = true
 
 [progress]
 enabled = true
