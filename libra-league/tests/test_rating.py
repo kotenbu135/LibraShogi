@@ -191,10 +191,12 @@ def test_curve_drops_points_with_too_few_games(tmp_path):
     assert [p["step"] for p in curve(sd, min_games=1)["points"]] == [400, 600, 800]
 
 
-def _match(sd, name, step, n, pts, *, go="movetime 1000", go_opp=None, opp_opt=None, libra_opt=None):
+def _match(sd, name, step, n, pts, *, go="movetime 1000", go_opp=None, opp_opt=None, libra_opt=None, standard=False):
     (sd.root / "matches").mkdir(exist_ok=True)
     r = {"n": n, "a_points": pts, "b": "外部エンジン", "go": go,
          "libra_options": {"DNN_Model": f"/x/ckpt_{step:09d}.onnx", "Declare_Win": "true", **(libra_opt or {})}}
+    if standard:
+        r["libra_standard"] = True
     if go_opp:
         r["go_opp"] = go_opp
     if opp_opt:
@@ -237,3 +239,17 @@ def test_old_match_records_without_conditions_keep_the_plain_name(tmp_path):
         {"n": 40, "a_points": 28.0, "b": "外部エンジン",
          "libra_options": {"DNN_Model": "/x/ckpt_000001600.onnx"}}), encoding="utf-8")
     assert [(p["a"], p["b"]) for p in pairs_of(sd)] == [("step 1,600", "外部エンジン")]
+
+
+def test_libra_standard_stays_on_the_main_scale(tmp_path):
+    """Libra 側が自己評価と同じ読みで打った（`libra_standard`）結果は、`go` が相手と違っても素の `step N` の点。
+
+    これが無いと Libra 側が別の点になり、「その点と相手」だけで閉じた塊になって目盛りから丸ごと落ちる。
+    2026-09-20 に布石を持ち込む形へ変えたとき、相手（やねうら王）と Libra で `go` が必ず違うので要る。
+    """
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    _match(sd, "a.summary.json", 1600, 40, 20.0, go="nodes 96", go_opp="nodes 10000",
+           opp_opt={"Threads": "1"}, libra_opt={"Mate_Nodes": "200"}, standard=True)
+    got = sorted((p["a"], p["b"]) for p in pairs_of(sd))
+    assert got == [("step 1,600", "外部エンジン [Threads=1, nodes 10000]")]

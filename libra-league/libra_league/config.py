@@ -128,8 +128,13 @@ DEFAULTS: dict[str, Any] = {
              # match_go は Libra 側の `go`。match_go_opp を書くと相手だけ別の `go` になり、読む量に差を付けて測れる
              # （勝ちすぎて勝率が 1 に寄ると 1 局あたりの情報が減り、全勝すると Elo が出ない。docs/runbook.md §6）。
              # match_libra_opt は Libra への setoption（例 Sims_Normal=400,Sims_Fuseki=200）。空なら送らない
+             # match_fuseki: 布石をどうするか。engine=両エンジンに打たせる／selfplay=自己対局の 41 手目の局面を使う（＝最強 Libra 同士の布石）
+             # match_opponent: 相手の起動コマンド（空なら布石つきの fuseki_usi_server.py、match_fuseki が engine 以外なら やねうら王）
+             # match_go_opp にコンマを書くと段ごとに分けて測る（例 "nodes 1000, nodes 10000"）。段ごとに Elo の別の点になる
+             # match_libra_standard: Libra 側が自己評価と同じ読み（eval_sims）で打つとき true。Elo の目盛りで同じ点として扱う
              "match_games": 10, "match_go": "movetime 1000", "match_go_opp": "", "match_opponent_opt": "Threads=2,Fuseki_Rules=2",
-             "match_libra_opt": ""},
+             "match_libra_opt": "", "match_fuseki": "engine", "match_opponent": "", "match_opponent_cwd": "",
+             "match_libra_standard": False},
     # 進捗の書き出し（libra_league/progress.py、docs/runbook.md §6）: 自動計測が動いた節目と heartbeat_minutes ごとに、
     # 数値の要約を repo の branch へ push する。~/libra-run の値をクラウドのセッションからも読めるようにするため（2026-09-18）。
     # repo が空ならこのチェックアウト。push には git の認証（gh の credential helper）が要る。

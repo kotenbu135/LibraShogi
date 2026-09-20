@@ -650,3 +650,46 @@ def test_rotation_says_why_it_skipped(tmp_path, capsys):
     log = capsys.readouterr().out
     assert "今の参照に入っていない" in log
     assert "置き換える archive が無い" in log
+
+
+def test_enqueue_match_splits_the_levels_and_shares_the_openings(tmp_path):
+    """相手の読む量を段で分けたとき（match_go_opp のコンマ区切り）は段ごとに 1 ジョブ・局数を等分し、
+    布石の種は同じにする（段どうしの比較が同じ局面の対になる）。2026-09-20 の相手の入れ替えで使う。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    cfg = load_config(None)
+    cfg["auto"].update({"enabled": True, "every_games": 1000, "match_games": 40, "match_go": "nodes 96",
+                        "match_go_opp": "nodes 1000, nodes 10000, nodes 100000, nodes 1000000",
+                        "match_fuseki": "self", "match_libra_standard": True,
+                        "match_opponent": "/opt/yaneuraou/YaneuraOu-by-gcc", "match_opponent_cwd": "/opt/yaneuraou",
+                        "match_opponent_opt": "Threads=1", "match_libra_opt": "Mate_Nodes=200"})
+    state: dict = {"games_total": 3200000}
+    AutoJobs(sd, cfg, state, lambda _m: None).enqueue_match()
+    q = state["auto"]["queue"]
+    assert len(q) == 4
+    assert [j["args"][j["args"].index("--go-opp") + 1] for j in q] == \
+        ["nodes 1000", "nodes 10000", "nodes 100000", "nodes 1000000"]
+    for j in q:
+        a = j["args"]
+        assert a[:5] == ["match", "--games", "10", "--go", "nodes 96"]          # 40 局を 4 段で等分
+        assert a[a.index("--fuseki") + 1] == "self"
+        assert a[a.index("--fuseki-seed") + 1] == "3200000"                     # 段をまたいで同じ布石
+        assert a[a.index("--opponent") + 1] == "/opt/yaneuraou/YaneuraOu-by-gcc"
+        assert a[a.index("--opponent-cwd") + 1] == "/opt/yaneuraou"
+        assert "--libra-standard" in a
+        assert a[a.index("--opponent-opt") + 1] == "Threads=1"
+    assert len({j["out"] for j in q}) == 4                                      # 棋譜のファイルは段ごとに別
+
+
+def test_enqueue_match_keeps_one_job_when_there_is_one_level(tmp_path):
+    """段が 1 つ（今までどおり）なら 1 ジョブのまま、布石の引数も付かない。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    cfg = load_config(None)
+    cfg["auto"].update({"enabled": True, "every_games": 1000, "match_games": 40, "match_go_opp": "movetime 1000"})
+    state: dict = {}
+    AutoJobs(sd, cfg, state, lambda _m: None).enqueue_match()
+    q = state["auto"]["queue"]
+    assert len(q) == 1 and q[0]["args"][:3] == ["match", "--games", "40"]
+    assert "--fuseki" not in q[0]["args"] and "--libra-standard" not in q[0]["args"]
+    assert q[0]["out"].endswith(".jsonl") and "-1.jsonl" not in q[0]["out"]
