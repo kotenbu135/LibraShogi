@@ -588,6 +588,12 @@ def main(argv: list[str] | None = None) -> int:
             g = max(1, eng.get("games", 0) or 1)
             print(f"time {st['time']}  step {st['step']}  generation {st['generation']}  games_total {st['games_total']}  "
                   f"games/day(1h) {st['games_per_day_1h']}  window {st['window_games']}  elapsed {st['elapsed_h']} h  active {st['active_games']}")
+            mem, gpu = st.get("mem") or {}, st.get("gpu") or {}
+            if mem or gpu:
+                print("memory: "
+                      + (f"runner rss {mem['rss_mb'] / 1024:.2f} GB  " if mem.get("rss_mb") is not None else "")
+                      + (f"swap {mem['swap_mb'] / 1024:.2f} GB  " if mem.get("swap_mb") is not None else "")
+                      + (f"gpu reserved {gpu['mem_reserved_mb'] / 1024:.2f} GB" if gpu.get("mem_reserved_mb") is not None else ""))
             if eng:
                 print(f"session: games {eng.get('games')}  avg plies {eng.get('plies_sum', 0) / g:.1f}  "
                       f"sente/draw/gote {eng.get('sente_wins')}/{eng.get('draws')}/{eng.get('gote_wins')}  "

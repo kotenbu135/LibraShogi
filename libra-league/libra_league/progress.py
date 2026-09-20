@@ -43,7 +43,7 @@ def scrub(obj, home: str | None = None):
 
 
 # ---- 要約を作る ----
-_METRIC_KEYS = ("t", "step", "games_total", "gpd", "gpd_5m", "window")
+_METRIC_KEYS = ("t", "step", "games_total", "gpd", "gpd_5m", "window", "rss_mb", "swap_mb", "gpu_mb")
 
 
 def _metric_row(r: dict) -> dict:

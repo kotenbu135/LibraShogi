@@ -47,6 +47,41 @@ def _kill_job_group(pid: int, out: str) -> None:
                 return
             time.sleep(0.1)
 
+
+# ---- メモリ（自動計測の前後でランナーのメモリが戻っているかを見るため。docs/runbook.md §6）----
+def proc_mem_mb(pid: str | int = "self") -> dict:
+    """そのプロセスの常駐メモリとスワップ（MiB）。/proc が読めない環境（Windows・macOS）では空の dict。"""
+    out: dict = {}
+    try:
+        for line in Path(f"/proc/{pid}/status").read_text(encoding="utf-8").splitlines():
+            if line.startswith("VmRSS:"):
+                out["rss_mb"] = int(line.split()[1]) // 1024
+            elif line.startswith("VmSwap:"):
+                out["swap_mb"] = int(line.split()[1]) // 1024
+    except (OSError, IndexError, ValueError):
+        pass
+    return out
+
+
+def children_peak_mb() -> int | None:
+    """回収済みの子プロセス（計測ジョブ・progress）の RSS の最大値（MiB、ランナーの起動からの最大で減らない）。"""
+    try:
+        import resource
+
+        return int(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss) // 1024
+    except (ImportError, OSError, ValueError):
+        return None
+
+
+def _mem_note(job: dict) -> str:
+    """ログの末尾に付けるメモリの一言（前後のランナーの RSS と、計測ジョブの最大）。読めない環境では空。"""
+    a, b, c = job.get("rss_start_mb"), job.get("rss_end_mb"), job.get("peak_child_mb")
+    if a is None and b is None:
+        return ""
+    s = f" runner rss {'?' if a is None else f'{a / 1024:.1f}'}->{'?' if b is None else f'{b / 1024:.1f}'} GB"
+    return s + (f" (job peak {c / 1024:.1f} GB)" if c else "")
+
+
 METRIC_ENGINE_KEYS = ("games", "moves", "sims", "sente_wins", "draws", "gote_wins", "ruling41", "no_legal_move",
                       "sennichite", "perpetual_check", "max_ply", "resign", "plies_sum", "mate_found", "proof_found")
 
@@ -72,6 +107,8 @@ def metrics_row(status: dict) -> dict:
         "engine": {k: eng.get(k) for k in METRIC_ENGINE_KEYS} if eng else None,
         "exploiter": {k: status["exploiter"].get(k) for k in ("games", "wins", "draws", "losses")} if status.get("exploiter") else None,
         "gpu_mb": (status.get("gpu") or {}).get("mem_reserved_mb"),
+        "rss_mb": (status.get("mem") or {}).get("rss_mb"),      # ランナーの常駐メモリ（窓が載っているか・漏れていないか）
+        "swap_mb": (status.get("mem") or {}).get("swap_mb"),    # スワップに出た量（0 でないと学習のバッチ作りが遅くなる）
         "timing": status.get("timing"),  # 処理時間の内訳（looptime.py。この行までの窓）
         "gen": status.get("gen"),        # 一般化の物差し（genprof.py。窓の中と held-out。gen_minutes ごとに更新）
         "heldout": status.get("heldout_games"),
@@ -750,6 +787,8 @@ class AutoJobs:
             job = self.current or {}
             job["finished"] = time.time()
             job["rc"] = rc
+            job["rss_end_mb"] = proc_mem_mb().get("rss_mb")   # 計測の後にランナーのメモリが戻っているか
+            job["peak_child_mb"] = children_peak_mb()         # 計測ジョブ自体が使った最大（起動からの最大で減らない）
             if job.get("kind") == "anchor" and rc == 0:
                 self.record_anchor(job)
             elif job.get("kind") == "best" and rc == 0:
@@ -758,7 +797,8 @@ class AutoJobs:
                 self.record_reference(job)
             st["history"] = (st["history"] + [job])[-20:]
             st["running"] = None
-            self.log(f"auto: {job.get('kind')} finished rc={rc} ({job['finished'] - job.get('started', job['finished']):.0f}s)")
+            self.log(f"auto: {job.get('kind')} finished rc={rc} ({job['finished'] - job.get('started', job['finished']):.0f}s)"
+                     + _mem_note(job))
             self.proc = None
             self.current = None
             (self.sd.root / JOB_FILE).unlink(missing_ok=True)
@@ -766,6 +806,7 @@ class AutoJobs:
             return changed
         job = st["queue"].pop(0)
         job["started"] = time.time()
+        job["rss_start_mb"] = proc_mem_mb().get("rss_mb")
         if job.get("ckpt_from_best"):
             job["args"] = job["args"] + ["--ckpt", self.best_ckpt(job.get("ckpt"))]
         if job.get("reuse"):

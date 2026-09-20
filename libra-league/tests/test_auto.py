@@ -758,3 +758,40 @@ def test_the_elo_eval_is_queued_before_the_external_match(tmp_path):
     second.write_bytes(b"pt")
     jobs.on_checkpoint(second, now=2000.0)
     assert [j["kind"] for j in state["auto"]["queue"]] == ["best", "match"]
+
+
+def test_memory_recorded_in_metrics(tmp_path):
+    # ランナーの常駐メモリとスワップを metrics.jsonl に残す（自動計測の前後で戻っているかを後から読めるように）
+    from libra_league.auto import metrics_row, proc_mem_mb
+
+    st = _status(1, 2)
+    st["mem"] = {"rss_mb": 15600, "swap_mb": 0}
+    row = metrics_row(st)
+    assert row["rss_mb"] == 15600 and row["swap_mb"] == 0 and row["gpu_mb"] == 2
+    assert metrics_row(_status(1, 2))["rss_mb"] is None  # mem が無い古い status でも落ちない
+    mem = proc_mem_mb()
+    assert mem == {} or mem["rss_mb"] > 0  # /proc が無い環境では空
+
+
+def test_auto_job_records_memory_around_the_run(tmp_path):
+    # 計測ジョブの前後でランナー自身の RSS を残す（増え続けていないかを auto.log と state の履歴で見る）
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    cfg = load_config(None)
+    cfg["auto"] = {"enabled": True, "every_games": 0, "match_games": 0, "anchor_games": 0, "best_games": 0}
+    state = {"games_total": 0}
+    lines = []
+    jobs = AutoJobs(sd, cfg, state, lines.append, cmd_prefix=[sys.executable, "-c", "pass"])
+    jobs.state["auto"]["queue"].append({"kind": "eval", "args": [], "out": str(tmp_path / "r.json")})
+    assert jobs.poll() is True
+    started = jobs.current
+    assert ("rss_start_mb" in started) == bool(Path("/proc/self/status").exists())
+    for _ in range(100):
+        if jobs.proc is not None and jobs.proc.poll() is not None:
+            break
+        time.sleep(0.05)
+    jobs.poll()
+    done = jobs.state["auto"]["history"][-1]
+    assert done["rc"] == 0
+    if Path("/proc/self/status").exists():
+        assert done["rss_end_mb"] > 0 and "runner rss" in lines[-1]
