@@ -46,16 +46,18 @@ jobs:
           ctest --test-dir build/libra-sim --output-on-failure
           ctest --test-dir build/libra-search --output-on-failure
       # ランナーは 4 コア。テスト自身がスレッドを持つ（自己対局の threads=4/8、torch の行列積）ので、
-      # 素直に 4 並列にするとコアの取り合いで逆に遅くなる（実測 283 秒 → 496 秒）。
-      # 2 並列にして torch 側のスレッドを 1 本に固定した組み合わせがいちばん速い（docs/measurements.md 2026-09-20）。
-      # --dist loadscope はファイル単位で割り当てる（テストどうしが同じ場所を使っても混ざらない）。
+      # torch 側のスレッドを 1 本に固定しないと、並列にしただけでは逆に遅くなる（実測 283 秒 → 496 秒）。
+      # 固定したうえで 4 並列・テスト単位の割り当てがいちばん速い（141.7〜145.2 秒。docs/measurements.md 2026-09-20）。
+      # --dist load はテスト 1 件ずつ空いたワーカーに渡す。いちばん重い test_selfplay_threads.py の 5 件が
+      # ばらけるのでファイル単位（--dist loadscope、183.6 秒）より速い。プロセスをまたぐ取り合いは無い
+      # （run.lock の pid は各テストの tmp_path で閉じており、プロセスの走査はしない）。
       # 手元で回すときは docs/getting-started.md §3 のとおり並列なしでよい（コアが多く、学習と取り合うため）
       - name: Python tests
         env:
           PYTHONPATH: libra-sim/python:libra-search/python:libra-net:libra-league:libra-scale:libra-cloud
           OMP_NUM_THREADS: "1"
           MKL_NUM_THREADS: "1"
-        run: python -m pytest -q -n 2 --dist loadscope libra-sim/tests/test_python.py libra-league/tests libra-net/tests libra-engine/tests libra-scale/tests libra-search/tests/test_external.py libra-search/tests/test_selfplay_threads.py libra-search/tests/test_selfplay_resign.py libra-cloud/tests
+        run: python -m pytest -q -n 4 --dist load libra-sim/tests/test_python.py libra-league/tests libra-net/tests libra-engine/tests libra-scale/tests libra-search/tests/test_external.py libra-search/tests/test_selfplay_threads.py libra-search/tests/test_selfplay_resign.py libra-cloud/tests
 
   console:
     # 管理コンソール（tools/windows/libra-console.ps1）の Elo の文言。ubuntu-latest には pwsh が入っている
