@@ -24,6 +24,8 @@ import statistics
 # 打ち切りの穴・余分な準備をこれ以上の長さだと見なさない（記録の取りこぼしで桁外れの値が出ないように）
 MAX_HOLE_H = 6.0
 
+RENT_LABELS = {"bid": "入札"}  # session.json の rent はコンソールの「借り方」の表示と綴りが違う
+
 
 def _f(v) -> float | None:
     try:
@@ -79,7 +81,8 @@ def _group(rows: list[dict], key: str) -> list[dict]:
     by: dict[str, list[dict]] = {}
     for r in rows:
         if r.get("bridge_h"):  # 借りて打ち始めた回だけ（オファーが無くて借りなかった回は数えない）
-            by.setdefault(str(r.get(key) or "-"), []).append(r)
+            name = str(r.get(key) or "-")
+            by.setdefault(RENT_LABELS.get(name, name) if key == "rent" else name, []).append(r)
     out = []
     for name, rs in by.items():
         bridge_h = round(sum(_f(r["bridge_h"]) or 0.0 for r in rs), 2)
@@ -88,8 +91,19 @@ def _group(rows: list[dict], key: str) -> list[dict]:
         out.append({"name": name, "sessions": len(rs), "bridge_h": bridge_h, "lost": lost,
                     "h_per_loss": round(bridge_h / lost, 2) if lost else None,
                     "dph": round(statistics.median([d for d in dphs if d]), 3) if any(dphs) else None,
-                    **_cost(rs)})
+                    **_time_lost(rs, bridge_h), **_cost(rs)})
     return sorted(out, key=lambda g: -g["sessions"])
+
+
+def _time_lost(rows: list[dict], bridge_h: float) -> dict:
+    """打てなかった時間と、それが経過時間（打った時間＋打てなかった時間）に占める割合。
+
+    **お金の損とは別**（止められている間は課金されないので費用にはほとんど出ない）。局/日で見るとここが効く:
+    入札で止められるたびに、借り直しが打ち始めるまでは 1 局も増えない。「同じ予算でいくつ買えるか」ではなく
+    「今日いくつ稼げるか」を気にするときの物差し。"""
+    lost_h = round(sum(_f(r.get("lost_h")) or 0.0 for r in rows), 2)
+    total = bridge_h + lost_h
+    return {"lost_h": lost_h, "lost_time_pct": round(lost_h / total * 100, 1) if total > 0 else None}
 
 
 def _cost(rows: list[dict]) -> dict:
@@ -114,6 +128,6 @@ def summary(rows: list[dict]) -> dict:
             "relaunches": sum(1 for r in rows if r.get("continues")),
             "not_relaunched": sum(1 for r in lost if r.get("unused_h")),
             "h_per_loss": round(bridge_h / len(lost), 2) if lost else None,
-            "lost_h": round(sum(_f(r.get("lost_h")) or 0.0 for r in rows), 2),
+            **_time_lost(rows, bridge_h),
             "unused_h": round(sum(_f(r.get("unused_h")) or 0.0 for r in rows), 2),
             **_cost(rows), "by_rent": _group(rows, "rent"), "by_gpu": _group(rows, "gpu")}

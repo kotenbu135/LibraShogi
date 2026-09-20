@@ -293,13 +293,16 @@ def waste_lines(w: dict) -> str:
            f"  損: 余分な準備代 ${w['extra_setup_usd']:.2f} ＋ 打てなかった {w['lost_h']:.1f} 時間 = 約 {w['lost_games']:,} 局"
            + (f"（うち借り直せずに捨てた予定 {w['unused_h']:.1f} 時間）" if w["unused_h"] else "")]
     if w["usd_per_1m"] and w["usd_per_1m_ideal"]:
-        out.append(f"  100 万局あたり ${w['usd_per_1m']:.2f}（打ち切りが無ければ ${w['usd_per_1m_ideal']:.2f}、+{w['waste_pct']:.1f}%）")
+        out.append(f"  お金の損 100 万局あたり ${w['usd_per_1m']:.2f}（打ち切りが無ければ ${w['usd_per_1m_ideal']:.2f}、+{w['waste_pct']:.1f}%）"
+                   + (f"　時間の損 {w['lost_time_pct']:.1f}%（止まっている間は課金されないので費用には出ないが、局/日には効く）"
+                      if w["lost_time_pct"] is not None else ""))
     for g in w["by_rent"]:
         out.append(f"  {g['name']}: {g['sessions']} 回・{g['bridge_h']:.1f} h、打ち切り {g['lost']} 回"
                    + (f"（{g['h_per_loss']:.1f} h に 1 回）" if g["h_per_loss"] else "")
                    + (f"、${g['dph']:.3f}/h" if g["dph"] else "")
                    + (f"、100 万局あたり ${g['usd_per_1m']:.2f}" if g["usd_per_1m"] else "")
-                   + (f"（打ち切りが無ければ ${g['usd_per_1m_ideal']:.2f}）" if g["lost"] and g["usd_per_1m_ideal"] else ""))
+                   + (f"（打ち切りが無ければ ${g['usd_per_1m_ideal']:.2f}）" if g["lost"] and g["usd_per_1m_ideal"] else "")
+                   + (f"、時間の損 {g['lost_time_pct']:.1f}%" if g["lost_time_pct"] is not None else ""))
     return "\n".join(out)
 
 
