@@ -67,7 +67,8 @@ libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX �
 - Windows 側の操作（デスクトップの bat、タスク スケジューラ「LibraShogi run」「LibraShogi run lx」）は docs/runbook.md §3。自動ログオンと GPU 電力上限は設定しない（ユーザーの決定）。
 
 ## 環境
-- WSL2 Ubuntu-24.04（ディストリ名は `Ubuntu-24.04`）、RAM 32 GB、RTX 5070 Ti、Ryzen 9 9950X3D。データは WSL 内の ext4。
+- WSL2 Ubuntu-24.04（ディストリ名は `Ubuntu-24.04`）、**マシンの RAM は 64 GB**（DDR5-6000、4 スロット中 2 枚）、RTX 5070 Ti、Ryzen 9 9950X3D。データは WSL 内の ext4。
+- **WSL の中で `free` が返すのは「マシンの搭載量」ではなく `%USERPROFILE%\.wslconfig` の `memory` で決めた上限**（2026-09-20 時点 48 GB。2026-09-20 15 時まで 32 GB だった）。メモリの余裕を判断するときは `free` だけを見ず、マシン全体の 64 GB と Windows 側の使用量（タスク マネージャー）も見る。2026-09-20 に、この行が「RAM 32 GB」と書いてあったせいで割当を搭載量と取り違え、窓を載せる余裕の判断を誤った（**ユーザーの指摘**）。
 - **sudo が使えない**（apt 不可）。cmake / ninja / pybind11 / pytest / torch / onnxruntime は `.venv` の pip、node は `~/.nvm`。apt が要るものはユーザーに依頼する（mingw-w64 は導入済み）。
 - Python パッケージは pip install しない。`PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-scale`（bin/ のスクリプトと driver は自分で通す）。
 - Windows 版 libra.exe は WSL の mingw クロスビルド（CI も ubuntu-latest で同じ mingw-w64 posix のクロスビルドを確かめる）。置き場所は `%USERPROFILE%\libra\engine\`。
