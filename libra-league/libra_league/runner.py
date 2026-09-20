@@ -55,6 +55,11 @@ class Runner:
         self.session_elapsed_offset = 0.0
         self.rate_hist: list[tuple[float, int]] = []
         self.last_train: dict = {}
+        # metrics の 1 行ぶん（既定 5 分）の学習の値の平均。1 バッチだけを記録すると、直近 20 点の loss の
+        # ばらつき sd 0.066 に対して 40 万局ぶんの変化が 0.056 しかなく、伸びが読めなかった（2026-09-20 の実測）
+        self.train_acc: dict[str, float] = {}
+        self.train_acc_n = 0
+        self.last_train_avg: dict | None = None
         self.timer = LoopTimer()  # ループの処理時間の内訳（metrics の 1 行ごとに閉じる。looptime.py）
         self.last_timing: dict | None = None
         self.train_mode = ""  # 学習の compile の状態（変わったらログに出す）
@@ -434,14 +439,36 @@ class Runner:
                 loop.timing = {}
         return out
 
+    TRAIN_STAT_KEYS = ("loss", "policy", "value", "v41", "policy_acc", "grad_norm", "lr")
+    RATE_MIN_SPAN_S = 60.0  # これより短い窓からは局/日を出さない（起動直後の 0 は「止まっている」に読めるため）
+
+    def add_train_stats(self, tr: dict) -> None:
+        """metrics の 1 行ぶんの学習の値を足し込む（平均で記録するため。take_train_stats で閉じる）。"""
+        for k in self.TRAIN_STAT_KEYS:
+            v = tr.get(k)
+            if v is not None:
+                self.train_acc[k] = self.train_acc.get(k, 0.0) + float(v)
+        self.train_acc_n += 1
+
+    def take_train_stats(self) -> dict | None:
+        """窓を閉じて平均を返す（0 から数え直す）。1 バッチも学習していなければ None。"""
+        n = self.train_acc_n
+        if n <= 0:
+            return None
+        out = {k: round(v / n, 6) for k, v in self.train_acc.items()}
+        out["steps"] = n
+        self.train_acc, self.train_acc_n = {}, 0
+        return out
+
     def write_status(self) -> None:
         now = time.time()
         self.rate_hist.append((now, self.replay.total_games))
         self.rate_hist = [(t, g) for (t, g) in self.rate_hist if now - t <= 3600]
-        rate = 0.0
+        rate = None
         if len(self.rate_hist) >= 2:
             (t0, g0), (t1, g1) = self.rate_hist[0], self.rate_hist[-1]
-            rate = (g1 - g0) / max(1e-6, t1 - t0) * 86400
+            if t1 - t0 >= self.RATE_MIN_SPAN_S:
+                rate = (g1 - g0) / max(1e-6, t1 - t0) * 86400
         st = self.loop.stats() if self.loop else {}
         gpu = None
         if self.device.type == "cuda":
@@ -453,7 +480,7 @@ class Runner:
             "generation": self.state.get("generation", 0),
             "games_total": self.replay.total_games,
             "games_session": self.session_games,
-            "games_per_day_1h": round(rate),
+            "games_per_day_1h": (round(rate) if rate is not None else None),
             "window_games": self.replay.n_games(),
             "window_target": self.replay.window(),
             "heldout_games": self.replay.n_heldout(),
@@ -483,6 +510,11 @@ class Runner:
             self.last_timing = self.take_timing()
         if self.last_timing is not None:
             status["timing"] = self.last_timing
+        if take_timing:
+            # metrics の 1 行ぶんの平均（最後の 1 バッチではなく）。コンソールの「学習」欄は last_train のまま
+            self.last_train_avg = self.take_train_stats()
+        if self.last_train_avg is not None:
+            status["train_avg"] = self.last_train_avg
         write_json_atomic(self.sd.status_json, status)
         if take_timing:
             append_metrics(self.sd, status)
@@ -621,6 +653,7 @@ class Runner:
                     add_target_stats(target_acc, batch["target_stats"])
                     with self.timer.phase("train_step"):
                         self.last_train = self.trainer.step(batch)
+                    self.add_train_stats(self.last_train)
                 with self.timer.phase("train_sample"):
                     fut.result()
                 self.timer.count("train_steps", steps)

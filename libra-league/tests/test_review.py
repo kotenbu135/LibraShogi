@@ -42,8 +42,8 @@ def test_review_verdicts(tmp_path, capsys):
     assert abs(r["items"][0]["values"]["gap"] - 0.08) < 1e-9 and r["items"][0]["values"]["n_rows"] == 3
     # 窓を 15 万局にすると gen の行は最後の 2 つ
     assert review(sd, {"gen_games": 150000}, now=now)["items"][0]["values"]["n_rows"] == 2
-    # 参照の窓を 10 万局にすると比べる点が 1 つ
-    assert review(sd, {"reference_games": 100000}, now=now)["items"][3]["verdict"] == NA
+    # 参照は最後の 2 回を比べ、実際の間隔を書く
+    assert "200,000 局で +100.0" in review(sd, now=now)["items"][3]["why"]
     # 窓の記憶（差 0.3）→ 注意。局/日の下限 → 注意
     with open(sd.root / "metrics.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(_gen(now - 10, 0.9, 0.6, 320000)) + "\n")
@@ -104,3 +104,41 @@ def test_m1_flat_is_ok_and_fall_warns(tmp_path):
     write(flat[:6] + [(0.95, 0.65), (0.95, 0.65), (0.95, 0.65), (0.95, 0.65), (0.95, 0.65), (0.95, 0.65)])
     r = review(sd, now=now)["items"][0]
     assert r["verdict"] == WARN and "窓の記憶" in r["why"], r
+
+
+def test_m4_reference_uses_the_last_two_points(tmp_path):
+    """M4（固定の参照）は最後の 2 回を比べる。
+
+    2026-09-20 まで「reference_games 局の窓」で点を選んでいたが、窓（40 万局）が節目の間隔
+    （every_games = 40 万局）と同じで、直前の点が数百局ぶん窓からはみ出していた。活きている参照は
+    いつまでも「比べる点がまだ 1 つ」になり、もう測っていない参照だけが判定を出していた。"""
+    sd = StateDir(tmp_path / "m4")
+    sd.create()
+    now = 100000.0
+    sd.status_json.write_text(json.dumps({"games_total": 2800000}))
+
+    def refs(rows):
+        _write(sd, "reference.jsonl", rows)
+        return {i["name"]: i for i in review(sd, now=now)["items"] if i["name"].startswith("M4")}
+
+    # 節目が 40 万局ごとでも、数百局のはみ出しで判定が消えない（実測 400,430 局差）
+    live = [{"t": now - 7200, "step": 1000, "games": 2415686, "ref": "live.pt", "elo": 200.0, "ci95": [150.0, 250.0], "score_new": 0.6},
+            {"t": now - 100, "step": 2000, "games": 2816116, "ref": "live.pt", "elo": 240.0, "ci95": [190.0, 290.0], "score_new": 0.65}]
+    it = refs(live)["M4 参照 live.pt"]
+    assert it["verdict"] == OK and "400,430 局で +40.0" in it["why"] and it["values"]["gap_games"] == 400430
+
+    # 下がったら注意
+    down = [live[0], {**live[1], "elo": 180.0}]
+    assert refs(down)["M4 参照 live.pt"]["verdict"] == WARN
+
+    # 天井（得点が 0.2〜0.8 の外）なら、下がっていても弱くなった証拠にならないので判定しない
+    ceil = [{**live[0], "ref": "top.pt", "score_new": 0.84}, {**live[1], "ref": "top.pt", "elo": 180.0, "score_new": 0.87}]
+    it = refs(ceil)["M4 参照 top.pt"]
+    assert it["verdict"] == NA and "天井" in it["why"]
+
+    # もう測っていない参照（最後が 160 万局前）は run 全体の判定を動かさない
+    old = [*live, {"t": now - 9000, "step": 500, "games": 800000, "ref": "old.pt", "elo": 380.0, "ci95": [340.0, 420.0], "score_new": 0.9},
+           {"t": now - 8000, "step": 600, "games": 1200000, "ref": "old.pt", "elo": 370.0, "ci95": [330.0, 410.0], "score_new": 0.895}]
+    items = refs(old)
+    assert items["M4 参照 old.pt"]["verdict"] == NA and "もう測っていない" in items["M4 参照 old.pt"]["why"]
+    assert items["M4 参照 old.pt"]["values"]["behind_games"] == 1600000
