@@ -29,7 +29,7 @@ import time
 import tomllib
 from pathlib import Path
 
-from libra_cloud import hosts
+from libra_cloud import hosts, interrupts
 from libra_cloud.bench import MAX_INET_COST
 
 REPO = Path(__file__).resolve().parents[2]
@@ -220,6 +220,8 @@ def history(root: Path, run_root: Path, now: float | None = None) -> dict:
         total = None if st["est_cost_usd"] is None else round(float(st["est_cost_usd"]) + (tr or 0.0), 4)
         rows.append({"name": d.name, "run": run, "started": s.get("started"), "alive": s["alive"], "phase": s["phase"],
                      "stopped_by_user": bool(s.get("stop_requested")), "hours": s.get("hours"), "max_dph": s.get("max_dph"),
+                     "lost": bool(res.get("lost")), "continues": s.get("continues"), "t_rent": inst.get("t_rent"), "t_bridge": t_bridge,
+                     "t_end": end, "last_pull": b.get("last_pull"),
                      "gpu": offer.get("gpu_name") or s.get("gpu"), "cpu": str(offer.get("cpu_name") or "").strip() or None,
                      "where": offer.get("geolocation"), "reliability": offer.get("reliability2"),
                      "dph": offer.get("dph_eff") or offer.get("dph_total"), "rent": s.get("rent") or "on-demand", "bid": offer.get("bid"),
@@ -230,6 +232,7 @@ def history(root: Path, run_root: Path, now: float | None = None) -> dict:
                      "games_per_day": round(games / bridge_h * 24) if bridge_h and bridge_h > 0 else None,
                      "transfer_usd": tr, "transfer_estimated": tr_est, "total_usd": total,
                      "usd_per_1m": per_million(total, net), "usd_per_1m_gross": per_million(total, games)})
+    rows = interrupts.annotate(rows)
     rented = [r for r in rows if r["est_cost_usd"] is not None]
     cost = round(sum(float(r["est_cost_usd"]) for r in rented), 3)
     transfer = round(sum(float(r["transfer_usd"] or 0) for r in rented), 4)
@@ -249,7 +252,8 @@ def history(root: Path, run_root: Path, now: float | None = None) -> dict:
         m["total_usd"] = round(m["total_usd"] + float(r["total_usd"] or 0), 4)
         m["games"] += r["games"]
         m["net_games"] += r["net_games"]
-    return {"root": str(root), "sessions": rows, "totals": totals, "months": list(months.values())}
+    return {"root": str(root), "sessions": rows, "totals": totals, "months": list(months.values()),
+            "interrupts": interrupts.summary(rows)}
 
 
 def cmd_history(a: argparse.Namespace) -> int:
@@ -276,7 +280,27 @@ def cmd_history(a: argparse.Namespace) -> int:
           f"有効局 {t['net_games']:,}（捨てた {t['stale_games']:,}）  100 万局あたり {money(t['usd_per_1m'])}")
     for m in h["months"]:
         print(f"  {m['month']}: {m['sessions']} 回  費用 {money(m['total_usd'])}（うち転送料 {money(m['transfer_usd'], '{:.3f}')}）  有効局 {m['net_games']:,}")
+    print(waste_lines(h["interrupts"]))
     return 0
+
+
+def waste_lines(w: dict) -> str:
+    """打ち切りの損を人が読む形にする（コンソールの「クラウド履歴」の要約と同じ文言）。"""
+    if not w["interruptions"]:
+        return f"打ち切り 0 回（打った {w['bridge_h']:.1f} 時間）。"
+    out = [f"打ち切り {w['interruptions']} 回（打った {w['bridge_h']:.1f} 時間、平均 {w['h_per_loss']:.1f} 時間に 1 回。"
+           f"借り直し {w['relaunches']} 回、借り直せず {w['not_relaunched']} 回）",
+           f"  損: 余分な準備代 ${w['extra_setup_usd']:.2f} ＋ 打てなかった {w['lost_h']:.1f} 時間 = 約 {w['lost_games']:,} 局"
+           + (f"（うち借り直せずに捨てた予定 {w['unused_h']:.1f} 時間）" if w["unused_h"] else "")]
+    if w["usd_per_1m"] and w["usd_per_1m_ideal"]:
+        out.append(f"  100 万局あたり ${w['usd_per_1m']:.2f}（打ち切りが無ければ ${w['usd_per_1m_ideal']:.2f}、+{w['waste_pct']:.1f}%）")
+    for g in w["by_rent"]:
+        out.append(f"  {g['name']}: {g['sessions']} 回・{g['bridge_h']:.1f} h、打ち切り {g['lost']} 回"
+                   + (f"（{g['h_per_loss']:.1f} h に 1 回）" if g["h_per_loss"] else "")
+                   + (f"、${g['dph']:.3f}/h" if g["dph"] else "")
+                   + (f"、100 万局あたり ${g['usd_per_1m']:.2f}" if g["usd_per_1m"] else "")
+                   + (f"（打ち切りが無ければ ${g['usd_per_1m_ideal']:.2f}）" if g["lost"] and g["usd_per_1m_ideal"] else ""))
+    return "\n".join(out)
 
 
 def launch_argv(a: argparse.Namespace, run_dir: Path, d: Path) -> list[str]:

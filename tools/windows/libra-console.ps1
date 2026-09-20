@@ -1349,7 +1349,8 @@ $script:Tip.SetToolTip($numGhz, "CPU が遅いホストでは探索が律速し�
 $vroot.Controls.Add($vbar, 0, 0)
 $script:VastKeys = @(
     @("phase", "状態"), @("session", "セッション"), @("gpu", "GPU / ホスト"), @("time", "借りた時間 / 残り"), @("cost", "費用（見積もり）"),
-    @("bridge", "回収（ブリッジ）"), @("learner", "取り込み（ls）"), @("verify", "検査"), @("credit", "残高"), @("instances", "借りているインスタンス")
+    @("bridge", "回収（ブリッジ）"), @("learner", "取り込み（ls）"), @("verify", "検査"), @("waste", "打ち切り（これまで）"),
+    @("credit", "残高"), @("instances", "借りているインスタンス")
 )
 $vgrid = New-Object System.Windows.Forms.TableLayoutPanel
 $vgrid.Dock = "Fill"; $vgrid.ColumnCount = 2; $vgrid.AutoSize = $true
@@ -1410,7 +1411,7 @@ $lvHist = New-Object System.Windows.Forms.ListView
 $lvHist.View = "Details"; $lvHist.FullRowSelect = $true; $lvHist.GridLines = $true; $lvHist.HideSelection = $false; $lvHist.MultiSelect = $false
 $lvHist.Dock = "Fill"
 foreach ($c in @(@("開始", 76, "Left"), @("GPU", 76, "Left"), @('$/100万局', 72, "Right"), @("有効局", 66, "Right"), @("費用", 50, "Right"),
-                 @("局/日", 68, "Right"), @("借りた h", 58, "Right"), @('$/h', 50, "Right"), @("捨てた", 52, "Right"), @("結果", 170, "Left"), @("CPU・場所", 280, "Left"))) {
+                 @("局/日", 68, "Right"), @("借りた h", 58, "Right"), @('$/h', 50, "Right"), @("捨てた", 52, "Right"), @("打ち切りの損", 78, "Right"), @("結果", 170, "Left"), @("CPU・場所", 280, "Left"))) {
     $ch = New-Object System.Windows.Forms.ColumnHeader
     $ch.Text = $c[0]; $ch.Width = $c[1]; $ch.TextAlign = $c[2]
     [void]$lvHist.Columns.Add($ch)
@@ -1483,6 +1484,19 @@ $histChart.Add_MouseClick({
         if ($lvHist.SelectedItems.Count -gt 0) { $lvHist.SelectedItems[0].EnsureVisible() }
     }
 })
+function Format-Vast-Session-Waste($r) {
+    # 選んだ回が打ち切られた（または打ち切りの借り直しだった）ときだけ、その回の損を 1 行で出す
+    $out = @()
+    if ($r.lost) {
+        $out += "打ち切り: 最後の回収から次が打ち始めるまで {0:N2} 時間{1}、この回で打てなかったのは約 {2:N0} 局" -f
+                [double]$r.dark_h, $(if ([double]$r.unused_h -gt 0) { "、借り直せず予定の残り {0:N2} 時間も捨てた" -f [double]$r.unused_h } else { "" }), [double]$r.lost_games
+    }
+    if ($r.continues) {
+        $out += "借り直し（{0} の打ち切りから）: 準備の {1:N2} 時間 {2} は打ち切りが無ければ払わずに済んだぶん" -f
+                $r.continues, [double]$r.setup_h, (Fmt-Num $r.extra_setup_usd "N2" '$')
+    }
+    return ($out -join "`r`n")
+}
 function Update-HistDetail {
     if ($lvHist.SelectedItems.Count -eq 0) { $txtHist.Text = ""; $histChart.Invalidate(); return }
     $r = $lvHist.SelectedItems[0].Tag
@@ -1495,11 +1509,57 @@ function Update-HistDetail {
                   (Fmt-Num $r.total_usd "N2" '$'), (Fmt-Num $r.est_cost_usd "N2" '$'), (Fmt-Num $r.transfer_usd "N3" '$'), $(if ($r.transfer_estimated) { "、見積もり" } else { "" })
         $lines += "回収 {0} 局（{1} ファイル、弾いた {2}、エラー {3}、検査 {4} ms/局）、捨てた {5}、有効 {6}" -f (Fmt-Num $r.games), (Fmt-Num $r.files), (Fmt-Num $r.rejected_files), (Fmt-Num $r.errors), (Fmt-Num $r.verify_ms_per_game "N2"), (Fmt-Num $r.stale_games), (Fmt-Num $r.net_games)
         $lines += "局/日（ブリッジの時間で換算）{0}、100 万局あたり {1}（回収局で割ると {2}）" -f (Fmt-Num $r.games_per_day), (Fmt-Num $r.usd_per_1m "N2" '$'), (Fmt-Num $r.usd_per_1m_gross "N2" '$')
+        $lines += Format-Vast-Session-Waste $r
     } else { $lines += "インスタンスを借りていません（費用なし）" }
+    $lines = @($lines | Where-Object { $_ })
     $txtHist.Text = $lines -join "`r`n"
     $histChart.Invalidate()
 }
 $lvHist.Add_SelectedIndexChanged({ Update-HistDetail })
+# 打ち切り（借りたホストを入札で止められる・落ちること）の損。libra-vast history --json の interrupts（libra_cloud/interrupts.py）。
+# 打ち切られると (1) 借り直しの準備の 5〜15 分は課金されるのに局が出ず、(2) 止まってから次が打ち始めるまで局が 1 つも増えない。
+# ここはその 2 つを「100 万局あたりいくら余計に払ったか」に直して出す（クラウド費用を効率化する判断の材料）
+function Format-Vast-Waste($w) {
+    if ($null -eq $w) { return "" }
+    if ([int]$w.interruptions -eq 0) {
+        return ("打ち切り 0 回（打った {0:N1} 時間）。入札で止められた回はまだありません" -f [double]$w.bridge_h)
+    }
+    $l1 = "打ち切り {0} 回（打った {1:N1} 時間、平均 {2:N1} 時間に 1 回。借り直し {3} 回、借り直せず {4} 回）: 余分な準備代 {5} ＋ 打てなかった {6:N1} 時間 = 約 {7:N0} 局" -f
+          [int]$w.interruptions, [double]$w.bridge_h, [double]$w.h_per_loss, [int]$w.relaunches, [int]$w.not_relaunched,
+          (Fmt-Num $w.extra_setup_usd "N2" '$'), [double]$w.lost_h, [double]$w.lost_games
+    $l2 = if ($null -ne $w.usd_per_1m -and $null -ne $w.usd_per_1m_ideal) {
+        "  100 万局あたり {0}（打ち切りが無ければ {1}、+{2:N1}%）" -f (Fmt-Num $w.usd_per_1m "N2" '$'), (Fmt-Num $w.usd_per_1m_ideal "N2" '$'), [double]$w.waste_pct
+    } else { "" }
+    $parts = @()
+    foreach ($g in @($w.by_rent)) {
+        $parts += "{0} {1} 回・打ち切り {2} 回{3}{4}" -f $g.name, [int]$g.sessions, [int]$g.lost,
+                  $(if ($null -ne $g.h_per_loss) { "（{0:N1} h に 1 回）" -f [double]$g.h_per_loss } else { "" }),
+                  $(if ($null -ne $g.usd_per_1m) { "・100 万局あたり " + (Fmt-Num $g.usd_per_1m "N2" '$') } else { "" })
+    }
+    if ($parts.Count -gt 0) { $l2 = ($l2 + "　借り方: " + ($parts -join "、")).TrimStart() }
+    return (@($l1, $l2) | Where-Object { $_ }) -join "`r`n"
+}
+# 入札と on-demand のどちらが実際に安く済んでいるかの助言（どちらも 3 回以上あって 1 割以上違うときだけ出す）
+function Format-Vast-Waste-Short($w) {
+    # クラウド タブの 1 行。借りる前に「どれくらいの頻度で止められ、そのぶん 100 万局あたりいくら余計に払っているか」が見えるように
+    if ($null -eq $w) { return "-" }
+    if ([int]$w.interruptions -eq 0) { return ("0 回 / 打った {0:N1} 時間" -f [double]$w.bridge_h) }
+    return ("{0} 回 / 打った {1:N1} 時間（平均 {2:N1} 時間に 1 回）。100 万局あたり {3} → {4}（+{5:N1}%）" -f
+            [int]$w.interruptions, [double]$w.bridge_h, [double]$w.h_per_loss,
+            (Fmt-Num $w.usd_per_1m_ideal "N2" '$'), (Fmt-Num $w.usd_per_1m "N2" '$'), [double]$w.waste_pct)
+}
+function Format-Vast-Rent-Advice($w) {
+    if ($null -eq $w) { return "" }
+    $bid = @($w.by_rent) | Where-Object { $_.name -eq "bid" -or $_.name -eq "入札" } | Select-Object -First 1
+    $od = @($w.by_rent) | Where-Object { $_.name -eq "on-demand" } | Select-Object -First 1
+    if ($null -eq $bid -or $null -eq $od) { return "" }
+    if ([int]$bid.sessions -lt 3 -or [int]$od.sessions -lt 3) { return "" }
+    if ($null -eq $bid.usd_per_1m -or $null -eq $od.usd_per_1m) { return "" }
+    $b = [double]$bid.usd_per_1m; $o = [double]$od.usd_per_1m
+    if ($b -gt $o * 1.1) { return ("入札は打ち切りのぶんを入れると on-demand より {0:N0}% 高くついています（借り方を on-demand にするか、入札の上乗せを増やす）" -f (($b / $o - 1) * 100)) }
+    if ($o -gt $b * 1.1) { return ("入札のほうが on-demand より {0:N0}% 安く済んでいます（打ち切りを入れても得）" -f (($o / $b - 1) * 100)) }
+    return "入札と on-demand で 100 万局あたりの費用は 1 割以内の差です"
+}
 function Update-HistPanel {
     $h = $script:VastHist
     if ($null -eq $h) { return }
@@ -1508,9 +1568,13 @@ function Update-HistPanel {
     $m = @($h.months) | Where-Object { $_.month -eq $mon } | Select-Object -First 1
     $mc = if ($null -ne $m) { [double]$(if ($null -ne $m.total_usd) { $m.total_usd } else { $m.est_cost_usd }) } else { 0.0 }
     $lblHistAt.Text = "読み込み " + $script:VastHistAt.ToString("HH:mm:ss") + "（5 分ごと、セッションの開始・終了時）"
+    $adv = Format-Vast-Rent-Advice $h.interrupts
+    $advice = if ($adv) { $adv + "`r`n" } else { "" }
     $lblHistSum.Text = ("合計 {0} 回（借りた {1} 回・{2} 時間）費用 {3}、有効 {4} 局（捨てた {5} 局）、100 万局あたり {6}" -f $t.sessions, $t.rented, (Fmt-Num $t.rented_h "N2"),
                         (Fmt-Num $(if ($null -ne $t.total_usd) { $t.total_usd } else { $t.est_cost_usd }) "N2" '$'), (Fmt-Num $t.net_games), (Fmt-Num $t.stale_games), (Fmt-Num $t.usd_per_1m "N2" '$')) + "`r`n" +
                        ("今月（{0}）: {1} ≈ {2:N0} 円 / 上限 {3:N0} 円（{4:P1}。1 ドル {5} 円で換算）" -f $mon, (Fmt-Num $mc "N2" '$'), ($mc * $UsdJpy), $BudgetJpy, ($mc * $UsdJpy / [Math]::Max(1, $BudgetJpy)), $UsdJpy) + "`r`n" +
+                       (Format-Vast-Waste $h.interrupts) + "`r`n" +
+                       $advice +
                        '有効局 = 回収局 − 学習側が古すぎて捨てた局。費用は借りた時間 × $/h ＋ 転送料（記録の無い古い回は見積もり）。局/日はブリッジの時間で換算'
     Set-TabState "history" ("今月 " + (Fmt-Num $mc "N2" '$')) ([System.Drawing.Color]::DimGray)
     $selName = if ($lvHist.SelectedItems.Count -gt 0) { $lvHist.SelectedItems[0].Tag.name } else { "" }
@@ -1523,6 +1587,7 @@ function Update-HistPanel {
         $cpu = if ($r.cpu) { "{0}（{1}）" -f ($r.cpu -replace '\s+\d+-Core Processor$', ''), $r.where } else { "-" }
         foreach ($txt in @((([string]$r.gpu) -replace '^RTX ', ''), (Fmt-Num $r.usd_per_1m "N2" '$'), (Fmt-Num $r.net_games), (Fmt-Num $(if ($null -ne $r.total_usd) { $r.total_usd } else { $r.est_cost_usd }) "N2" '$'),
                            (Fmt-Num $r.games_per_day), (Fmt-Num $r.rented_h "N2"), (Fmt-Num $r.dph "N3" '$'), (Fmt-Num $r.stale_games),
+                           $(if ([double]$r.lost_games -gt 0) { "{0:N0} 局" -f [double]$r.lost_games } elseif ([double]$r.extra_setup_usd -gt 0) { Fmt-Num $r.extra_setup_usd "N2" '$' } else { "-" }),
                            ([string]$r.phase + $(if ($r.stopped_by_user) { "（停止）" } else { "" })), $cpu)) {
             [void]$it.SubItems.Add([string]$txt)
         }
@@ -1918,7 +1983,8 @@ function Update-VastPanel {
         $v.phase.ForeColor = if ($s.phase -like "異常終了*") { [System.Drawing.Color]::Firebrick } elseif ($alive) { [System.Drawing.Color]::ForestGreen } else { [System.Drawing.Color]::DimGray }
         $v.phase.Font = New-Object System.Drawing.Font($form.Font, [System.Drawing.FontStyle]::Bold)
         $started = if ($null -ne $s.started) { (From-Unix $s.started).ToString("MM/dd HH:mm") } else { "-" }
-        $v.session.Text = '{0}（開始 {1}、{2} を最大 ${3:N2}/h で {4} 時間）' -f ([string]$s.dir -split "/")[-1], $started, $s.gpu, [double]$s.max_dph, $s.hours
+        $v.session.Text = ('{0}（開始 {1}、{2} を最大 ${3:N2}/h で {4} 時間）' -f ([string]$s.dir -split "/")[-1], $started, $s.gpu, [double]$s.max_dph, $s.hours) +
+                          $(if ($s.continues) { "　※ {0} が打ち切られたあとの借り直し" -f $s.continues } else { "" })
         $inst = $o.instance
         if ($null -ne $inst -and $null -ne $inst.offer) {
             $off = $inst.offer
@@ -1934,6 +2000,8 @@ function Update-VastPanel {
             $v.verify.Text = if ($null -ne $b.verify_ms_per_game) { '{0} ms/局' -f $b.verify_ms_per_game } else { "-" }
         } else { $v.bridge.Text = "-"; $v.verify.Text = "-" }
     }
+    $v.waste.Text = Format-Vast-Waste-Short $(if ($null -ne $script:VastHist) { $script:VastHist.interrupts } else { $null })
+    $v.waste.ForeColor = if ($null -ne $script:VastHist -and $null -ne $script:VastHist.interrupts -and [double]$script:VastHist.interrupts.waste_pct -ge 20) { [System.Drawing.Color]::DarkOrange } else { $black }
     $wk = $null
     if ($script:Last.ContainsKey("ls") -and $null -ne $script:Last["ls"].status) { $wk = $script:Last["ls"].status.workers }
     $v.learner.Text = if ($null -ne $wk) { '{0} 局（古くて捨てた {1}、不正 {2}）' -f (Format-Int $wk.games), (Format-Int $wk.stale_games), $wk.rejected_files } else { "（ls の [workers] が無効か、まだ取り込みなし）" }

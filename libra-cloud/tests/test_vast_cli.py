@@ -364,3 +364,46 @@ def test_offers_report_shows_the_expected_speed_and_cost_and_ranks_by_value():
     assert rep["top"][0]["est_usd_per_1m"] is not None and rep["top"][0]["est_from"] == "machine"
     assert "◎87.7万" in rep["text"] and "$7.17" in rep["text"] and "$12.00" in rep["text"]
     assert "見込みは過去に借りたホストの実測" in rep["text"]
+
+
+def test_history_counts_what_each_interruption_cost(tmp_path: Path, capsys):
+    """打ち切り（入札で止められる）と借り直しの損を history が数える（コンソールの「クラウド履歴」の要約）。"""
+    root = tmp_path / "cloud"
+    t0 = time.mktime(time.strptime("2026-09-20 09:00:00", "%Y-%m-%d %H:%M:%S"))
+    offer = {"dph_eff": 0.20, "dph_total": 0.26, "bid": 0.20, "gpu_name": "RTX 5070 Ti", "cpu_name": "AMD Ryzen 9 7900",
+             "inet_down_cost": 0.0, "inet_up_cost": 0.0}
+    # 1 回目: 入札で 3 時間の予定が、打ち始めて 1 時間で止められた（最後の回収は止められる 2 分前）
+    a = root / "ls-20260920-090000"
+    _write(a / "session.json", {"run": "ls", "gpu": "RTX 5070 Ti", "hours": 3.0, "started": t0, "pid": None, "rent": "bid"})
+    _write(a / "launcher.log", "credit $9\ncreate #1\nssh ready\nbridge pid 7\ninstance 5 lost: exited / running\nrelaunched: ls-20260920-102000\n")
+    _write(a / "instance.json", {"instance": 5, "offer": offer, "t_rent": t0, "t_bridge": t0 + 600})
+    _write(a / "result.json", {"worker": "vast1", "offer": offer, "lost": True, "rented_h": 1.2, "est_cost_usd": 0.24,
+                               "bridge": {"time": t0 + 4200, "last_pull": t0 + 4080, "games": 20000, "files": 200,
+                                          "push_bytes": 0, "pull_bytes": 0}})
+    # 2 回目: 残りの 1.83 時間で借り直した（準備に 12 分。この準備代が打ち切りのぶん余分に増えた費用）
+    b = root / "ls-20260920-102000"
+    t_b = t0 + 4200
+    _write(b / "session.json", {"run": "ls", "gpu": "RTX 5070 Ti", "hours": 1.83, "started": t_b, "pid": None, "rent": "bid",
+                                "continues": a.name})
+    _write(b / "launcher.log", "credit $9\ncreate #1\nssh ready\nbridge pid 8\nbridge: stopping\ndestroyed instance 6 (show_instance after: none)\n")
+    _write(b / "instance.json", {"instance": 6, "offer": offer, "t_rent": t_b, "t_bridge": t_b + 720})
+    _write(b / "result.json", {"worker": "vast1", "offer": offer, "rented_h": 2.03, "est_cost_usd": 0.406,
+                               "bridge": {"time": t_b + 720 + 6588, "last_pull": t_b + 720 + 6588, "games": 36000, "files": 360,
+                                          "push_bytes": 0, "pull_bytes": 0}})
+    _write(tmp_path / "runs" / "ls" / "log.txt", "")
+
+    h = vast_cli.history(root, tmp_path / "runs", now=t_b + 8000)
+    s1, s2 = h["sessions"]
+    assert s1["lost"] and not s2["lost"] and s2["continues"] == a.name
+    # 止められた 2 分前の回収から、借り直しが打ち始めるまでの 14 分（0.233 時間）は局が 1 つも増えない
+    assert s1["dark_h"] == 0.233 and s1["unused_h"] == 0.0 and s1["lost_games"] == round(0.233 / 24 * s1["games_per_day"])
+    assert s1["setup_h"] == 0.167 and s1["extra_setup_usd"] == 0.0  # 1 回目の準備は打ち切りが無くても払う
+    assert s2["setup_h"] == 0.2 and s2["extra_setup_usd"] == 0.04   # 借り直しの準備 12 分 × $0.20/h
+    w = h["interrupts"]
+    assert w["interruptions"] == 1 and w["relaunches"] == 1 and w["not_relaunched"] == 0
+    assert w["h_per_loss"] == w["bridge_h"] and w["extra_setup_usd"] == 0.04
+    assert w["usd_per_1m"] > w["usd_per_1m_ideal"] and w["waste_pct"] > 0
+    assert [g["name"] for g in w["by_rent"]] == ["bid"] and w["by_rent"][0]["lost"] == 1
+    assert vast_cli.main(["--root", str(root), "history", "--run-root", str(tmp_path / "runs")]) == 0
+    out = capsys.readouterr().out
+    assert "打ち切り 1 回" in out and "借り直せず 0 回" in out and "打ち切りが無ければ" in out
