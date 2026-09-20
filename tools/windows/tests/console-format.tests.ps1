@@ -11,7 +11,8 @@ if ($errors.Count -gt 0) {
     $errors | ForEach-Object { Write-Host ("構文エラー {0}:{1} {2}" -f $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber, $_.Message) }
     exit 1
 }
-$want = @("Format-Int", "Format-Ago", "From-Unix", "Ci-Val", "Format-Ci", "Format-Pct", "Format-Saturated", "New-Series", "Add-Pt", "Pt-XVal", "Get-XAxis", "Format-Elo-Anchor", "Format-Elo-Best", "Format-Elo-References", "Format-Elo-Rating", "Format-Elo-Note", "Build-Rating-Series", "Build-Trend-Series", "X-Scale", "X-Unscale", "Format-Auto-Status")
+$want = @("Format-Int", "Format-Ago", "From-Unix", "Ci-Val", "Format-Ci", "Format-Pct", "Format-Saturated", "New-Series", "Add-Pt", "Pt-XVal", "Get-XAxis", "Format-Elo-Anchor", "Format-Elo-Best", "Format-Elo-References", "Format-Elo-Rating", "Format-Elo-Note", "Build-Rating-Series", "Build-Trend-Series", "X-Scale", "X-Unscale", "Format-Auto-Status",
+          "Fmt-Num", "Format-Vast-Waste", "Format-Vast-Waste-Short", "Format-Vast-Rent-Advice", "Format-Vast-Session-Waste")
 $found = @{}
 foreach ($f in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
     if ($want -contains $f.Name) { $found[$f.Name] = $true; . ([scriptblock]::Create($f.Extent.Text)) }
@@ -205,6 +206,46 @@ Check "自動計測（節目なし）" (Format-Auto-Status ([pscustomobject]@{ e
     "節目なし（[auto] every_games が 0。eval-now / match-now のときだけ測る、待ち 0 件）"
 Check "自動計測（総局数がまだ無い）" (Format-Auto-Status ([pscustomobject]@{ enabled = $true; every_games = 400000 }) ([pscustomobject]@{ running = $null }) $null 0) `
     "待機（40 万局ごと、待ち 0 件）"
+
+# --- クラウドの打ち切り（libra-vast history --json の interrupts。libra_cloud/interrupts.py） ---
+# 入札で借りたホストを止められると、借り直しの準備代（課金されるのに局が出ない）と、次が打ち始めるまでの空白ぶんの局を損する
+$w = [pscustomobject]@{
+    sessions = 4; bridge_h = 5.55; interruptions = 2; relaunches = 1; not_relaunched = 1; h_per_loss = 2.77
+    lost_h = 2.78; unused_h = 2.5; lost_games = 55660; extra_setup_usd = 0.05; net_games = 110000; total_usd = 1.67
+    usd_per_1m = 15.18; usd_per_1m_ideal = 9.78; waste_pct = 55.2
+    by_rent = @([pscustomobject]@{ name = "入札"; sessions = 3; bridge_h = 3.55; lost = 2; h_per_loss = 1.77; usd_per_1m = 15.29; usd_per_1m_ideal = 8.12 },
+                [pscustomobject]@{ name = "on-demand"; sessions = 3; bridge_h = 6.0; lost = 0; h_per_loss = $null; usd_per_1m = 13.0; usd_per_1m_ideal = 13.0 })
+}
+Check "打ち切り（要約 1 行目）" ((Format-Vast-Waste $w) -split "`r`n")[0] `
+    "打ち切り 2 回（打った 5.5 時間、平均 2.8 時間に 1 回。借り直し 1 回、借り直せず 1 回）: 余分な準備代 `$0.05 ＋ 打てなかった 2.8 時間 = 約 55,660 局"
+Check "打ち切り（要約 2 行目）" ((Format-Vast-Waste $w) -split "`r`n")[1] `
+    "100 万局あたり `$15.18（打ち切りが無ければ `$9.78、+55.2%）　借り方: 入札 3 回・打ち切り 2 回（1.8 h に 1 回）・100 万局あたり `$15.29、on-demand 3 回・打ち切り 0 回・100 万局あたり `$13.00"
+Check "打ち切り（0 回）" (Format-Vast-Waste ([pscustomobject]@{ interruptions = 0; bridge_h = 12.5 })) `
+    "打ち切り 0 回（打った 12.5 時間）。入札で止められた回はまだありません"
+Check "打ち切り（読めていない）" (Format-Vast-Waste $null) ""
+Check "打ち切り（クラウド タブの 1 行）" (Format-Vast-Waste-Short $w) `
+    "2 回 / 打った 5.5 時間（平均 2.8 時間に 1 回）。100 万局あたり `$9.78 → `$15.18（+55.2%）"
+Check "打ち切り（クラウド タブ・0 回）" (Format-Vast-Waste-Short ([pscustomobject]@{ interruptions = 0; bridge_h = 3.0 })) "0 回 / 打った 3.0 時間"
+# 入札と on-demand はどちらも 3 回以上あるので比べてよい。入札のほうが 17% 高い
+Check "借り方の助言（入札が高い）" (Format-Vast-Rent-Advice $w) `
+    "入札は打ち切りのぶんを入れると on-demand より 18% 高くついています（借り方を on-demand にするか、入札の上乗せを増やす）"
+$few = [pscustomobject]@{ by_rent = @([pscustomobject]@{ name = "入札"; sessions = 3; usd_per_1m = 15.0 },
+                                      [pscustomobject]@{ name = "on-demand"; sessions = 2; usd_per_1m = 9.0 }) }
+Check "借り方の助言（回数が足りない）" (Format-Vast-Rent-Advice $few) ""
+$close = [pscustomobject]@{ by_rent = @([pscustomobject]@{ name = "入札"; sessions = 5; usd_per_1m = 10.0 },
+                                        [pscustomobject]@{ name = "on-demand"; sessions = 5; usd_per_1m = 10.5 }) }
+Check "借り方の助言（差が小さい）" (Format-Vast-Rent-Advice $close) "入札と on-demand で 100 万局あたりの費用は 1 割以内の差です"
+# セッションごとの明細（一覧で選んだ回の下）
+$lost = [pscustomobject]@{ lost = $true; dark_h = 0.25; unused_h = 0.0; lost_games = 5000; continues = $null }
+Check "打ち切り（1 回ぶん）" (Format-Vast-Session-Waste $lost) `
+    "打ち切り: 最後の回収から次が打ち始めるまで 0.25 時間、この回で打てなかったのは約 5,000 局"
+$dead = [pscustomobject]@{ lost = $true; dark_h = 0.03; unused_h = 2.5; lost_games = 50660; continues = $null }
+Check "打ち切り（借り直せず）" (Format-Vast-Session-Waste $dead) `
+    "打ち切り: 最後の回収から次が打ち始めるまで 0.03 時間、借り直せず予定の残り 2.50 時間も捨てた、この回で打てなかったのは約 50,660 局"
+$again = [pscustomobject]@{ lost = $false; dark_h = 0.0; unused_h = 0.0; lost_games = 0; continues = "ls-20260920-090000"; setup_h = 0.2; extra_setup_usd = 0.05 }
+Check "打ち切り（借り直した回）" (Format-Vast-Session-Waste $again) `
+    "借り直し（ls-20260920-090000 の打ち切りから）: 準備の 0.20 時間 `$0.05 は打ち切りが無ければ払わずに済んだぶん"
+Check "打ち切り（ふつうの回）" (Format-Vast-Session-Waste ([pscustomobject]@{ lost = $false; continues = $null })) ""
 
 if ($fails -gt 0) { Write-Host "`n$fails 件 失敗"; exit 1 }
 Write-Host "`nすべて通過"
