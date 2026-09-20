@@ -14,7 +14,7 @@ import torch
 
 from libra_net.model import LibraNet, NetConfig
 
-from .auto import AutoJobs, append_metrics, crossed_games_multiple
+from .auto import AutoJobs, append_metrics, crossed_games_multiple, proc_mem_mb
 from .progress import Publisher
 from .config import dump_toml, load_config
 from .runconfig import resolve as resolve_config
@@ -462,6 +462,7 @@ class Runner:
             "engine": st,
             "train": self.last_train,
             "gpu": gpu,
+            "mem": proc_mem_mb(),  # ランナー自身の常駐メモリとスワップ（MiB）。窓が RAM に載っているかを見る
             "restarts": self.state.get("restarts", [])[-5:],
         }
         if self.inbox is not None:
