@@ -92,6 +92,22 @@ def ckpt_step(p: Path | str) -> int | None:
 
 
 # ---- metrics.jsonl ----
+TRAIN_ROW_KEYS = ("loss", "policy", "value", "v41", "policy_acc", "grad_norm", "lr", "steps")
+
+
+def _train_row(status: dict) -> dict | None:
+    """metrics の 1 行に載せる学習の値。平均（train_avg）があればそれ、無ければ最後の 1 バッチ（train）。
+    `target`（学習目標と結果の差。replay.summarize_target_stats）は最後の学習のまとめをそのまま載せる。"""
+    avg, last = status.get("train_avg"), status.get("train")
+    if not avg and not last:
+        return None
+    src = avg or last
+    row = {k: (src or {}).get(k) for k in TRAIN_ROW_KEYS}
+    row["target"] = (last or {}).get("target") or (avg or {}).get("target")
+    row["avg"] = bool(avg)
+    return row
+
+
 def metrics_row(status: dict) -> dict:
     eng = status.get("engine") or {}
     row = {
@@ -103,7 +119,9 @@ def metrics_row(status: dict) -> dict:
         "gpd": status.get("games_per_day_1h"),
         "active": status.get("active_games"),
         "window": status.get("window_games"),
-        "train": {k: status["train"].get(k) for k in ("loss", "policy", "value", "v41", "policy_acc", "lr", "target")} if status.get("train") else None,
+        # 学習の値は metrics の 1 行ぶんの**平均**（train_avg）を使う。最後の 1 バッチ（train）だけだと
+        # ばらつきが大きく、40 万局ぶんの変化より 1 点のばらつきのほうが大きかった（2026-09-20 の実測）
+        "train": _train_row(status),
         "engine": {k: eng.get(k) for k in METRIC_ENGINE_KEYS} if eng else None,
         "exploiter": {k: status["exploiter"].get(k) for k in ("games", "wins", "draws", "losses")} if status.get("exploiter") else None,
         "gpu_mb": (status.get("gpu") or {}).get("mem_reserved_mb"),

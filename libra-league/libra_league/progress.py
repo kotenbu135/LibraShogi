@@ -46,11 +46,68 @@ def scrub(obj, home: str | None = None):
 _METRIC_KEYS = ("t", "step", "games_total", "gpd", "gpd_5m", "window", "rss_mb", "swap_mb", "gpu_mb")
 
 
+# 自己対局の数え上げ（engine）は起動からの累計。行ごとの差から 1 局あたりの割合にする
+_ENGINE_COUNTS = ("draws", "sente_wins", "gote_wins", "sennichite", "perpetual_check", "max_ply", "resign", "ruling41", "no_legal_move", "mate_found")
+
+
+def _selfplay_rates(rows: list[dict]) -> None:
+    """各行に、直前の行との差から自己対局の分布（`sp_*`）を足す。
+
+    引き分けの割合・1 局の手数・先手の勝率・千日手・連続王手・320 手・投了は、学習が壊れたときにいちばん
+    早く形が変わる。これまで `metrics.jsonl` にはあったが要約に載せていなかったので、クラウドから
+    （＝この節目の数値を読む側から）見えなかった（2026-09-20）。"""
+    prev = None
+    for r in rows:
+        eng = r.get("engine") or {}
+        g = eng.get("games")
+        pg = ((prev or {}).get("engine") or {}).get("games")
+        d = None
+        if g is not None and pg is not None and g > pg:      # 再起動で 0 に戻った行は出さない
+            n = float(g - pg)
+            d = {k: (float(eng.get(k) or 0) - float(((prev or {})["engine"]).get(k) or 0)) / n for k in _ENGINE_COUNTS}
+            ps, pps = eng.get("plies_sum"), (prev or {})["engine"].get("plies_sum")
+            d["plies"] = ((float(ps) - float(pps)) / n) if (ps is not None and pps is not None) else None
+            d["games"] = int(n)
+        prev = r
+        if d is None:
+            continue
+        r["sp_games"] = d["games"]
+        r["sp_draw"] = round(d["draws"], 4)
+        r["sp_plies"] = round(d["plies"], 1) if d["plies"] is not None else None
+        won = d["sente_wins"] + d["gote_wins"]
+        r["sp_sente"] = round(d["sente_wins"] / won, 4) if won > 0 else None
+        for k in ("sennichite", "perpetual_check", "max_ply", "resign", "ruling41", "no_legal_move", "mate_found"):
+            r["sp_" + k] = round(d[k], 4)
+
+
+def _with_rates(rows: list[dict]) -> list[dict]:
+    _selfplay_rates(rows)
+    return rows
+
+
 def _metric_row(r: dict) -> dict:
     out = {k: r.get(k) for k in _METRIC_KEYS}
     tr = r.get("train") or {}
-    out["loss"] = tr.get("loss")
-    out["policy_acc"] = tr.get("policy_acc")
+    # 学習の値（metrics の 1 行ぶんの平均。auto._train_row）。価値と布石の損失・学習率・勾配の大きさが
+    # 無いと「方策だけ学んで価値が学べていない」「勾配が切られ続けている」を外から切り分けられない
+    for k in ("loss", "policy", "value", "v41", "policy_acc", "grad_norm", "lr", "steps"):
+        out[k] = tr.get(k)
+    out["train_avg"] = tr.get("avg")
+    # 学習目標と結果の差（replay.summarize_target_stats）。布石の目標の引き分け率と実際の引き分け率の
+    # ずれは、2026-09-15 に見つかった「目標が結果より 0.02 低い」の類を早く捕まえるための物差し
+    tg = tr.get("target") or {}
+    for k in ("target_minus_z", "v41_minus_z", "draw_target", "draw_actual", "rootq_minus_z_fuseki", "rootq_minus_z_normal"):
+        out[k] = tg.get(k)
+    # 処理時間の内訳（窓に占める割合）。train_sample が跳ねたらバッチ作りがスワップに出ている
+    tm = r.get("timing") or {}
+    w = float(tm.get("window_s") or 0.0)
+    sec = tm.get("sec") or {}
+    for k in ("train_sample", "train_step", "sp_eval"):
+        out["t_" + k] = round(float(sec.get(k) or 0.0) / w * 100, 2) if w > 0 else None
+    # 自己対局の分布（_selfplay_rates が入れる）
+    for k in ("sp_games", "sp_draw", "sp_plies", "sp_sente", "sp_sennichite", "sp_perpetual_check", "sp_max_ply",
+              "sp_resign", "sp_ruling41", "sp_no_legal_move", "sp_mate_found"):
+        out[k] = r.get(k)
     gen = r.get("gen") or {}
     # 価値の相関だけだと「横ばい」の読み分けができないので、方策の側と布石の側も出す
     # （2026-09-19: 本将棋の corr_v は結果 z が上限を決めるので上がり続けない。docs/gen-metric-2026-09-19.md）
@@ -89,7 +146,7 @@ def snapshot(sd: StateDir, cfg: dict | None = None, points: int = 120, now: floa
             "games_per_day_1h": st.get("games_per_day_1h"), "window_games": st.get("window_games"),
             "active_games": st.get("active_games"), "elapsed_h": st.get("elapsed_h"),
             "heldout_games": st.get("heldout_games"), "status_time": st.get("time"),
-            "train": {k: (st.get("train") or {}).get(k) for k in ("loss", "policy", "value", "v41", "policy_acc", "lr")} if st.get("train") else None,
+            "train": {k: (st.get("train_avg") or st.get("train") or {}).get(k) for k in ("loss", "policy", "value", "v41", "policy_acc", "grad_norm", "lr", "steps")} if (st.get("train_avg") or st.get("train")) else None,
             "gen": st.get("gen"),
         },
         "auto": {
@@ -111,7 +168,7 @@ def snapshot(sd: StateDir, cfg: dict | None = None, points: int = 120, now: floa
         "reference": collect_reference(sd),
         "matches": collect_matches(sd),
         "archives": [{"step": s} for p in list_archives(sd) if (s := int(p.stem.split("_")[1])) is not None],
-        "metrics": [_metric_row(r) for r in load_metrics(sd, max(1, points))],
+        "metrics": [_metric_row(r) for r in _with_rates(load_metrics(sd, max(1, points)))],
     }
     try:
         out["review"] = review(sd, now=now)
@@ -146,6 +203,40 @@ def _fmt(v, digits: int = 1, plus: bool = False) -> str:
     return str(v)
 
 
+def _last(rows: list[dict], key: str):
+    """metrics の行のうち、その値が入っている最後のもの（起動直後の行は空になる）。"""
+    for r in reversed(rows):
+        if r.get(key) is not None:
+            return r
+    return {}
+
+
+def _metric_lines(rows: list[dict]) -> list[str]:
+    """学習と自己対局の直近の値。表に出しておかないと誰も JSON を開かない（2026-09-20）。"""
+    L = []
+    t = _last(rows, "loss")
+    if t:
+        L.append(f"| 学習（直近の平均） | 損失 {_fmt(t.get('loss'), 3)}（方策 {_fmt(t.get('policy'), 3)}・価値 {_fmt(t.get('value'), 3)}"
+                 f"・布石 {_fmt(t.get('v41'), 3)}）、方策の正解率 {_fmt(t.get('policy_acc'), 3)}、"
+                 f"学習率 {_fmt(t.get('lr'), 6)}、勾配 {_fmt(t.get('grad_norm'), 2)}（{_fmt(t.get('steps'))} step の平均） |")
+    sp = _last(rows, "sp_draw")
+    if sp:
+        L.append(f"| 自己対局の中身 | 引き分け {_fmt((sp.get('sp_draw') or 0) * 100, 2)}%、1 局 {_fmt(sp.get('sp_plies'))} 手、"
+                 f"先手の勝ち {_fmt((sp.get('sp_sente') or 0) * 100, 1)}%、千日手 {_fmt((sp.get('sp_sennichite') or 0) * 100, 2)}%、"
+                 f"連続王手 {_fmt((sp.get('sp_perpetual_check') or 0) * 100, 2)}%、320 手 {_fmt((sp.get('sp_max_ply') or 0) * 100, 2)}%、"
+                 f"投了 {_fmt((sp.get('sp_resign') or 0) * 100, 2)}%（{_fmt(sp.get('sp_games'))} 局） |")
+    d = _last(rows, "draw_actual")
+    if d:
+        L.append(f"| 布石の学習目標と結果の差 | 目標 − 結果 {_fmt(d.get('target_minus_z'), 4, plus=True)}、"
+                 f"V̂41 − 結果 {_fmt(d.get('v41_minus_z'), 4, plus=True)}、"
+                 f"目標の引き分け {_fmt(d.get('draw_target'), 4)} / 実際 {_fmt(d.get('draw_actual'), 4)} |")
+    tm = _last(rows, "t_train_sample")
+    if tm:
+        L.append(f"| 処理時間の内訳 | バッチ作り {_fmt(tm.get('t_train_sample'), 2)}%、学習 {_fmt(tm.get('t_train_step'), 2)}%、"
+                 f"自己対局の評価待ち {_fmt(tm.get('t_sp_eval'), 2)}%（バッチ作りが跳ねたらスワップに出ている） |")
+    return L
+
+
 def format_md(s: dict) -> str:
     """GitHub でそのまま読める短い要約（数値の正は同じ場所の .json）。"""
     n, a = s.get("now") or {}, s.get("auto") or {}
@@ -156,6 +247,7 @@ def format_md(s: dict) -> str:
          f"| 総局数 | {_fmt(n.get('games_total'))} |",
          f"| 局/日（1 時間平均） | {_fmt(n.get('games_per_day_1h'))} |",
          f"| リプレイの窓 | {_fmt(n.get('window_games'))} |",
+         *_metric_lines(s.get("metrics") or []),
          f"| 最強の step | {_fmt(a.get('best_step'))}（足踏み {_fmt(a.get('best_stall'))}） |",
          f"| 基準の step | {_fmt(a.get('anchor_step'))}（offset {_fmt(a.get('anchor_offset'), plus=True)}） |"]
     b = (s.get("best") or [])[-1:]

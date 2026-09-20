@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from .auto import collect_anchor, collect_best, collect_reference, load_metrics
+from .scaling import BAND
 from .state import StateDir
 
 DEFAULT_THRESHOLDS = {
@@ -23,7 +24,7 @@ DEFAULT_THRESHOLDS = {
     "gen_max_fall": 0.03,       # held-out の相関が窓の間にこれ以上下がったら「注意」（1 回の計測のばらつき sd 0.013 の約 2 倍）
     "gen_min_corr": 0.6,        # 一度この線を超えた run で下回ったら「見直し」（docs/restart-plan.md §3 M1）
     "best_stall_alert": 3,      # 最強を更新できない回数がこれ以上なら「見直し」
-    "reference_games": 400000,  # 参照との Elo の伸びを見る窓（局数）
+    "reference_stale_games": 800000,  # 参照の最後の計測がこれ以上前なら判定しない（もう測っていない参照）
     "gpd_min": 0,               # 局/日の下限（0 で見ない）
 }
 
@@ -57,15 +58,6 @@ def _gen_rows(sd: StateDir, window_games: int) -> list[dict]:
     return _window(rows, window_games)
 
 
-def _recent(rows: list[dict], window_games: int) -> list[dict]:
-    if not rows:
-        return rows
-    last = rows[-1].get("games")
-    if last is None:
-        return rows[-2:]
-    return [r for r in rows if r.get("games") is not None and int(r["games"]) >= int(last) - window_games]
-
-
 def _k(n: int) -> int:
     """中央値を取る点の数（両端それぞれ）。行が少ないうちは 1 点。"""
     return max(1, min(3, n // 3))
@@ -81,7 +73,8 @@ def _med(xs: list) -> float | None:
 def review(sd: StateDir, thresholds: dict | None = None, now: float | None = None) -> dict:
     th = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
     now = now or time.time()
-    out: dict = {"time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)), "run": sd.root.name, "items": []}
+    st = json.loads(sd.status_json.read_text(encoding="utf-8")) if sd.status_json.exists() else {}
+    out: dict ={"time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)), "run": sd.root.name, "items": []}
 
     # M1 一般化: 窓の中との差（丸暗記）と、下がっていないか。伸びは見ない（上の docstring）
     allrows = _gen_rows(sd, 1 << 62)
@@ -133,26 +126,45 @@ def review(sd: StateDir, thresholds: dict | None = None, now: float | None = Non
     else:
         out["items"].append({"name": "M3 基準比", "verdict": NA, "why": "eval/anchor.jsonl がまだ無い", "values": {}})
 
-    # M4 固定の参照: 参照ごとに、reference_games 局の窓での伸び
+    # M4 固定の参照: **最後の 2 回の計測**を比べ、間隔は実測を書く。
+    # 以前は reference_games 局の窓で点を選んでいたが、窓（40 万局）が節目の間隔（every_games = 40 万局）と
+    # ぴったり同じなので、直前の点が数百局ぶん窓からはみ出し、活きている参照はいつまでも
+    # 「比べる点がまだ 1 つ」になっていた（2026-09-20 に判明。280 万局の時点で win1m は 400,430 局差、
+    # ckpt_000062426 は 400,252 局差で、どちらも 400,000 局の窓を数百局だけ超えていた）。
+    # そのせいで、もう測っていない参照（ckpt_000646699 は 124 万局で止まっている）だけが判定を出し、
+    # 160 万局前の -14.3 Elo で run 全体の判定が「注意」になっていた。
     refs = collect_reference(sd)
+    games_now = int(st.get("games_total") or 0)
     by_ref: dict[str, list[dict]] = {}
     for r in refs:
         by_ref.setdefault(str(r.get("ref")), []).append(r)
     for name, rs in sorted(by_ref.items()):
-        recent = _recent(rs, int(th["reference_games"]))
-        last = rs[-1]
-        if len(recent) >= 2:
-            rise = float(recent[-1]["elo"]) - float(recent[0]["elo"])
-            verdict = OK if rise > 0 else WARN
-            why = f"対 {name}: {recent[0]['elo']:+.1f} → {recent[-1]['elo']:+.1f} Elo（{int(th['reference_games']):,} 局で {rise:+.1f}）"
-        else:
+        last, prev = rs[-1], (rs[-2] if len(rs) >= 2 else None)
+        g_last, g_prev = last.get("games"), (prev or {}).get("games")
+        behind = (games_now - int(g_last)) if (games_now and g_last is not None) else None
+        gap = (int(g_last) - int(g_prev)) if (g_last is not None and g_prev is not None) else None
+        score = last.get("score_new")
+        values = {"last": last, "gap_games": gap, "behind_games": behind, "score": score}
+        if behind is not None and behind > int(th["reference_stale_games"]):
+            # もう測っていない参照。古い 2 点の差で run 全体の判定を動かさない
+            verdict, why = NA, f"対 {name}: もう測っていない（最後は step {last.get('step')}、{behind:,} 局前）"
+        elif prev is None:
             verdict, why = NA, f"対 {name}: {last['elo']:+.1f} Elo（step {last.get('step')}、比べる点がまだ 1 つ）"
-        out["items"].append({"name": f"M4 参照 {name}", "verdict": verdict, "why": why, "values": {"last": last, "n_recent": len(recent)}})
+        elif score is not None and not (BAND[0] <= float(score) <= BAND[1]):
+            # 天井・床。勝率が振り切れた参照は Elo が縮むので、下がって見えても弱くなった証拠にならない
+            # （scaling.py が曲線から外すのと同じ帯。参照の自動入れ替え reference_rotate を待つ）
+            verdict, why = NA, (f"対 {name}: 得点 {float(score):.3f} で天井・床（{BAND[0]}〜{BAND[1]} の外）。"
+                                "この参照では伸びを測れない")
+        else:
+            rise = float(last["elo"]) - float(prev["elo"])
+            verdict = OK if rise > 0 else WARN
+            why = (f"対 {name}: {prev['elo']:+.1f} → {last['elo']:+.1f} Elo"
+                   + (f"（{gap:,} 局で {rise:+.1f}）" if gap is not None else f"（{rise:+.1f}）"))
+        out["items"].append({"name": f"M4 参照 {name}", "verdict": verdict, "why": why, "values": values})
     if not by_ref:
         out["items"].append({"name": "M4 参照", "verdict": NA, "why": "eval/reference.jsonl がまだ無い", "values": {}})
 
-    # 局/日
-    st = json.loads(sd.status_json.read_text(encoding="utf-8")) if sd.status_json.exists() else {}
+    # 局/日（起動直後は 1 時間の履歴が無く None。0 と書くと「止まっている」に読めるので項目を出さない）
     gpd = st.get("games_per_day_1h")
     if gpd is not None:
         verdict = OK if th["gpd_min"] <= 0 or gpd >= th["gpd_min"] else WARN
