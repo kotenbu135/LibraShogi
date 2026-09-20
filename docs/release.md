@@ -1,0 +1,180 @@
+# リリース手順（v0.2 以降）
+
+v0.1（2026-09-16）で実際にやったことを手順にしたもの。**v0.2 はこの通りに進める。**
+v0.1 の作業は decisions.md の 2026-09-15〜16 に散らばっていて、次に出すときに読み直さないと再現できなかった。
+
+どの段でも「止める・起動する」はユーザーがコンソールで行う（CLAUDE.md §稼働中のランの扱い）。
+判断がユーザーに要るところは §8 にまとめてある。**§8 を先に聞いてから §1 に入る。**
+
+---
+
+## 0. いつ出すか（引き金）
+
+**方針: 搾取者の上乗せ（lx）を使わない状態で Elo の伸びが頭打ちになったら v0.2 として公開する**（2026-09-18 のユーザーの方針）。
+
+頭打ちかどうかは `bin/libra rating --curve` で見る（読み方は docs/scaling-2026-09-18.md §6）。
+
+| 見るもの | 頭打ちの合図 |
+|---|---|
+| `rating --curve` の点 | 横軸を log2(総局数) にしたとき、**続けて 2 つ以上**の節目が「これまでの傾きの線」より下に落ち、95% 区間が線をまたがない |
+| 節目ごとの直接対局 | 前の節目の自分との 1,000 局で、95% 区間の下限が 0 を下回る（`eval/best.jsonl` の足踏み。`best_stall_alert` の WARNING） |
+| 外部計測（40 局、ハンデ付き） | 得点が上がらない。ただし 40 局の幅は ±55 Elo なので、これ単独では決めない |
+
+**1 点だけで決めない。** 点のばらつきは約 21 Elo あり、節目 1 つの下振れは普通に起きる（2026-09-19）。
+
+**2026-09-20 15:34 時点（総局数 2,711,441、step 238,074）: 頭打ちではない。**
+最新の節目 step 210,020 が +1203.2 [1167.7, 1238.8] で、曲線の傾き（局数 2 倍あたり約 +209 Elo）の線に乗っている。
+
+---
+
+## 1. 重みを固定する
+
+1. ユーザーに、どの節目の重みを v0.2 にするかを確かめる（§8-A）。
+2. その step の archive を `~/libra-run/releases/v0.2/` に写す。**チェックポイントは直近 3 つしか残らない**ので、決めた直後に写す（v0.1 でそうした）。
+
+```bash
+mkdir -p ~/libra-run/releases/v0.2
+cp ~/libra-run/ls/checkpoints/archive/ckpt_<step>.pt ~/libra-run/releases/v0.2/libra-v0.2.pt
+# ONNX を書き出す（fp32、opset 17）。書き出し方は libra-net/README.md
+bin/libra export --ckpt ~/libra-run/releases/v0.2/libra-v0.2.pt --out ~/libra-run/releases/v0.2/libra-v0.2.onnx
+( cd ~/libra-run/releases/v0.2 && sha256sum * > SHA256SUMS )
+```
+
+3. **この時点の `main` のコミットを控える**（§6 でタグを打つ先）。重みを固定したコミットを選ぶ理由は decisions.md 2026-09-16。
+
+---
+
+## 2. 玉配置表（`scale.json`）を作り直す
+
+重みが変われば釣り合う組も変わるので、**版ごとに作り直す**。v0.2 の表は Release の添付にもサイトのハンデ表にもなる。
+
+- **全組（492 組）を検証対局で作り直す**: `bin/libra-scale seq run --dir ~/libra-run/ls/scale/seq-v0.2 --table ~/libra-run/ls/scale/scale-v0.2.json --notify windows`（手順は libra-scale/README.md の seq）。
+  v0.1 は 303,677 局・約 12 時間（クラウドの GPU 1 台を足して）。**この間は ls・lx を止める**（§8-B）。
+- 上位だけでよいなら `bin/libra-scale build --sims 1600` → `verify --top 48 --games 100`。こちらは **ls・lx を止めずに GPU を共有したまま回す**（decisions.md 2026-09-15）。
+- 終わったら `verify.v_hat_minus_w`（検証した組の V̂ と実際の勝率の差）を measurements.md に 1 行書く。標準誤差の 2 倍を超えて 0 から離れていたら学習目標の偏りを疑う（v0.1 は −0.008）。
+
+**ハンデ表（tenbin-shogi-web）はこの表から作る**ので、v0.2 では全組が要る（decisions.md 2026-09-19。v0.1 の表は「まだ弱い」ので当てにしない、というユーザーの指摘）。
+
+---
+
+## 3. 強さを測る（モデルカードに載せる数値）
+
+| 物差し | コマンド | 何が分かる |
+|---|---|---|
+| 目盛り（主） | `bin/libra rating --curve` | 記録した全対局を 1 本の Elo に当てはめた値と、局数 2 倍あたりの傾き |
+| 最強比・基準比 | 自動計測（`eval/best.jsonl`・`anchor.jsonl`） | 直前の自分に勝てているか |
+| 固定の参照 | 自動計測（`eval/reference.jsonl`） | run をまたいで変わらない物差し |
+| 外部エンジン | `bin/libra match --games 40 --go "nodes 400" --go-opp "movetime 1000" --ckpt <v0.2 の archive> --opponent-opt Threads=2 --opponent-opt Fuseki_Rules=2` | じゃんけんの影響を受けない唯一の物差し。ハンデの付け方は runbook §7.0 |
+| v0.1 との直接対局 | `bin/libra eval --a <v0.2 の pt> --b ~/libra-run/releases/v0.1/libra-v0.1.pt --games 1000` | **「v0.1 からどれだけ強くなったか」。Release の本文に書く 1 行はこれ** |
+
+**外部計測はハンデ付き（Libra は `nodes 400`、相手は 1 手 1 秒）で打つ**（2026-09-19 のユーザーの決定）。
+得点が 0.6 を超えたら 200 回、0.4 未満なら 800 回に直して取り直す。
+**ハンデ付きの点は全読みの自分とは別人**として `libra rating` に入るので、モデルカードには読む回数を必ず書く（runbook §7.0）。
+
+**測る前に手元のプログラムを新しくする**（`cd ~/LibraShogi && git pull` → コンソールの停止 → 起動）。
+設定はリポジトリから読まれるがプログラムは手元の写しが動くので、新しい設定の鍵を古いプログラムが黙って無視する。
+2026-09-19 にこれで 40 局の計測が丸ごと無効になった（measurements.md 同日）。
+
+---
+
+## 4. モデルカードを書く
+
+`docs/model-card-v0.1.md` を雛形にして `docs/model-card-v0.2.md` を作る。**節の構成は変えない**（読む人が版どうしを比べられるように）。
+v0.1 から必ず書き換わるところ:
+
+| 節 | 書き換えるもの |
+|---|---|
+| 冒頭・§1 | 版、step、到達時刻、ファイル名 |
+| §2 ネットの形 | **変わらないはず**（`[net]` は run を替えない限り固定）。ONNX のメタデータの `libra_step` だけ直す |
+| §3 どう学習したか | 世代、総局数、自己対局の探索の設定、学習の設定（リプレイの窓、`replay_ratio` は 2026-09-19 に変わった）、布石の価値目標（λ は 1.0 に変わった）、投了の有無 |
+| §4 再現に使うコードの版 | v0.2 のタグのコミット。§1 で控えたもの |
+| §5 計測 | §3 で測り直した値で**全部入れ替える**。v0.1 の 40 局（0 勝 40 敗、持ち時間が揃っていない）は残さない |
+| §6 既知の限界 | v0.1 の 7 件を 1 つずつ確かめ直す。直ったものは消し、残るものは今の数値に直す（特に 1・2 の布石の価値の偏りは λ を 1.0 にしたので測り直す） |
+| §8 SHA-256 | `SHA256SUMS` から写す |
+| §9 配布物の作り方 | 版の文字列だけ |
+
+書き終えたら NOTICE の `model card: docs/model-card-v0.1.md` を v0.2 に直す。
+
+---
+
+## 5. 配布物を作る
+
+```bash
+# 1. ONNX Runtime（DirectML 版）を取る（初回だけ）
+tools/fetch_onnxruntime.sh win-dml
+# 2. Windows 版をクロスビルド（libra-engine/README.md）
+cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-posix.cmake \
+  -DLIBRA_BUILD_PYTHON=OFF -DLIBRA_BUILD_TESTS=OFF -DLIBRA_ORT_DIR=$PWD/third_party/onnxruntime/onnxruntime-win-x64-directml-1.24.4
+cmake --build build-win
+# 3. zip・単体のファイル・SHA256SUMS を作る（第 3 引数は自己対局の標本の中心の時刻）
+tools/package_release.sh v0.2 ~/libra-run/releases/v0.2 '<v0.2 の重みに到達した時刻>'
+```
+
+- **2 回続けて作って `SHA256SUMS` が一致することを確かめる。** zip と gzip は日時を固定して詰めてあるので、同じ入力からは同じハッシュになる（decisions.md 2026-09-16）。一致しなければ非決定な要素が混ざっている。
+- **作った zip を展開して `libra.exe` を動かす**（`usi` → `isready` → 布石の `go` が通り、`info string … provider dml` が出る）。v0.1 でも毎回やった。
+- 自己対局の標本は選別していない（搾取者の布石・リーグの局・Gumbel ノイズの手が混ざる）。data/README.md の表に v0.2 の行を足す。
+
+---
+
+## 6. タグと Release
+
+1. `git tag -a v0.2 <§1 で控えたコミット> -m "Libra v0.2 (step <step>)"` → `git push origin v0.2`
+2. GitHub Release を作り、`dist/` の中身（zip・`.onnx`・`.pt`・`scale-v0.2.json`・自己対局の標本・`SHA256SUMS`）を添付する。
+3. 本文に書くこと（v0.1 の本文に倣う）:
+   - **v0.1 からどれだけ強くなったか**（§3 の直接対局 1,000 局の Elo と区間）
+   - 外部エンジンとの計測の条件（ハンデ付きであること、読む回数、相手の持ち時間）と結果
+   - **残っている穴**（搾取者に負ける割合、本将棋の読み抜けなど。モデルカード §6 から）
+   - 強さを揃えた条件での絶対的な強さは未計測であること（1.0 で測る）
+4. data/README.md の「公開済み」の表に v0.2 の行を足す。
+
+---
+
+## 7. サイトとデスクトップへ反映する
+
+**Release を公開してから**行う（配布物のハッシュが決まっていないと照合できない）。
+
+### tenbin-shogi-web
+
+1. 重みを分けて置く: `node scripts/models/split.mjs ~/libra-run/releases/v0.2/libra-v0.2.onnx --step <step>`
+   （16MiB ごとに分け、`src/engine/libra/model.ts` に貼る行と `.gitignore` に足す行を出す）
+2. `src/engine/libra/model.ts` の `LIBRA_MODEL` を差し替える（`name`・`parts`・`bytes`・`sha256`・`step`）。
+3. `.gitignore` の `!public/models/…` を新しいファイル名に直し、**古い重みの行を消す**（ワイルドカードにしない。配布経路に黙って混ざらないようにするため）。
+4. 玉配置表を取り込む: `node scripts/kings/import-scale.mjs ~/libra-run/ls/scale/scale-v0.2.json`（表の step が `LIBRA_MODEL.step` と違えば止まる）。
+5. 一致試験の局面集を作り直す: `PYTHONPATH=… libra_oracle.py <games.jsonl> 24`（tenbin-shogi-web/CLAUDE.md のコマンド）。
+6. `npm test` と `npm run e2e` を通す。
+7. **ハンデ表**（両玉の置き場所。decisions.md 2026-09-19）は v0.2 の `scale.json` から作り直してから出す。
+
+### tenbin-shogi-desktop
+
+エンジンは利用者が Release の zip を登録して使うので、**リポジトリ側の差し替えは要らない**。
+案内の文（対応する Libra の版）を書いているところがあれば直す。
+
+---
+
+## 8. 出す前にユーザーに確認すること
+
+| # | 聞くこと | 既定（決まっていなければこれで進める） |
+|---|---|---|
+| A | どの節目の重みを v0.2 にするか | 頭打ちと判断した節目の archive |
+| B | 玉配置表を全組で作り直すか（ls・lx を約 12 時間止める） | **全組で作り直す**。ハンデ表に全組が要るため |
+| C | エンジンの版の名乗り（`LibraShogi 0.0.2`）を上げるか | 上げる（重みの版と別だが、配る実行ファイルが変わるため） |
+| D | `Scale_Table` の既定（今は空。実行ファイルの隣の `scale.json` を自動で見ない） | 変えない（v0.1 と同じ挙動のまま） |
+| E | 外部エンジンとの対局棋譜を公開するか | 出さない（相手側の配布条件の確認が要る。v0.1 と同じ） |
+| F | 自己対局の棋譜をどこまで出すか | v0.1 と同じく前後 1 時間の標本だけ Release に載せる |
+
+C・D は decisions.md 2026-09-16 で「今回は変えない、どちらを変えるかはユーザーの判断待ち」のまま残っている。
+
+---
+
+## 9. チェックリスト
+
+- [ ] §0 頭打ちを `rating --curve` で確かめ、ユーザーに報告した
+- [ ] §8 の A〜F をユーザーに確かめた
+- [ ] §1 重みを `~/libra-run/releases/v0.2/` に固定し、コミットを控えた
+- [ ] §2 玉配置表を作り直し、`v_hat_minus_w` を measurements.md に書いた
+- [ ] §3 強さを測った（rating・v0.1 との直接対局・外部 40 局）
+- [ ] §4 `docs/model-card-v0.2.md` を書き、NOTICE を直した
+- [ ] §5 配布物を 2 回作ってハッシュが一致し、展開した `libra.exe` が動いた
+- [ ] §6 タグを push し、Release を公開し、data/README.md に行を足した
+- [ ] §7 サイトの重み・玉配置表・一致試験を差し替え、`npm test` と e2e が通った
+- [ ] decisions.md に決定を、measurements.md に実測を 1 行ずつ書いた

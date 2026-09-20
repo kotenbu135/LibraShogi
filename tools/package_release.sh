@@ -5,7 +5,7 @@
 #   tools/package_release.sh <版> <重みの置き場>   例: tools/package_release.sh v0.1 ~/libra-run/releases/v0.1
 #
 # 出す先は <重みの置き場>/dist/:
-#   libra-<版>.onnx / libra-<版>.pt / scale-<版>.json … 重みの置き場から写す（あるものだけ）
+#   libra-<版>.onnx / libra-<版>.pt / scale-<版>.json … 重みの置き場から写す（.pt 以外は必須）
 #   libra-<版>-windows-x64.zip                        … libra.exe ＋ DirectML 版の DLL ＋ モデル ＋ 表 ＋ ライセンス
 #   libra-<版>-selfplay-sample.jsonl.gz               … 第 3 引数を渡したときだけ（CC0 の自己対局の標本）
 #   SHA256SUMS                                        … dist/ の全ファイル
@@ -25,6 +25,11 @@ DIST="$SRC/dist"
 
 [ -f "$WIN/libra.exe" ] || { echo "先にクロスビルドする（libra-engine/README.md）: $WIN/libra.exe" >&2; exit 1; }
 [ -d "$ORT" ] || { echo "先に tools/fetch_onnxruntime.sh win-dml を実行する: $ORT" >&2; exit 1; }
+# zip だけで指せることが配布の条件なので、モデル・玉配置表・モデルカードが欠けたら作らない。
+# 以前は「あるものだけ」写していたので、名前を間違えるとモデルの入っていない zip が黙って出来上がった。
+[ -f "$SRC/libra-$VER.onnx" ] || { echo "モデルが無い: $SRC/libra-$VER.onnx（bin/libra export で書き出す。docs/release.md §1）" >&2; exit 1; }
+[ -f "$SRC/scale-$VER.json" ] || { echo "玉配置表が無い: $SRC/scale-$VER.json（libra-scale で作り直す。docs/release.md §2）" >&2; exit 1; }
+[ -f "$ROOT/docs/model-card-$VER.md" ] || { echo "モデルカードが無い: docs/model-card-$VER.md（docs/release.md §4）" >&2; exit 1; }
 
 rm -rf "$DIST"; mkdir -p "$DIST"
 STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
@@ -33,16 +38,16 @@ PKG="$STAGE/libra-$VER-windows-x64"; mkdir -p "$PKG/LICENSES"
 cp "$WIN/libra.exe" "$PKG/"
 for d in onnxruntime.dll onnxruntime_providers_shared.dll DirectML.dll; do cp "$ORT/lib/$d" "$PKG/"; done
 # 配布物だけで指せるよう、モデルと玉配置表も同梱する（同じものを単体でも Release に置く）
-[ -f "$SRC/libra-$VER.onnx" ] && cp "$SRC/libra-$VER.onnx" "$PKG/libra.onnx"
-SCALE="$(ls "$SRC/scale-$VER.json" 2>/dev/null || true)"
-[ -n "$SCALE" ] && cp "$SCALE" "$PKG/scale.json"
+SCALE="$SRC/scale-$VER.json"
+cp "$SRC/libra-$VER.onnx" "$PKG/libra.onnx"
+cp "$SCALE" "$PKG/scale.json"
 # ライセンス（LICENSES/README.md の台帳のとおり）
 cp "$ROOT/LICENSE" "$PKG/LICENSES/Apache-2.0.txt"
 cp "$ROOT/NOTICE" "$PKG/LICENSES/NOTICE"
 cp "$ROOT/LICENSES/README.md" "$PKG/LICENSES/"
 cp "$ROOT/LICENSES/CC0-1.0.txt" "$ROOT/LICENSES/CC-BY-4.0.txt" "$PKG/LICENSES/"
 cp "$ORT"/LICENSE-*.txt "$ORT"/ThirdPartyNotices-*.txt "$PKG/LICENSES/"
-cp "$ROOT/docs/model-card-$VER.md" "$PKG/MODEL-CARD.md" 2>/dev/null || true
+cp "$ROOT/docs/model-card-$VER.md" "$PKG/MODEL-CARD.md"
 
 cat > "$PKG/README.txt" <<TXT
 LibraShogi $VER - Windows x64 (DirectML)
@@ -75,7 +80,7 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
             z.writestr(info, f.read())
 print(f"zip: {len(paths)} files, {os.path.getsize(out)/1e6:.1f} MB")
 PY
-for f in "$SRC/libra-$VER.onnx" "$SRC/libra-$VER.pt" $SCALE; do [ -f "$f" ] && cp "$f" "$DIST/"; done
+for f in "$SRC/libra-$VER.onnx" "$SRC/libra-$VER.pt" "$SCALE"; do [ -f "$f" ] && cp "$f" "$DIST/"; done
 if [ "${3:-}" != "" ]; then
   # 既定は <重みの置き場>/../../<run>/games。別の場所なら LIBRA_GAMES_DIR で渡す
   GAMES="${LIBRA_GAMES_DIR:-$(dirname "$(dirname "$SRC")")/${LIBRA_RUN_ID:-ls}/games}"
