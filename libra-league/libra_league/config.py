@@ -133,8 +133,10 @@ DEFAULTS: dict[str, Any] = {
              # match_go_opp にコンマを書くと段ごとに分けて測る（例 "nodes 1000, nodes 10000"）。段ごとに Elo の別の点になる
              # match_libra_standard: Libra 側が自己評価と同じ読み（eval_sims）で打つとき true。Elo の目盛りで同じ点として扱う
              "match_games": 10, "match_go": "movetime 1000", "match_go_opp": "", "match_opponent_opt": "Threads=2,Fuseki_Rules=2",
+             # match_use_best: 外部計測を「最強比が決めた最強の重み」で打つ（節目の新しい重みではなく）。
+             # ジョブを始めるときに決めるので、同じ節目の最強比の結果を待ってから決まる
              "match_libra_opt": "", "match_fuseki": "engine", "match_opponent": "", "match_opponent_cwd": "",
-             "match_libra_standard": False},
+             "match_libra_standard": False, "match_use_best": True},
     # 進捗の書き出し（libra_league/progress.py、docs/runbook.md §6）: 自動計測が動いた節目と heartbeat_minutes ごとに、
     # 数値の要約を repo の branch へ push する。~/libra-run の値をクラウドのセッションからも読めるようにするため（2026-09-18）。
     # repo が空ならこのチェックアウト。push には git の認証（gh の credential helper）が要る。

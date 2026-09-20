@@ -663,6 +663,8 @@ class AutoJobs:
         # 段ごとに Elo の別の点になるので、1 回の節目で釣り合う段を挟める（docs/runbook.md §7.0）
         levels = [s.strip() for s in str(self.acfg.get("match_go_opp", "")).split(",") if s.strip()] or [""]
         total = int(self.acfg.get("match_games", 10))
+        # 最強比を打たない run（best_games = 0）は「最強」が決まらないので、今までどおり節目の重みで打つ
+        use_best = bool(self.acfg.get("match_use_best", True)) and int(self.acfg.get("best_games", 0)) > 0
         seed = int(self.state.get("games_total") or 0)
         for k, go_opp in enumerate(levels):
             games = total // len(levels) + (1 if k < total % len(levels) else 0)
@@ -688,12 +690,35 @@ class AutoJobs:
             for kv in str(self.acfg.get("match_libra_opt", "")).split(","):
                 if kv.strip():
                     args += ["--libra-opt", kv.strip()]
+            job = {"kind": "match", "args": args, "out": str(out)}
             if ckpt is not None:
-                args += ["--ckpt", str(ckpt)]
-            self.state["auto"]["queue"].append({"kind": "match", "args": args, "out": str(out)})
+                if use_best:
+                    # どの重みで打つかはジョブを始めるときに決める（最強比の結果を待つ）。ckpt は控え
+                    job["ckpt_from_best"] = True
+                    job["ckpt"] = str(ckpt)
+                else:
+                    args += ["--ckpt", str(ckpt)]
+            self.state["auto"]["queue"].append(job)
         if ckpt is not None:
             self.snapshot_onnx(ckpt)
         self.log(f"auto: queued match x{len(levels)}" + (f" ({ckpt.name})" if ckpt is not None else ""))
+
+    def best_ckpt(self, fallback: str | None = None) -> str:
+        """外部計測で打つ重み: **最強比が決めた最強**（`state["auto"]["best"]`）。
+
+        ジョブを始めるときに呼ぶ。節目のジョブは 最強比 → 基準比 → 参照 → 外部計測 の順に待ち行列へ入るので、
+        この時点では最強比の結果が `record_best` で反映済みになる（2026-09-20 のユーザーの決定「Elo 測定の
+        結果を待ってから最強の Libra を決めたい」）。新しい世代が有意に勝てなかった節目では、前の最強で打つ。
+        `latest.onnx` は写さない（最強が前の世代なら中身が違う。隣に .onnx が無ければ match 側が .pt から書き出す）。
+        """
+        best = (self._st().get("best") or {}).get("file")
+        if best and Path(best).exists():
+            if fallback and str(Path(fallback)) != str(Path(best)):
+                self.log(f"auto: match plays with the best checkpoint {Path(best).name} (not {Path(fallback).name})")
+            return str(best)
+        if best:
+            self.log(f"auto: best checkpoint {best} is missing; match plays with {fallback}")
+        return str(fallback or "")
 
     def snapshot_onnx(self, ckpt: Path) -> Path | None:
         """この世代の推論用の重み（latest.onnx）を ckpt の隣に写す。ランナーはチェックポイントの直後に
@@ -741,6 +766,8 @@ class AutoJobs:
             return changed
         job = st["queue"].pop(0)
         job["started"] = time.time()
+        if job.get("ckpt_from_best"):
+            job["args"] = job["args"] + ["--ckpt", self.best_ckpt(job.get("ckpt"))]
         if job.get("reuse"):
             src = Path(job["reuse"])
             if src.exists():  # 同じ組の最強比の結果を写す（打たない）
