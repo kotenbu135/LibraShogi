@@ -302,3 +302,12 @@ decisions.md 2026-09-15 の同名の行。claude.ai の設計案の 1 行「分�
 - [dlshogi-WCSC29] 第29回世界コンピュータ将棋選手権 dlshogi アピール文章. https://www.apply.computer-shogi.org/wcsc29/appeal/dlshogi/dlshogi_appeal_wcsc29.pdf
 - [Oracle] Lessons From AlphaZero (part 4): Improving the Training Target. https://medium.com/oracledevs/lessons-from-alphazero-part-4-improving-the-training-target-6efba2e71628
 - [Willemsen22] Willemsen, Baier, Kaisers, Value targets in off-policy AlphaZero: a new greedy backup. https://research.tue.nl/en/publications/value-targets-in-off-policy-alphazero-a-new-greedy-backup/
+
+### 2.13 頭打ちの引き金（2026-09-20。ユーザーの依頼「どこで伸びが鈍った、と判断したらいいか検討」）
+
+| 項目 | 今の値・形 | 出所 | 文献・計測との対応 | 区分 |
+|---|---|---|---|---|
+| 「`rating --curve` の点が**続けて 2 つ以上**、目安の線（`fit_recent`）より下に落ち、95% 区間が線をまたがない」 | docs/release.md §0 の表。2026-09-20 に置いたまま | 自分の案（**出典なし**）。学習曲線の頭打ちを判定する標準的な手法は当たっていない（**未確認**） | 2026-09-20 に計算で効き目を数えた（`tools/plateau_trigger_power.py`、実データ 13 点＋節目 20 回を条件ごとに 400 回）: 誤報 3.5%／停止 100%（1 節目）／半減 96%（480 万局）／**25% の鈍りは 27% しか捕まえない**。v0.2 の判断に効くのは「1 Elo 約 8 円を払う価値があるか」なので、25% の鈍りは判断を変えないと見て**そのまま使う**と決めた | 裏取りあり（自分の計算。一次資料は未確認） |
+| 目安の線は `fit_recent`（最後の点から 4 回の倍化ぶん、最低 4 点） | `libra-league/libra_league/rating.py` の `RECENT_DOUBLINGS = 4` | 自分の案（**出典なし**） | 2026-09-19 の実データ 11 点で、全部の点に当てはめると傾き +140.1・残差 87.9 で最新の点が +62 上に出て「加速している」と誤読させた。この範囲なら +203.1・残差 21.3 で、40 万局以降どの節目で当てはめても 203〜213 に収まる | 裏取りあり（自分の計測） |
+| 自己評価の局数 `anchor_games`・`best_games` = 2,000（1,000 から） | `config/ls.toml`（2026-09-20） | 自分の計算（**出典なし**） | 1 点の 95% 区間が ±35 → ±25 Elo に縮み、25% の鈍りを捕まえる割合が **27% → 51%**。誤報は 3.2% で変わらない。余分な対局は節目あたり 2,000 局で 40 万局の 0.5%。**確かめる計測**: 320 万局の節目で目盛りの点の区間が ±25 Elo 前後に縮んでいるか | 裏取りあり（自分の計算） |
+| 節目を等比（総局数 1.25 倍ごと）にする案 | **却下**（40 万局ごとのまま） | 自分の案 | 25% の鈍りは 27% → 39% に上がるが、誤報が 3.5% → 5.8% に上がり、鳴る総局数はむしろ遅くなる（560 万 → 684 万局） | 裏取りあり（自分の計算） |

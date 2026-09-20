@@ -76,9 +76,11 @@ chain_eval = false
 eval_sims = 96
 eval_concurrent = 64
 eval_threads = 4
-anchor_games = 1000         # 100 → 1,000（幅 ±22 Elo）
+anchor_games = 2000         # 100 → 1,000 → 2,000（2026-09-20）。目盛りの 1 点の幅が ±35 → ±25 Elo に縮み、
+                            # 「伸びが 25% 落ちた」を捕まえる確率が 27% → 51% に上がる（同日の計算）。
+                            # 余分な対局は節目あたり 2,000 局で、40 万局に対して 0.5%
 anchor_rebaseline = 0.85
-best_games = 1000           # 最強比（新規）
+best_games = 2000           # 最強比。同上（1,000 → 2,000）
 best_stall_alert = 3
 # 固定の参照。80 万局の点で勝率が 80% を超えた参照は外す（縮んだ Elo で曲線を寝かせるだけで、
 # 過去の行は eval/reference.jsonl に残るので曲線は短くならない。docs/scaling-2026-09-18.md §6.4）。
