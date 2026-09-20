@@ -605,3 +605,48 @@ def test_enqueue_match_omits_the_handicap_settings_when_empty(tmp_path):
     AutoJobs(sd, cfg, state, lambda _m: None).enqueue_match()
     args = state["auto"]["queue"][0]["args"]
     assert "--go-opp" not in args and "--libra-opt" not in args
+
+
+def test_reference_with_a_tilde_path_still_rotates(tmp_path, monkeypatch):
+    """設定に `~/...` と書いた参照でも入れ替わる（2026-09-20 の回帰）。
+
+    ジョブには `expanduser()` した絶対パスを入れるのに、入れ替えの判定は設定の文字列と
+    そのまま比べていたため、`~` で書かれた参照は永久に一致せず、黙って見送られていた。
+    280 万局まで 1 度も入れ替わらなかった原因。"""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home" / "refs").mkdir(parents=True)
+    (tmp_path / "home" / "refs" / "old.pt").write_bytes(b"r")
+    sd, jobs, state = _anchor_jobs(tmp_path, anchor_games=0, reference_games=200,
+                                   reference_ckpts=["~/refs/old.pt"], reference_rotate=0.8)
+    _archive(sd, jobs, 2000, 1000.0, elo=-300.0, score=0.15)
+    new_ref = sd.root / "checkpoints" / "archive" / "ckpt_000002000.pt"
+    assert state["auto"]["references"] == [str(new_ref)]
+    assert state["auto"]["references_retired"] == ["~/refs/old.pt"]
+    assert jobs.active_references() == [str(new_ref)]
+
+
+def test_reference_removed_from_the_config_stops_being_used(tmp_path):
+    """設定が正。`config/<run-id>.toml` から参照を消せば、その場で打たなくなる。"""
+    (tmp_path / "refs").mkdir()
+    a, b = tmp_path / "refs" / "a.pt", tmp_path / "refs" / "b.pt"
+    a.write_bytes(b"a"); b.write_bytes(b"b")
+    sd, jobs, state = _anchor_jobs(tmp_path, anchor_games=0, reference_games=200,
+                                   reference_ckpts=[str(a), str(b)], reference_rotate=0.0)
+    assert jobs.active_references() == [str(a), str(b)]
+    jobs.acfg["reference_ckpts"] = [str(b)]
+    assert jobs.active_references() == [str(b)]
+    assert state["auto"]["references"] == [str(b)]
+
+
+def test_rotation_says_why_it_skipped(tmp_path, capsys):
+    """見送るときは必ず理由を log に出す（外から原因が分かるように）。"""
+    (tmp_path / "refs").mkdir()
+    old = tmp_path / "refs" / "old.pt"
+    old.write_bytes(b"r")
+    sd, jobs, state = _anchor_jobs(tmp_path, anchor_games=0, reference_games=200,
+                                   reference_ckpts=[str(old)], reference_rotate=0.8)
+    jobs.rotate_references(str(tmp_path / "refs" / "knowhere.pt"), 2000, 0.9)
+    jobs.rotate_references(str(old), 999999, 0.9)
+    log = capsys.readouterr().out
+    assert "今の参照に入っていない" in log
+    assert "置き換える archive が無い" in log

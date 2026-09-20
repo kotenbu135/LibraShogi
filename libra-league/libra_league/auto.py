@@ -277,7 +277,7 @@ class AutoJobs:
         st = self.state.setdefault("auto", {})
         for k, v in (("last_archive", None), ("last_match", None), ("queue", []), ("history", []), ("running", None), ("anchor", None),
                      ("best", None), ("best_stall", 0), ("last_archive_games", None), ("last_match_games", None),
-                     ("references", []), ("references_retired", []), ("references_seeded", False)):
+                     ("references", []), ("references_retired", []), ("references_added", [])):
             st.setdefault(k, v)
         return st
 
@@ -425,20 +425,32 @@ class AutoJobs:
             self.log(f"auto: WARNING best not updated for {row['stall']} evals (best step {best.get('step')}); docs/restart-plan.md §3 M2 の見直し")
 
     # -- 固定の参照（reference、同 §3 M4）: run をまたいで同じ相手と打ち、絶対の物差しにする --
+    @staticmethod
+    def _ref_key(ref: str) -> str:
+        """参照の同一性。`~` と相対と絶対が混ざっても同じ重みを同じものとして数える
+        （2026-09-20: 入れ替えが動かなかったとき、文字列のまま比べていたのが疑いの 1 つだった）。"""
+        try:
+            return str(Path(str(ref)).expanduser().resolve())
+        except (OSError, RuntimeError):
+            return str(ref)
+
     def active_references(self) -> list[str]:
-        """今の参照。設定の `reference_ckpts` を種にして state に持ち、勝ちすぎた参照を入れ替えていく
-        （docs/runbook.md §6。手で config を直さなくても物差しが天井に着かないようにする）。"""
+        """今の参照 ＝（設定の `reference_ckpts` ＋ 入れ替えで足したもの）− 外したもの。
+
+        設定をそのつど読み直すので、`config/<run-id>.toml` から参照を消せばその場で止まる（設定が正）。
+        自動で外したものは設定に残っていても戻さない（docs/runbook.md §6）。"""
         st = self._st()
-        act = [str(x) for x in (st.get("references") or [])]
-        retired = [str(x) for x in (st.get("references_retired") or [])]
-        seeded = bool(st.get("references_seeded"))
-        for ref in [str(x) for x in (self.acfg.get("reference_ckpts") or []) if str(x).strip()]:
-            # 設定に新しく足された参照だけ取り込む（自動で外したものを設定が書き戻さないように）
-            if ref not in act and (ref not in retired or not seeded):
-                act.append(ref)
+        retired = {self._ref_key(x) for x in (st.get("references_retired") or [])}
+        added = [str(x) for x in (st.get("references_added") or [])]
+        act, seen = [], set()
+        for ref in [str(x) for x in (self.acfg.get("reference_ckpts") or []) if str(x).strip()] + added:
+            k = self._ref_key(ref)
+            if k in retired or k in seen:
+                continue
+            seen.add(k)
+            act.append(ref)
         st["references"] = act
-        st["references_retired"] = retired
-        st["references_seeded"] = True
+        st["references_added"] = added
         return act
 
     def rotate_references(self, ref_path: str, step: int | None, score_new: float | None) -> None:
@@ -447,31 +459,44 @@ class AutoJobs:
         新しい参照をこの run 自身の archive にするのは、足した時点では自分自身（＝互角）なので、
         古い参照が既に天井に着いていても目盛りが必ずつながるため（docs/scaling-2026-09-18.md §6.5）。"""
         thr = float(self.acfg.get("reference_rotate", 0.0) or 0.0)
-        if thr <= 0 or score_new is None or float(score_new) <= thr or step is None:
+        if score_new is None or step is None:
             return
+        name = Path(ref_path).name or ref_path
+        if thr <= 0:
+            return
+        if float(score_new) <= thr:
+            return
+        # ここから先は「入れ替えるべき」ところ。見送るときは必ず理由を log に出す
+        # （2026-09-20: 280 万局まで 1 度も入れ替わらず、published の情報だけでは理由が分からなかったため）
         st = self._st()
         act = self.active_references()
-        if ref_path not in act:
+        keys = {self._ref_key(x): x for x in act}
+        if self._ref_key(ref_path) not in keys:
+            self.log(f"auto: reference {name} は得点 {score_new} > {thr} だが、今の参照に入っていないので入れ替えない"
+                     f"（今の参照: {[Path(x).name for x in act]}）")
             return
-        new_ref = self.sd.root / "checkpoints" / "archive" / f"ckpt_{int(step):09d}.pt"
+        entry = keys[self._ref_key(ref_path)]
+        new_ref = archive_dir(self.sd) / f"ckpt_{int(step):09d}.pt"
         if not new_ref.exists():
-            self.log(f"auto: reference {Path(ref_path).name} は得点 {score_new} だが、置き換える archive が無い（{new_ref.name}）")
+            self.log(f"auto: reference {name} は得点 {score_new} > {thr} だが、置き換える archive が無い（{new_ref}）")
             return
-        if str(new_ref) in act:
-            keep_min = max(int(self.acfg.get("reference_min", 1)), 1)
-            if len(act) <= keep_min:
-                return
-            act.remove(ref_path)
-            st["references_retired"] = [*st.get("references_retired", []), ref_path]
-            self.log(f"auto: reference {Path(ref_path).name} を外した（得点 {score_new} > {thr}。代わりは既にある）")
+        keep_min = max(int(self.acfg.get("reference_min", 1)), 1)
+        already = self._ref_key(str(new_ref)) in keys
+        if already and len(act) <= keep_min:
+            self.log(f"auto: reference {name} は得点 {score_new} > {thr} だが、参照が {keep_min} 個までなので残す")
             return
-        act[act.index(ref_path)] = str(new_ref)
-        st["references_retired"] = [*st.get("references_retired", []), ref_path]
-        st["references"] = act
-        self.log(f"auto: reference {Path(ref_path).name}（得点 {score_new} > {thr}）を {new_ref.name} に入れ替えた")
+        st["references_retired"] = [*st.get("references_retired", []), entry]
+        if already:
+            self.log(f"auto: reference {name} を外した（得点 {score_new} > {thr}。代わりの {new_ref.name} は既にある）")
+            new_name = new_ref.name
+        else:
+            st["references_added"] = [*st.get("references_added", []), str(new_ref)]
+            self.log(f"auto: reference {name}（得点 {score_new} > {thr}）を {new_ref.name} に入れ替えた")
+            new_name = new_ref.name
+        self.active_references()            # state の `references` を今の中身に直す
         with open(self.sd.root / "eval" / "references.jsonl", "a", encoding="utf-8") as f:
-            f.write(json.dumps({"t": time.time(), "step": int(step), "out": Path(ref_path).name,
-                                "in": new_ref.name, "score_new": float(score_new), "threshold": thr},
+            f.write(json.dumps({"t": time.time(), "step": int(step), "out": name,
+                                "in": new_name, "score_new": float(score_new), "threshold": thr},
                                ensure_ascii=False) + "\n")
 
     def enqueue_references(self, new: Path) -> None:
