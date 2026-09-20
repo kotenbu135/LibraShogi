@@ -1528,13 +1528,15 @@ function Format-Vast-Waste($w) {
           [int]$w.interruptions, [double]$w.bridge_h, [double]$w.h_per_loss, [int]$w.relaunches, [int]$w.not_relaunched,
           (Fmt-Num $w.extra_setup_usd "N2" '$'), [double]$w.lost_h, [double]$w.lost_games
     $l2 = if ($null -ne $w.usd_per_1m -and $null -ne $w.usd_per_1m_ideal) {
-        "  100 万局あたり {0}（打ち切りが無ければ {1}、+{2:N1}%）" -f (Fmt-Num $w.usd_per_1m "N2" '$'), (Fmt-Num $w.usd_per_1m_ideal "N2" '$'), [double]$w.waste_pct
+        ("  お金の損: 100 万局あたり {0}（打ち切りが無ければ {1}、+{2:N1}%）" -f (Fmt-Num $w.usd_per_1m "N2" '$'), (Fmt-Num $w.usd_per_1m_ideal "N2" '$'), [double]$w.waste_pct) +
+        $(if ($null -ne $w.lost_time_pct) { "　時間の損: {0:N1}%（止まっている間は課金されないので費用には出ないが、局/日には効く）" -f [double]$w.lost_time_pct } else { "" })
     } else { "" }
     $parts = @()
     foreach ($g in @($w.by_rent)) {
         $parts += "{0} {1} 回・打ち切り {2} 回{3}{4}" -f $g.name, [int]$g.sessions, [int]$g.lost,
                   $(if ($null -ne $g.h_per_loss) { "（{0:N1} h に 1 回）" -f [double]$g.h_per_loss } else { "" }),
-                  $(if ($null -ne $g.usd_per_1m) { "・100 万局あたり " + (Fmt-Num $g.usd_per_1m "N2" '$') } else { "" })
+                  ($(if ($null -ne $g.usd_per_1m) { "・100 万局あたり " + (Fmt-Num $g.usd_per_1m "N2" '$') } else { "" }) +
+                   $(if ($null -ne $g.lost_time_pct) { "・時間の損 {0:N1}%" -f [double]$g.lost_time_pct } else { "" }))
     }
     if ($parts.Count -gt 0) { $l2 = ($l2 + "　借り方: " + ($parts -join "、")).TrimStart() }
     return (@($l1, $l2) | Where-Object { $_ }) -join "`r`n"

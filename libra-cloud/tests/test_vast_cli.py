@@ -403,7 +403,7 @@ def test_history_counts_what_each_interruption_cost(tmp_path: Path, capsys):
     assert w["interruptions"] == 1 and w["relaunches"] == 1 and w["not_relaunched"] == 0
     assert w["h_per_loss"] == w["bridge_h"] and w["extra_setup_usd"] == 0.04
     assert w["usd_per_1m"] > w["usd_per_1m_ideal"] and w["waste_pct"] > 0
-    assert [g["name"] for g in w["by_rent"]] == ["bid"] and w["by_rent"][0]["lost"] == 1
+    assert [g["name"] for g in w["by_rent"]] == ["入札"] and w["by_rent"][0]["lost"] == 1
     assert vast_cli.main(["--root", str(root), "history", "--run-root", str(tmp_path / "runs")]) == 0
     out = capsys.readouterr().out
     assert "打ち切り 1 回" in out and "借り直せず 0 回" in out and "打ち切りが無ければ" in out

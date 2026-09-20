@@ -11,16 +11,16 @@ H = 3600.0
 
 
 def _rows() -> list[dict]:
-    a = {"name": "A", "rent": "入札", "gpu": "RTX 5070 Ti", "lost": True, "continues": None, "hours": 3.0, "dph": 0.25,
+    a = {"name": "A", "rent": "bid", "gpu": "RTX 5070 Ti", "lost": True, "continues": None, "hours": 3.0, "dph": 0.25,
          "t_rent": 0.0, "t_bridge": 600.0, "last_pull": 600.0 + 1.25 * H, "t_end": 600.0 + 1.25 * H + 180,
          "bridge_h": 1.25, "games_per_day": RATE, "net_games": 24_000, "total_usd": 0.35}
-    b = {"name": "B", "rent": "入札", "gpu": "RTX 5070 Ti", "lost": False, "continues": "A", "hours": 1.8, "dph": 0.25,
+    b = {"name": "B", "rent": "bid", "gpu": "RTX 5070 Ti", "lost": False, "continues": "A", "hours": 1.8, "dph": 0.25,
          "t_rent": a["t_end"], "t_bridge": 6000.0, "t_end": 6000.0 + 1.8 * H, "last_pull": 6000.0 + 1.8 * H,
          "bridge_h": 1.8, "games_per_day": RATE, "net_games": 36_000, "total_usd": 0.52}
     c = {"name": "C", "rent": "on-demand", "gpu": "RTX 5080", "lost": False, "continues": None, "hours": 2.0, "dph": 0.30,
          "t_rent": 20_000.0, "t_bridge": 20_360.0, "t_end": 20_360.0 + 2 * H, "last_pull": 20_360.0 + 2 * H,
          "bridge_h": 2.0, "games_per_day": RATE, "net_games": 40_000, "total_usd": 0.60}
-    d = {"name": "D", "rent": "入札", "gpu": "RTX 5070 Ti", "lost": True, "continues": None, "hours": 3.0, "dph": 0.25,
+    d = {"name": "D", "rent": "bid", "gpu": "RTX 5070 Ti", "lost": True, "continues": None, "hours": 3.0, "dph": 0.25,
          "t_rent": 40_000.0, "t_bridge": 40_600.0, "last_pull": 40_600.0 + 0.5 * H - 120, "t_end": 40_600.0 + 0.5 * H,
          "bridge_h": 0.5, "games_per_day": RATE, "net_games": 10_000, "total_usd": 0.20}
     return [a, b, c, d]
@@ -50,6 +50,8 @@ def test_summary_shows_how_much_the_interruptions_cost():
     assert w["sessions"] == 4 and w["interruptions"] == 2 and w["relaunches"] == 1 and w["not_relaunched"] == 1
     assert w["bridge_h"] == 5.55 and w["h_per_loss"] == 2.77  # 平均 2.8 時間打つと 1 回止められる
     assert w["lost_h"] == 2.78 and w["unused_h"] == 2.5 and w["lost_games"] == 55_660
+    # 時間の損は費用とは別。止まっている間は課金されないので、お金には出ないが局/日には効く
+    assert w["lost_time_pct"] == 33.4  # 2.78 / (5.55 + 2.78)
     assert w["extra_setup_usd"] == 0.05 and w["net_games"] == 110_000 and w["total_usd"] == 1.67
     # 打ち切りが無ければ、同じ 1.67 ドルから余分な準備代を引いた額で 16.6 万局打てていた
     assert w["usd_per_1m"] == 15.18 and w["usd_per_1m_ideal"] == 9.78 and w["waste_pct"] == 55.2
@@ -58,9 +60,12 @@ def test_summary_shows_how_much_the_interruptions_cost():
 def test_summary_compares_bids_with_on_demand():
     w = interrupts.summary(interrupts.annotate(_rows()))
     bid, od = w["by_rent"]
+    # session.json の "bid" はコンソールの「借り方」と同じ「入札」で出す
     assert bid["name"] == "入札" and bid["sessions"] == 3 and bid["lost"] == 2 and bid["h_per_loss"] == 1.77
     assert bid["dph"] == 0.25 and bid["usd_per_1m"] == 15.29 and bid["usd_per_1m_ideal"] == 8.12
+    assert bid["lost_h"] == 2.78 and bid["lost_time_pct"] == 43.9  # 入札だけで見ると経過時間の 4 割は打てていない
     assert od["name"] == "on-demand" and od["sessions"] == 1 and od["lost"] == 0 and od["h_per_loss"] is None
+    assert od["lost_h"] == 0.0 and od["lost_time_pct"] == 0.0
     assert od["usd_per_1m"] == 15.0 and od["usd_per_1m_ideal"] == 15.0 and od["waste_pct"] == 0.0
     assert [g["name"] for g in w["by_gpu"]] == ["RTX 5070 Ti", "RTX 5080"]
 

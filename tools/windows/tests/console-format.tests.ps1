@@ -212,14 +212,14 @@ Check "自動計測（総局数がまだ無い）" (Format-Auto-Status ([pscusto
 $w = [pscustomobject]@{
     sessions = 4; bridge_h = 5.55; interruptions = 2; relaunches = 1; not_relaunched = 1; h_per_loss = 2.77
     lost_h = 2.78; unused_h = 2.5; lost_games = 55660; extra_setup_usd = 0.05; net_games = 110000; total_usd = 1.67
-    usd_per_1m = 15.18; usd_per_1m_ideal = 9.78; waste_pct = 55.2
-    by_rent = @([pscustomobject]@{ name = "入札"; sessions = 3; bridge_h = 3.55; lost = 2; h_per_loss = 1.77; usd_per_1m = 15.29; usd_per_1m_ideal = 8.12 },
-                [pscustomobject]@{ name = "on-demand"; sessions = 3; bridge_h = 6.0; lost = 0; h_per_loss = $null; usd_per_1m = 13.0; usd_per_1m_ideal = 13.0 })
+    usd_per_1m = 15.18; usd_per_1m_ideal = 9.78; waste_pct = 55.2; lost_time_pct = 33.4
+    by_rent = @([pscustomobject]@{ name = "入札"; sessions = 3; bridge_h = 3.55; lost = 2; h_per_loss = 1.77; usd_per_1m = 15.29; usd_per_1m_ideal = 8.12; lost_time_pct = 43.9 },
+                [pscustomobject]@{ name = "on-demand"; sessions = 3; bridge_h = 6.0; lost = 0; h_per_loss = $null; usd_per_1m = 13.0; usd_per_1m_ideal = 13.0; lost_time_pct = 0.0 })
 }
 Check "打ち切り（要約 1 行目）" ((Format-Vast-Waste $w) -split "`r`n")[0] `
     "打ち切り 2 回（打った 5.5 時間、平均 2.8 時間に 1 回。借り直し 1 回、借り直せず 1 回）: 余分な準備代 `$0.05 ＋ 打てなかった 2.8 時間 = 約 55,660 局"
-Check "打ち切り（要約 2 行目）" ((Format-Vast-Waste $w) -split "`r`n")[1] `
-    "100 万局あたり `$15.18（打ち切りが無ければ `$9.78、+55.2%）　借り方: 入札 3 回・打ち切り 2 回（1.8 h に 1 回）・100 万局あたり `$15.29、on-demand 3 回・打ち切り 0 回・100 万局あたり `$13.00"
+Check "打ち切り（要約 2 行目。お金の損と時間の損は別もの）" ((Format-Vast-Waste $w) -split "`r`n")[1] `
+    "お金の損: 100 万局あたり `$15.18（打ち切りが無ければ `$9.78、+55.2%）　時間の損: 33.4%（止まっている間は課金されないので費用には出ないが、局/日には効く）　借り方: 入札 3 回・打ち切り 2 回（1.8 h に 1 回）・100 万局あたり `$15.29・時間の損 43.9%、on-demand 3 回・打ち切り 0 回・100 万局あたり `$13.00・時間の損 0.0%"
 Check "打ち切り（0 回）" (Format-Vast-Waste ([pscustomobject]@{ interruptions = 0; bridge_h = 12.5 })) `
     "打ち切り 0 回（打った 12.5 時間）。入札で止められた回はまだありません"
 Check "打ち切り（読めていない）" (Format-Vast-Waste $null) ""
