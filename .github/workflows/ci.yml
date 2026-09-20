@@ -8,18 +8,30 @@ on:
   pull_request:
     paths-ignore: ["docs/**", "**.md", "LICENSES/**", "NOTICE"]
 
+# 同じブランチに続けて push したとき、古い実行を打ち切る（結果を誰も見ない実行でランナーを埋めない）。
+# main は打ち切らない（push 後に緑を確かめる運用のため。CLAUDE.md 作業の進め方 1）
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   linux:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      # pip が落とした車輪を使い回す（毎回 torch を落とすと 30 秒ほどかかる）
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-py312-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: pip-${{ runner.os }}-py312-
       - name: Install build tools
         run: |
-          python -m pip install --upgrade pip cmake ninja pybind11 pytest numpy onnx onnxruntime
+          python -m pip install --upgrade pip cmake ninja pybind11 pytest pytest-xdist numpy onnx onnxruntime
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Fetch ONNX Runtime (CPU, MIT; hash pinned in tools/fetch_onnxruntime.sh)
         run: tools/fetch_onnxruntime.sh linux-cpu
@@ -33,17 +45,24 @@ jobs:
         run: |
           ctest --test-dir build/libra-sim --output-on-failure
           ctest --test-dir build/libra-search --output-on-failure
+      # ランナーは 4 コア。テスト自身がスレッドを持つ（自己対局の threads=4/8、torch の行列積）ので、
+      # 素直に 4 並列にするとコアの取り合いで逆に遅くなる（実測 283 秒 → 496 秒）。
+      # 2 並列にして torch 側のスレッドを 1 本に固定した組み合わせがいちばん速い（docs/measurements.md 2026-09-20）。
+      # --dist loadscope はファイル単位で割り当てる（テストどうしが同じ場所を使っても混ざらない）。
+      # 手元で回すときは docs/getting-started.md §3 のとおり並列なしでよい（コアが多く、学習と取り合うため）
       - name: Python tests
         env:
           PYTHONPATH: libra-sim/python:libra-search/python:libra-net:libra-league:libra-scale:libra-cloud
-        run: python -m pytest -q libra-sim/tests/test_python.py libra-league/tests libra-net/tests libra-engine/tests libra-scale/tests libra-search/tests/test_external.py libra-search/tests/test_selfplay_threads.py libra-search/tests/test_selfplay_resign.py libra-cloud/tests
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+        run: python -m pytest -q -n 2 --dist loadscope libra-sim/tests/test_python.py libra-league/tests libra-net/tests libra-engine/tests libra-scale/tests libra-search/tests/test_external.py libra-search/tests/test_selfplay_threads.py libra-search/tests/test_selfplay_resign.py libra-cloud/tests
 
   console:
     # 管理コンソール（tools/windows/libra-console.ps1）の Elo の文言。ubuntu-latest には pwsh が入っている
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Console format tests (PowerShell)
         run: pwsh -NoProfile -File tools/windows/tests/console-format.tests.ps1
 
@@ -51,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install mingw-w64
         run: |
           sudo apt-get update

@@ -13,6 +13,7 @@ GPL 系のコードは一行も入れない（docs/libra-design.md §7.3〜7.4�
 | 自己対局データ・玉配置表（棋譜 JSONL、`scale.json`） | CC0 1.0 | — | `CC0-1.0.txt` | 全文は https://creativecommons.org/publicdomain/zero/1.0/legalcode.txt から取得（2026-09-16、SHA-256 `a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499`） |
 | pybind11 | BSD-3-Clause | libra-sim の Python バインディング | （追加時に置く） | |
 | pytest | MIT | テスト | （追加時に置く） | 配布物に含めない |
+| pytest-xdist | MIT | CI のテストを 2 並列で回す | （追加時に置く） | 配布物に含めない。CI だけで使う |
 | ONNX Runtime 1.30.0 | MIT | libra / libra.exe の推論（C API を実行時にロード。`tools/fetch_onnxruntime.sh` で公式バイナリを取得、SHA-256 固定） | `onnxruntime-MIT.txt` | Linux 版と、Windows で NVIDIA の GPU 向けに差し替える CUDA 版の DLL。CUDA・cuDNN は同梱しない |
 | ONNX Runtime 1.24.4 DirectML 版（NuGet `Microsoft.ML.OnnxRuntime.DirectML`） | MIT | Windows 配布物の推論（`tools/fetch_onnxruntime.sh win-dml`、SHA-256 固定） | `onnxruntime-MIT.txt` | 配布物に `onnxruntime.dll`・`onnxruntime_providers_shared.dll` を同梱する。同梱物に NuGet の ThirdPartyNotices を添える |
 | DirectML 1.15.4（NuGet `Microsoft.AI.DirectML`） | Microsoft Software License Terms（再配布可。Windows 向けのアプリの一部として配る。単体配布・リバースエンジニアリング・表示の削除は不可。テレメトリの条項あり） | Windows 配布物の DirectML EP | `DirectML-MSLT.txt` | 配布物に `DirectML.dll` を同梱する（`DirectML.Debug.dll` は配らない）。同梱物にこの全文と NuGet の ThirdPartyNotices を添える |
