@@ -693,3 +693,68 @@ def test_enqueue_match_keeps_one_job_when_there_is_one_level(tmp_path):
     assert len(q) == 1 and q[0]["args"][:3] == ["match", "--games", "40"]
     assert "--fuseki" not in q[0]["args"] and "--libra-standard" not in q[0]["args"]
     assert q[0]["out"].endswith(".jsonl") and "-1.jsonl" not in q[0]["out"]
+
+
+def test_match_plays_with_the_best_checkpoint_decided_after_the_elo_eval(tmp_path):
+    """外部計測は「最強比が決めた最強の重み」で打つ。どれで打つかは**ジョブを始めるときに**決めるので、
+    同じ節目の最強比の結果を待ってから決まる（2026-09-20 のユーザーの決定「Elo 測定が 40 万局ごとに
+    自動起動するので、その結果を待ってから最強の Libra を決めたい」）。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    cfg = load_config(None)
+    cfg["auto"].update({"enabled": True, "every_games": 1000, "match_games": 2, "match_use_best": True, "best_games": 1000})
+    state: dict = {}
+    jobs = AutoJobs(sd, cfg, state, lambda _m: None)
+    new = sd.checkpoints / "archive" / "ckpt_000246009.pt"
+    old = sd.checkpoints / "archive" / "ckpt_000210020.pt"
+    new.parent.mkdir(parents=True, exist_ok=True)
+    new.write_bytes(b"pt")
+    old.write_bytes(b"pt")
+    jobs.enqueue_match(new)
+    job = state["auto"]["queue"][0]
+    assert "--ckpt" not in job["args"] and job["ckpt_from_best"] and job["ckpt"] == str(new)
+    # 最強比が「前の世代のまま」と決めたら、外部計測もその重みで打つ
+    state["auto"]["best"] = {"file": str(old), "step": 210020}
+    assert jobs.best_ckpt(job["ckpt"]) == str(old)
+    # 新しい世代が最強になったらそちら
+    state["auto"]["best"] = {"file": str(new), "step": 246009}
+    assert jobs.best_ckpt(job["ckpt"]) == str(new)
+    # 最強の重みが消えていたら節目の重みで打つ（計測を落とさない）
+    state["auto"]["best"] = {"file": str(sd.checkpoints / "archive" / "gone.pt"), "step": 1}
+    assert jobs.best_ckpt(job["ckpt"]) == str(new)
+
+
+def test_match_can_still_be_pinned_to_the_milestone_checkpoint(tmp_path):
+    """match_use_best を false にすれば今までどおり節目の重みで打つ。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    cfg = load_config(None)
+    cfg["auto"].update({"enabled": True, "every_games": 1000, "match_games": 2, "match_use_best": False, "best_games": 1000})
+    state: dict = {}
+    ck = sd.checkpoints / "ckpt_000246009.pt"
+    ck.write_bytes(b"pt")
+    AutoJobs(sd, cfg, state, lambda _m: None).enqueue_match(ck)
+    job = state["auto"]["queue"][0]
+    assert job["args"][job["args"].index("--ckpt") + 1] == str(ck) and "ckpt_from_best" not in job
+
+
+def test_the_elo_eval_is_queued_before_the_external_match(tmp_path):
+    """同じ節目では 最強比 → … → 外部計測 の順に待ち行列へ入る。待ち行列は先入れ先出しなので、
+    外部計測が始まるときには最強比の結果が出ている（＝どの重みが最強か決まっている）。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    cfg = load_config(None)
+    cfg["auto"].update({"enabled": True, "every_games": 400000, "match_games": 2, "best_games": 1000,
+                        "anchor_games": 0, "chain_eval": False, "reference_ckpts": []})
+    state: dict = {"games_total": 2800000}
+    jobs = AutoJobs(sd, cfg, state, lambda _m: None)
+    first = sd.checkpoints / "ckpt_000210020.pt"
+    first.write_bytes(b"pt")
+    jobs.on_checkpoint(first, now=1000.0)          # 最初の節目: ここが最強になる（対局は無し）
+    assert state["auto"]["best"]["step"] == 210020
+    state["auto"]["queue"].clear()
+    state["games_total"] = 3200000
+    second = sd.checkpoints / "ckpt_000246009.pt"
+    second.write_bytes(b"pt")
+    jobs.on_checkpoint(second, now=2000.0)
+    assert [j["kind"] for j in state["auto"]["queue"]] == ["best", "match"]

@@ -105,7 +105,7 @@ def snapshot(sd: StateDir, cfg: dict | None = None, points: int = 120, now: floa
                                               "best_games", "reference_games", "reference_ckpts", "reference_rotate",
                                               "reference_min", "match_games",
                                               "match_go", "match_go_opp", "match_opponent_opt", "match_libra_opt",
-                                              "match_fuseki", "match_opponent", "match_libra_standard")},
+                                              "match_fuseki", "match_opponent", "match_libra_standard", "match_use_best")},
         "best": collect_best(sd),
         "anchor": collect_anchor(sd),
         "reference": collect_reference(sd),
