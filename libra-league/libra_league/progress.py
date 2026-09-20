@@ -104,7 +104,8 @@ def snapshot(sd: StateDir, cfg: dict | None = None, points: int = 120, now: floa
         "auto_cfg": {k: acfg.get(k) for k in ("enabled", "every_games", "eval_games", "eval_sims", "anchor_games",
                                               "best_games", "reference_games", "reference_ckpts", "reference_rotate",
                                               "reference_min", "match_games",
-                                              "match_go", "match_go_opp", "match_opponent_opt", "match_libra_opt")},
+                                              "match_go", "match_go_opp", "match_opponent_opt", "match_libra_opt",
+                                              "match_fuseki", "match_opponent", "match_libra_standard")},
         "best": collect_best(sd),
         "anchor": collect_anchor(sd),
         "reference": collect_reference(sd),
@@ -167,11 +168,13 @@ def format_md(s: dict) -> str:
         L.append(f"| 基準比（直近） | step {_fmt(r.get('step'))}: 累積 {_fmt(r.get('elo'), plus=True)} Elo 区間 {r.get('ci95')}（{_fmt(r.get('n'))} 局） |")
     for r in (s.get("reference") or [])[-4:]:
         L.append(f"| 参照 {r.get('ref')} | step {_fmt(r.get('step'))}: {_fmt(r.get('elo'), plus=True)} Elo 区間 {r.get('ci95')}（勝ち {_fmt((r.get('score_new') or 0) * 100, 0)}%、{_fmt(r.get('n'))} 局） |")
-    for m in (s.get("matches") or [])[-3:]:
+    for m in (s.get("matches") or [])[-6:]:   # 段に分けた節目は 1 回で何行にもなる
         wr = m.get("winrate")
         go = str(m.get("go"))
         if m.get("go_opp") and m.get("go_opp") != m.get("go"):
-            go += f" / 相手 {m.get('go_opp')}"   # 読む量にハンデを付けた計測
+            go += f" / 相手 {m.get('go_opp')}"   # 相手と読む量が違う（段・ハンデ）
+        if (m.get("fuseki") or "engine") != "engine":
+            go += "、布石は Libra 同士"
         L.append(f"| 外部計測 {m.get('opponent')} | step {_fmt(m.get('libra_step'))}: 得点 {_fmt(wr, 3)}（{_fmt(m.get('n'))} 局、{go}） |")
     sc = s.get("scaling") or {}
     curve = (sc.get("curve") or {}).get("fit")

@@ -49,7 +49,9 @@ def node_step(name: str) -> int | None:
 
 # 外部計測の条件のうち、強さを変えないもの（点の名前に入れない）。
 # Fuseki_Rules はルールの版で、違えば計測そのものが無効になるので強さの軸には入れない
-_OPP_SIG_SKIP = {"Fuseki_Rules"}
+# 相手の点の名前に入れない設定: ルールの合わせ込みと定跡の停止（強さの段を決めるものではない）。
+# USI_Hash も入れない（読む節点数を固定しているので効き目が小さく、こちらは一定に保つ）
+_OPP_SIG_SKIP = {"Fuseki_Rules", "BookFile", "USI_OwnBook", "EnteringKingRule", "USI_Hash", "MaxMovesToDraw"}
 _LIBRA_SIG_SKIP = {"DNN_Model", "DNN_Provider", "Declare_Win", "USI_Ponder", "Scale_Table"}
 
 
@@ -68,6 +70,11 @@ def match_nodes(m: dict) -> tuple[str | None, str]:
     のまま 1 点にまとめると、強さの違う相手が混ざって目盛りが狂う。Libra 側に読む量のハンデを付けたときも
     同じで、ハンデ付きは別の点にする（そのままだと全読みの自分と同じ点に混ざる）。
     条件を記録していない古い結果は、今までどおり素の名前にする（点が分かれて鎖が切れないように）。
+
+    `libra_standard` が真の結果は、Libra 側が自己評価と同じ読み（`eval_sims`）で打ったという申告なので、
+    `go` が相手と違っていても素の `step N` の点にする。**これが無いと外部計測は目盛りから落ちる**:
+    Libra 側が別の点になると「その点と相手」だけで閉じた塊になり、強連結の条件で丸ごと外れる
+    （2026-09-19〜20 のハンデ付きの計測が実際にそうなっていた。docs/decisions.md 2026-09-20）。
     """
     opp = str(m.get("opponent") or "外部の相手")
     go_libra, go_opp = m.get("go"), m.get("go_opp") or m.get("go")
@@ -75,7 +82,8 @@ def match_nodes(m: dict) -> tuple[str | None, str]:
     if osig:
         opp = f"{opp} [{osig}]"
     node = step_node(m.get("libra_step"))
-    lsig = _sig(m.get("libra_opt"), go_libra if go_libra != go_opp else None, _LIBRA_SIG_SKIP)
+    lsig = _sig(m.get("libra_opt") if not m.get("libra_standard") else None,
+                go_libra if go_libra != go_opp and not m.get("libra_standard") else None, _LIBRA_SIG_SKIP)
     if node is not None and lsig:
         node = f"{node} [{lsig}]"
     return node, opp

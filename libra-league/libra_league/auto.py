@@ -242,6 +242,7 @@ def collect_matches(sd: StateDir) -> list[dict]:
             "opponent_opt": r.get("opponent_options") or {},
             "libra_opt": {k: v for k, v in (r.get("libra_options") or {}).items() if k != "DNN_Model"},
             "libra_step": ckpt_step(str((r.get("libra_options") or {}).get("DNN_Model", ""))),
+            "fuseki": r.get("fuseki") or "engine", "libra_standard": bool(r.get("libra_standard")),
             "auto": p.name.startswith("auto-"),
         })
     out.sort(key=lambda m: m["time"])
@@ -658,22 +659,41 @@ class AutoJobs:
         """外部エンジンとの計測を積む。ckpt を渡すとその重みで打つ（渡さないと latest.onnx = 中身が動く別名になり、
         計測待ちの間に世代が変わって時系列の比較にならない。docs/restart-plan.md §7 P2）。"""
         ts = time.strftime("%Y%m%d-%H%M%S")
-        out = self.sd.root / "matches" / f"auto-{ts}.jsonl"
-        args = ["match", "--games", str(self.acfg.get("match_games", 10)), "--go", str(self.acfg.get("match_go", "movetime 1000")), "--out", str(out)]
-        go_opp = str(self.acfg.get("match_go_opp", "")).strip()
-        if go_opp:
-            args += ["--go-opp", go_opp]
-        for kv in str(self.acfg.get("match_opponent_opt", "")).split(","):
-            if kv.strip():
-                args += ["--opponent-opt", kv.strip()]
-        for kv in str(self.acfg.get("match_libra_opt", "")).split(","):
-            if kv.strip():
-                args += ["--libra-opt", kv.strip()]
+        # 相手の読む量を段で分けるとき（match_go_opp のコンマ区切り）は、段ごとに 1 ジョブ・局数を等分する。
+        # 段ごとに Elo の別の点になるので、1 回の節目で釣り合う段を挟める（docs/runbook.md §7.0）
+        levels = [s.strip() for s in str(self.acfg.get("match_go_opp", "")).split(",") if s.strip()] or [""]
+        total = int(self.acfg.get("match_games", 10))
+        seed = int(self.state.get("games_total") or 0)
+        for k, go_opp in enumerate(levels):
+            games = total // len(levels) + (1 if k < total % len(levels) else 0)
+            if games <= 0:
+                continue
+            out = self.sd.root / "matches" / (f"auto-{ts}.jsonl" if len(levels) == 1 else f"auto-{ts}-{k + 1}.jsonl")
+            args = ["match", "--games", str(games), "--go", str(self.acfg.get("match_go", "movetime 1000")), "--out", str(out)]
+            if go_opp:
+                args += ["--go-opp", go_opp]
+            fuseki = str(self.acfg.get("match_fuseki", "engine")).strip() or "engine"
+            if fuseki != "engine":
+                # 段をまたいで同じ布石を使う（同じ種）。段どうしの比較が対になる
+                args += ["--fuseki", fuseki, "--fuseki-seed", str(seed)]
+            if str(self.acfg.get("match_opponent", "")).strip():
+                args += ["--opponent", str(self.acfg["match_opponent"]).strip()]
+            if str(self.acfg.get("match_opponent_cwd", "")).strip():
+                args += ["--opponent-cwd", str(self.acfg["match_opponent_cwd"]).strip()]
+            if self.acfg.get("match_libra_standard"):
+                args += ["--libra-standard"]
+            for kv in str(self.acfg.get("match_opponent_opt", "")).split(","):
+                if kv.strip():
+                    args += ["--opponent-opt", kv.strip()]
+            for kv in str(self.acfg.get("match_libra_opt", "")).split(","):
+                if kv.strip():
+                    args += ["--libra-opt", kv.strip()]
+            if ckpt is not None:
+                args += ["--ckpt", str(ckpt)]
+            self.state["auto"]["queue"].append({"kind": "match", "args": args, "out": str(out)})
         if ckpt is not None:
-            args += ["--ckpt", str(ckpt)]
             self.snapshot_onnx(ckpt)
-        self.state["auto"]["queue"].append({"kind": "match", "args": args, "out": str(out)})
-        self.log("auto: queued match" + (f" ({ckpt.name})" if ckpt is not None else ""))
+        self.log(f"auto: queued match x{len(levels)}" + (f" ({ckpt.name})" if ckpt is not None else ""))
 
     def snapshot_onnx(self, ckpt: Path) -> Path | None:
         """この世代の推論用の重み（latest.onnx）を ckpt の隣に写す。ランナーはチェックポイントの直後に

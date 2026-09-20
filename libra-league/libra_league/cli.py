@@ -96,6 +96,13 @@ def main(argv: list[str] | None = None) -> int:
     p_m.add_argument("--ckpt", default=None, help="Libra の重みをチェックポイント（.pt）で指定する。隣の同じ名前の .onnx で打ち、無ければ書き出す（--model が優先）")
     p_m.add_argument("--out", default=None, help="棋譜 JSONL（既定: <run>/matches/<時刻>.jsonl）")
     p_m.add_argument("--first-placer", default="a", choices=["a", "b"], help="第 1 局で両玉を置く側（a=Libra）")
+    p_m.add_argument("--fuseki", default="engine",
+                     help="布石（1〜40 手目）をどうするか。engine=両エンジンに打たせる（既定）／self=Libra が両陣とも作る"
+                          "（相手が布石を指せないふつうの将棋エンジンでも測れる）／selfplay=run の自己対局の 41 手目の局面を使う／"
+                          "<ファイル>=41 手目の SFEN の一覧。self 以外はどれも同じ局面を先後入れ替えて 2 局ずつ打つ")
+    p_m.add_argument("--fuseki-seed", type=int, default=0, help="--fuseki selfplay で局面を選ぶ乱数の種（同じ種なら同じ局面。段ごとの比較を対にできる）")
+    p_m.add_argument("--libra-standard", action="store_true",
+                     help="Libra 側が run の標準の読み（[auto] eval_sims と同じ）で打っていることを記録する。Elo の目盛りで自己評価と同じ点として扱われる")
     p_ex = sub.add_parser("export", help="チェックポイント（.pt）を推論用 ONNX に書き出す（libra / libra.exe 用）")
     p_ex.add_argument("--ckpt", default=None, help="既定: <run>/checkpoints/latest.pt")
     p_ex.add_argument("--out", default=None, help="既定: <run>/checkpoints/latest.onnx（同じ場所に一時ファイルを書いてから置き換える）")
@@ -441,23 +448,42 @@ def main(argv: list[str] | None = None) -> int:
         for kv in a.opponent_opt:
             k, v = kv.split("=", 1)
             oopts[k] = v
+        openings = None
+        self_fuseki = a.fuseki == "self"
+        if a.fuseki not in ("engine", "self"):
+            from .harness import load_openings
+
+            openings = load_openings(a.fuseki, sd.games, max(1, (a.games + 1) // 2), a.fuseki_seed)
+            if not openings:
+                log(f"match: 布石の局面が見つからない（--fuseki {a.fuseki}）")
+                return 1
+            log(f"match: 布石は持ち込み {len(openings)} 局面（--fuseki {a.fuseki}）。同じ局面を先後入れ替えて 2 局ずつ打つ")
+        if self_fuseki:
+            log("match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ")
+        opp_cwd = str(Path(a.opponent_cwd).expanduser())
         if a.opponent:
-            ocmd = a.opponent.split()
+            ocmd = [str(Path(t).expanduser()) if t.startswith("~") else t for t in a.opponent.split()]
+        elif openings is not None or self_fuseki:
+            # 布石を持ち込むときの既定は本将棋だけのエンジン（やねうら王／水匠5 の評価）。docs/protocol.md §5
+            ocmd = [str(Path(opp_cwd) / "vendor/YaneuraOu/source/YaneuraOu-by-gcc")]
         else:
-            ocmd = [str(Path(a.opponent_cwd) / ".venv" / "bin" / "python"), "scripts/fuseki_usi_server.py"]
+            ocmd = [str(Path(opp_cwd) / ".venv" / "bin" / "python"), "scripts/fuseki_usi_server.py"]
         libra = UsiEngine("libra", [str(root / "bin" / "libra-usi")], cwd=str(root), options=lopts, log=lambda s: logf and logf.write(s + "\n"))
-        opp = UsiEngine("opp", ocmd, cwd=a.opponent_cwd, options=oopts, log=lambda s: logf and logf.write(s + "\n"))
+        opp = UsiEngine("opp", ocmd, cwd=opp_cwd, options=oopts, log=lambda s: logf and logf.write(s + "\n"))
         log(f"starting engines: libra={libra.cmd} opp={ocmd}")
         libra.start()
         opp.start()
         log(f"libra: {libra.id_name}  opp: {opp.id_name}")
         try:
-            summary = run_match(libra, opp, a.games, a.go, out, log=log, first_placer=a.first_placer, go_args_b=a.go_opp)
+            summary = run_match(libra, opp, a.games, a.go, out, log=log, first_placer=a.first_placer, go_args_b=a.go_opp,
+                                openings=openings, self_fuseki=self_fuseki)
         finally:
             libra.quit()
             opp.quit()
         summary["go"] = a.go
         summary["go_opp"] = a.go_opp or a.go
+        summary["fuseki"] = a.fuseki
+        summary["libra_standard"] = bool(a.libra_standard)
         summary["libra_options"] = lopts
         summary["opponent_options"] = oopts
         summary["opponent_cmd"] = ocmd

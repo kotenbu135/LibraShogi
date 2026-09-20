@@ -149,35 +149,64 @@ metrics_points = 120      # metrics.jsonl から残す点の数
 `match` は `~/libra-run/ls/matches/<時刻>.jsonl`（1 局 1 行）と `.summary.json`、USI ログ `.log` を書く。裁定は libra-sim（docs/rules.md）。相手のバージョンとハッシュは docs/protocol.md §5。
 GPU を L-S と共有するので、計測中は ls・lx を停止するか、局/日が落ちることを承知で回す。
 
-### 7.0 勝ちすぎたとき（読む量のハンデ）
+### 7.0 外部計測（布石は Libra 同士、41 手目から やねうら王／水匠5）
 
-**勝率が 1 に寄ると物差しとして効かなくなる。** 1 局あたりの情報は得点 p の p(1−p) に比例するので、
-40 局の 95% 区間は 5 割なら ±55 Elo、9 割で ±92 Elo、97.5% で ±176 Elo と広がり、**全勝すると Elo が
-発散して点そのものが目盛りから外れる**（`rating.fit` の強連結の条件）。
+**2026-09-20 に相手を総取り替えした**（ユーザーの決定「方策ネット＋やねうら王/水匠5 での対外対局には
+限界があるのでやめる。40 手目までは Elo 測定で測った最強 Libra 同士で行い、41 手目から 最強 Libra vs
+やねうら王/水匠5 で対局する」）。それまでの相手（fuseki_usi_server.py ＝ 相手の方策ネットが布石を打ち、
+41 手目から やねうら王へ中継）は、布石が弱いぶん Libra が勝ちすぎて物差しにならなくなっていた
+（読む量のハンデを 1 手 3,000 回 → 400 回 → 8 回と下げても得点 0.875 のまま。docs/decisions.md 2026-09-19・20）。
 
-そこで **Libra 側の読む量を減らして得点を 5 割に近づける**。相手の設定は変えないので、過去の計測と
-つながったまま比べられる。
+新しい形:
+
+1. **布石（1〜40 手目）は計測する重みが両陣とも作る**（`match_fuseki = "self"`）。置く側・選ぶ側は無く、
+   同じ Libra が 40 手すべてを打つ。根の Gumbel ノイズで手が散るので、局ごとに違う布石になる。
+   41 手目の裁定（docs/rules.md §3.4）で終わった布石は捨てて打ち直す。
+   自己対局の棋譜から 41 手目の局面を借りる形（`selfplay`）と、SFEN の一覧を渡す形（ファイル名）もある。
+2. **同じ局面を先後入れ替えて 2 局ずつ打つ。** 布石の有利不利が打ち消し合い、どちらの陣を持っても測れる。
+3. **41 手目から 相手はふつうの将棋エンジン**（やねうら王＋水匠5 の評価、`Threads=1`）。布石を指せなくてよい。
+4. **段は相手の読む節点数**。Libra 側は動かさない（下の「目盛りに乗せる」）。
 
 ```bash
-# 相手は 1 手 1 秒のまま、Libra は 400 回だけ読む（＝ハンデ）
-~/LibraShogi/bin/libra match --games 40 --go "nodes 400" --go-opp "movetime 1000" \
-  --ckpt ~/libra-run/ls/checkpoints/archive/ckpt_000172923.pt \
-  --opponent-opt Threads=2 --opponent-opt Fuseki_Rules=2
+# 手で 1 回打つ（自動計測と同じ条件。布石は Libra が 10 個作り、それぞれ先後入れ替えて 20 局）
+~/LibraShogi/bin/libra match --games 20 --fuseki self \
+  --go "nodes 96" --go-opp "nodes 10000" --libra-opt Mate_Nodes=200 --libra-standard \
+  --ckpt ~/libra-run/ls/checkpoints/archive/ckpt_000246009.pt \
+  --opponent ~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc --opponent-cwd ~/fuseki-shogi-ai \
+  --opponent-opt EvalDir=vendor/yaneuraou_eval --opponent-opt Threads=1
 ```
 
-自動計測では `config/<run-id>.toml` の `[auto]` に書く（反映はコンソールの停止 → 起動）。
+自動計測では `config/<run-id>.toml` の `[auto]` に書く（反映は `cd ~/LibraShogi && git pull` →
+コンソールの停止 → 起動）。
 
 | 鍵 | 意味 |
 |---|---|
-| `match_go` | Libra 側の `go`。`nodes N` にすると読む回数が固定になり、GPU の混み具合で変わらない |
-| `match_go_opp` | 相手だけ別の `go`（空なら `match_go` と同じ） |
-| `match_libra_opt` | Libra への `setoption`（例 `Sims_Normal=400,Sims_Fuseki=200`）。`go nodes` を使うならふつう要らない |
+| `match_fuseki` | `self`（Libra が両陣とも作る。今の形）／`engine`（両エンジンに布石を打たせる。昔の形）／`selfplay`（run の自己対局の 41 手目の局面）／ファイル名 |
+| `match_opponent`・`match_opponent_cwd` | 相手の起動コマンドと作業フォルダ（空なら布石つきの fuseki_usi_server.py） |
+| `match_go` | Libra 側の `go`。`nodes N` なら読む回数が固定で、GPU の混み具合で変わらない |
+| `match_go_opp` | 相手の `go`。**コンマで区切ると段に分かれ**、局数を等分して段ごとに 1 ジョブ走る |
+| `match_libra_opt`・`match_opponent_opt` | それぞれへの `setoption`（コンマ区切り） |
+| `match_libra_standard` | Libra 側が自己評価と同じ読みだという申告（下） |
 
-**条件を変えたら Elo の点も分かれる。** 相手の `setoption`（`Fuseki_Rules` を除く）と両者の `go` が
-違う結果は、`libra rating` が別の点として扱う（同じ名前で強さの違う相手が 1 点に混ざると目盛りが狂うため）。
-点の名前は `外部エンジン [Threads=2, movetime 1000]`、ハンデ付きの Libra は `step 172,923 [nodes 400]` の形。
-**ハンデ付きの点は全読みの自分とは別人**なので、全読みの目盛りに載せたいときは同じ重みどうしを
-`libra eval --a <ckpt> --b <同じ ckpt> --b-set full_sims=<ハンデ> --games 1000` で測ってハンデの Elo を出す。
+**目盛りに乗せる（大事）。** `libra rating` は条件の違う相手を別の点として扱う。Libra 側も同じで、
+**Libra の読む量を自己評価（`eval_sims`）と変えると、「その Libra と相手」だけで閉じた塊になり、
+強連結の条件で目盛りから丸ごと落ちる**。2026-09-19〜20 のハンデ付きの計測が実際にそうなっていて、
+得点は残っても `libra rating` には 1 つも効いていなかった。そこで新しい形では
+
+- Libra 側を `match_go = "nodes 96"`（＝ `[auto] eval_sims`）と `match_libra_opt = "Mate_Nodes=200"`
+  （＝ `[search] mate_nodes_root`）にして、**自己評価とまったく同じ読み**にする。
+- `match_libra_standard = true` を立てる。`libra rating` はこの申告がある結果の Libra 側を素の `step N`
+  の点として扱う（相手と `go` が違っても分けない）。**違う読みにしたらこの申告を外す。**
+
+点の名前は `YaneuraOu ... [EvalDir=…, Threads=1, nodes 10000]` の形。ルールの合わせ込み（`EnteringKingRule`）や
+定跡の停止（`BookFile`・`USI_OwnBook`）、`USI_Hash` は名前に入れない（段を決めるものではない）。
+
+**この形では布石の強さは測らない**（両陣とも Libra が作るので打ち消し合う）。測るのは 41 手目以降の将棋で、
+布石を含めた強さは `libra rating` の内部の物差し（最強比・基準比・固定の参照）が見ている。
+
+**段の決め方。** 得点が 0.4〜0.6 に入る段を使う（1 局あたりの情報が最大で、区間がいちばん狭い）。
+釣り合う段が分からないうちは `match_go_opp` に複数書いて挟む。段をまたいで布石は同じなので（`--fuseki-seed`
+が揃う）、段どうしの比較が対になる。年末の 100 局の基準値マッチは持ち時間をそろえたまま別に行う。
 
 ## 7.1 設定値のオフライン比較（`libra abtest`）
 
