@@ -262,6 +262,11 @@ tools/package_release.sh v0.2 ~/libra-run/releases/v0.2 '<v0.2 の重みに到�
 5. 一致試験の局面集を作り直す: `PYTHONPATH=… libra_oracle.py <games.jsonl> 24`（tenbin-shogi-web/CLAUDE.md のコマンド）。
 6. `npm test` と `npm run e2e` を通す。
 7. **ハンデ表**（両玉の置き場所。decisions.md 2026-09-19）は v0.2 の `scale.json` から作り直してから出す。
+   **2026-09-21: 作り直したが、サイトには出さない**（ユーザーの決定「急いでやりたいわけじゃないので今はやらない」）。
+   分かったこと 2 つ: (a) **ハンデの重さは読む量で変わる**（読み 96 回は読み 1,600 回より先手が +20.3 ± 1.1 Elo 得。
+   組によっては有利な側が入れ替わる）ので、**v0.1 の「`selfplay` と `verify` を逆分散で合算」は誤り**。`verify` だけを使う。
+   (b) `seq` は有利不利が決まった時点で止めるので**一方的な組ほど局数が少なく**（中央値 124 局）、
+   25 Elo 刻みにできるのは **0〜100 Elo** まで。広げるには狙いの 20〜30 組に各 2,000 局を足す（約 1 時間・$3 の見込み、未確認）。
 
 ### tenbin-shogi-desktop
 
@@ -320,5 +325,5 @@ tools/package_release.sh v0.2 ~/libra-run/releases/v0.2 '<v0.2 の重みに到�
 - [x] §4 `docs/model-card-v0.2.md` を書き、NOTICE を直した
 - [x] §5 配布物を 2 回作ってハッシュが一致し、展開した `libra.exe` が動いた
 - [x] §6 タグを push し、Release を公開し、data/README.md に行を足した（2026-09-21 16:19 UTC 公開。6 ファイルの digest は SHA256SUMS と一致）
-- [ ] §7 サイトの重み・玉配置表・一致試験を差し替え、`npm test` と e2e が通った
-- [ ] decisions.md に決定を、measurements.md に実測を 1 行ずつ書いた
+- [x] §7 サイトの重み・玉配置表・一致試験を差し替え、`npm test` と e2e が通った（tenbin-shogi-web PR #16、2026-09-21。174 件 ＋ 34 件。**ハンデ表はユーザーの決定で見送り**、**ブラウザの WASM は作り直していない**＝一致試験 24 局面でずれが無いため別の作業）
+- [x] decisions.md に決定を、measurements.md に実測を 1 行ずつ書いた（両リポジトリとも）
