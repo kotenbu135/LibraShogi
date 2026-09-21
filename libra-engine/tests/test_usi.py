@@ -159,6 +159,17 @@ def test_choose_reports_winrate_on_multipv1(engine):
         assert 0.0 <= float(t[t.index("winrate") + 1]) <= 1.0, (go_args, " ".join(t))
 
 
+def test_scale_table_defaults_to_the_file_next_to_the_exe(engine):
+    """Scale_Table の既定は実行ファイルの隣の scale.json（DNN_Model と同じ扱い。docs/release.md §8-D、v0.2 から）。
+
+    配布物の zip は exe の隣に scale.json を入れるので、GUI の登録で手でパスを入れなくても表が使われる。
+    """
+    declared = engine.declared["Scale_Table"]
+    assert declared.endswith("scale.json"), declared
+    assert str(BIN.resolve().parent) in declared, (declared, BIN)
+    assert "<empty>" not in declared, declared
+
+
 def test_scale_table_answers_with_clock_words(engine, tmp_path):
     """1〜2 手目に時計の語が来ても玉配置表から即座に返す（GUI は布石でも btime/wtime/byoyomi を送る）。"""
     import json
