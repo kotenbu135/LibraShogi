@@ -23,7 +23,7 @@ from .looptime import LoopTimer
 from .replay import ReplayBuffer, add_target_stats, summarize_target_stats
 from .selfplay import SelfPlayLoop
 from .state import StateDir, write_json_atomic
-from .supervise import EXIT_ALREADY_RUNNING, acquire_lock
+from .supervise import EXIT_ALREADY_RUNNING, EXIT_NO_CONFIG, acquire_lock
 from .trainer import Trainer
 from .workers import Inbox, load_weights, publish_weights
 
@@ -709,6 +709,19 @@ def main_run(root: Path, config_path: Path | None) -> None:
         print(f"config: 作り直しに失敗（{type(e).__name__}: {e}）。今の config.toml を使う", flush=True)
         sd.append_log(f"config: 作り直しに失敗（{type(e).__name__}: {e}）。今の config.toml を使う")
         cfg = load_config(sd.config_toml if sd.config_toml.exists() else None)
+        cfg_info = {"source": str(sd.config_toml) if sd.config_toml.exists() else "DEFAULTS"}
+    # 設定がどこにも無い run は既定値で始めない（2026-09-21 の実害。docs/decisions.md 同日）。
+    # 空のディレクトリに `libra run` が来ると、これまでは既定値を書いて乱数初期化から学習を始めていた。
+    # 誰も設定していない run なので学習の中身に意味が無いのに、GPU を本物の run と分け合う
+    if config_path is None and cfg_info.get("source") == "DEFAULTS":
+        run_id = sd.root.name
+        msg = (f"config: {run_id} の設定がどこにも無い（config/{run_id}.toml も {sd.config_toml.name} も無い）。"
+               "既定値のまま学習を始めると、誰も設定していない重みが GPU を使い続けるので起動しない。"
+               f"リポジトリに config/{run_id}.toml を置くか、`--config <ファイル>` を付けて起動する")
+        print(msg, file=sys.stderr, flush=True)
+        sd.append_log(msg)
+        lock.unlink(missing_ok=True)
+        sys.exit(EXIT_NO_CONFIG)
     try:
         Runner(sd, cfg).run()
     finally:

@@ -17,6 +17,8 @@ from typing import Callable
 from .state import StateDir
 
 EXIT_ALREADY_RUNNING = 3
+# 設定がどこにも無い run を既定値で始めようとした。起動し直さない（設定を置くまで何度試しても同じ）
+EXIT_NO_CONFIG = 4
 # 利用者や OS が止めた（Ctrl+C、kill、wsl --shutdown、ログオフ）。起動し直さない
 STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 RESTART_DELAY = 60.0
@@ -33,9 +35,9 @@ def exit_code(rc: int) -> int:
 
 def should_restart(rc: int, uptime: float, quick_failures: int, healthy: float = HEALTHY_SECONDS,
                    max_quick: int = MAX_QUICK_FAILURES) -> tuple[bool, int]:
-    """(起動し直すか, 更新後の連続失敗数)。0（STOP）、already running、止めるシグナルでは起動し直さない。"""
+    """(起動し直すか, 更新後の連続失敗数)。0（STOP）、already running、設定が無い、止めるシグナルでは起動し直さない。"""
     code = exit_code(rc)
-    if code in (0, EXIT_ALREADY_RUNNING) or code in {128 + int(s) for s in STOP_SIGNALS}:
+    if code in (0, EXIT_ALREADY_RUNNING, EXIT_NO_CONFIG) or code in {128 + int(s) for s in STOP_SIGNALS}:
         return False, 0
     n = 0 if uptime >= healthy else quick_failures + 1
     return n < max_quick, n
@@ -141,7 +143,8 @@ def supervise(sd: StateDir, argv: list[str], *, delay: float = RESTART_DELAY, he
             uptime = time.monotonic() - t0
             restart, quick = should_restart(rc, uptime, quick, healthy, max_quick)
             if not restart:
-                if code not in (0, EXIT_ALREADY_RUNNING):
+                # 設定が無い（EXIT_NO_CONFIG）は子が理由を出しているので、「異常終了」と重ねて書かない
+                if code not in (0, EXIT_ALREADY_RUNNING, EXIT_NO_CONFIG):
                     log(f"supervisor: run exited abnormally rc={code} after {uptime / 3600:.2f} h; giving up after {quick} quick failures")
                 return code
             log(f"supervisor: run exited abnormally rc={code} after {uptime / 3600:.2f} h; restarting in {delay:.0f} s (quick failures {quick}/{max_quick})")

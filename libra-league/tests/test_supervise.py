@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from libra_league.state import StateDir
-from libra_league.supervise import EXIT_ALREADY_RUNNING, acquire_lock, child_argv, exit_code, running_pid, should_restart, supervise
+from libra_league.supervise import EXIT_ALREADY_RUNNING, EXIT_NO_CONFIG, acquire_lock, child_argv, exit_code, running_pid, should_restart, supervise
 
 
 def _child(tmp_path: Path, body: str) -> list[str]:
@@ -34,6 +34,7 @@ def test_exit_code_and_should_restart():
     assert exit_code(-6) == 134 and exit_code(-9) == 137 and exit_code(1) == 1
     assert should_restart(0, 10.0, 0) == (False, 0)  # STOP フラグで正常終了
     assert should_restart(EXIT_ALREADY_RUNNING, 1.0, 0) == (False, 0)
+    assert should_restart(EXIT_NO_CONFIG, 1.0, 0) == (False, 0)  # 設定を置くまで何度試しても同じ
     for rc in (-int(signal.SIGTERM), -int(signal.SIGINT), -int(signal.SIGHUP), 143, 130):
         assert should_restart(rc, 1.0, 0)[0] is False  # 利用者や OS が止めた
     assert should_restart(-6, 5 * 3600.0, 4) == (True, 0)  # 長く動いた後の abort は数え直し

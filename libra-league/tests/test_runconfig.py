@@ -227,3 +227,25 @@ def test_no_warning_when_every_key_is_known(tmp_path):
     logs: list[str] = []
     _cfg, info = resolve(sd, None, repo, ref="none", log=logs.append)
     assert info["unknown"] == [] and not any("WARNING" in m for m in logs)
+
+
+def test_run_refuses_to_start_without_any_config(tmp_path, monkeypatch, capsys):
+    """設定がどこにも無い run は既定値で始めない（2026-09-21 の実害。docs/decisions.md 同日）。
+
+    空の `~/libra-run/lx` に `libra run` が来て、既定値を書いて乱数初期化から 14 分学習し、
+    本物の run と GPU を分け合っていた。誰も設定していない run なので学習の中身に意味が無い。"""
+    from libra_league.runner import main_run
+    from libra_league.supervise import EXIT_NO_CONFIG
+
+    monkeypatch.setenv("LIBRA_CONFIG_REF", "none")  # リポジトリを読みに行かない
+    root = tmp_path / "run" / "lxtest"  # リポジトリに config/lxtest.toml は無い
+    with pytest.raises(SystemExit) as e:
+        main_run(root, None)
+    assert e.value.code == EXIT_NO_CONFIG
+    assert not (root / "config.toml").exists()  # 既定値を書き残さない
+    assert not (root / "run.lock").exists()  # 鍵を放す（残ると次の起動が「二重起動」になる）
+    assert "設定がどこにも無い" in capsys.readouterr().err
+    # <run>/config.toml があるランは今まで通り動く（リポジトリにまだ無いランの道筋。runbook §設定の管理）
+    (root / "config.toml").write_text("[train]\nlr = 0.001\n", encoding="utf-8")
+    cfg, info = resolve(StateDir(root), None, None, ref="none", log=lambda m: None)
+    assert cfg["train"]["lr"] == 0.001 and info["source"].endswith("config.toml")
