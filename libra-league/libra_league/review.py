@@ -26,6 +26,7 @@ DEFAULT_THRESHOLDS = {
     "best_stall_alert": 3,      # 最強を更新できない回数がこれ以上なら「見直し」
     "reference_stale_games": 800000,  # 参照の最後の計測がこれ以上前なら判定しない（もう測っていない参照）
     "gpd_min": 0,               # 局/日の下限（0 で見ない）
+    "job_history": 8,           # 計測ジョブの失敗を見る直近の件数（1 回の節目が 6〜7 ジョブ）
 }
 
 OK, WARN, REVIEW, NA = "続ける", "注意", "見直し", "まだ無い"
@@ -163,6 +164,22 @@ def review(sd: StateDir, thresholds: dict | None = None, now: float | None = Non
         out["items"].append({"name": f"M4 参照 {name}", "verdict": verdict, "why": why, "values": values})
     if not by_ref:
         out["items"].append({"name": "M4 参照", "verdict": NA, "why": "eval/reference.jsonl がまだ無い", "values": {}})
+
+    # 計測ジョブ: 失敗は auto.log にしか出ず、これまで気づけなかった（2026-09-21。外部計測が 3 回続けて
+    # 1 局も記録を残していないのに判定はずっと「続ける」だった）。直近の履歴に rc != 0 があれば必ず出す。
+    hist = ((sd.read_state() or {}).get("auto") or {}).get("history") or []
+    recent = hist[-int(th["job_history"]):]
+    failed = [j for j in recent if j.get("rc") not in (0, None)]
+    if failed:
+        kinds = ", ".join(sorted({str(j.get("kind")) for j in failed}))
+        tail = next((j["tail"][-1] for j in reversed(failed) if j.get("tail")), "理由は auto.log")
+        out["items"].append({"name": "計測ジョブ", "verdict": WARN,
+                             "why": f"直近 {len(recent)} 件のうち {len(failed)} 件が失敗（{kinds}）。最後の失敗: {tail}",
+                             "values": {"n_recent": len(recent), "n_failed": len(failed),
+                                        "failed": [{k: j.get(k) for k in ("kind", "rc", "tail")} for j in failed]}})
+    elif recent:
+        out["items"].append({"name": "計測ジョブ", "verdict": OK, "why": f"直近 {len(recent)} 件はどれも正常に終わった",
+                             "values": {"n_recent": len(recent), "n_failed": 0}})
 
     # 局/日（起動直後は 1 時間の履歴が無く None。0 と書くと「止まっている」に読めるので項目を出さない）
     gpd = st.get("games_per_day_1h")
