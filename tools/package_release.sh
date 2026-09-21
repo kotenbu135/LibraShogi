@@ -15,6 +15,7 @@
 # 選別はしない（搾取者の布石から始まる局・リーグの局・Gumbel ノイズの手が混ざる。data/README.md）。
 #
 # Windows 版 libra.exe は先に libra-engine/README.md の mingw クロスビルドで build-win/ に作っておく。
+# cmake と ninja は pip 版なので、クロスビルドの前に .venv/bin を PATH の先頭に置く（docs/getting-started.md §8・§9）。
 set -euo pipefail
 VER="${1:?使い方: tools/package_release.sh <版> <重みの置き場>}"
 SRC="$(cd "${2:?使い方: tools/package_release.sh <版> <重みの置き場>}" && pwd)"
@@ -24,6 +25,17 @@ WIN="$ROOT/build-win/libra-engine"
 DIST="$SRC/dist"
 
 [ -f "$WIN/libra.exe" ] || { echo "先にクロスビルドする（libra-engine/README.md）: $WIN/libra.exe" >&2; exit 1; }
+# 古い libra.exe を黙って詰めない。2026-09-21 に cmake が PATH に無くてクロスビルドが走らず
+# （pip 版なので .venv/bin を PATH の先頭に置く必要がある）、エラーは出たのに build-win に残っていた
+# v0.1 のときの exe（名乗り 0.0.2）で zip が出来上がった。
+STALE="$(find "$ROOT/libra-engine" "$ROOT/libra-search" "$ROOT/libra-sim" \( -name '*.cpp' -o -name '*.h' \) \
+  -newer "$WIN/libra.exe" -print -quit)"
+[ -z "$STALE" ] || { echo "libra.exe より新しいソースがある（$STALE）。クロスビルドし直す: docs/getting-started.md §8" >&2; exit 1; }
+ENGINE_VERSION="$(sed -n 's/^const char\* VERSION = "\(.*\)";$/\1/p' "$ROOT/libra-engine/src/engine.cpp")"
+[ -n "$ENGINE_VERSION" ] || { echo "libra-engine/src/engine.cpp から VERSION を読めない" >&2; exit 1; }
+grep -qF "$ENGINE_VERSION" "$WIN/libra.exe" || {
+  echo "libra.exe に版の文字列 $ENGINE_VERSION が無い（別の版から作られている）。クロスビルドし直す: docs/getting-started.md §8" >&2
+  exit 1; }
 [ -d "$ORT" ] || { echo "先に tools/fetch_onnxruntime.sh win-dml を実行する: $ORT" >&2; exit 1; }
 # zip だけで指せることが配布の条件なので、モデル・玉配置表・モデルカードが欠けたら作らない。
 # 以前は「あるものだけ」写していたので、名前を間違えるとモデルの入っていない zip が黙って出来上がった。

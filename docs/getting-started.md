@@ -178,6 +178,7 @@ WSL の mingw-w64（posix スレッド版。`sudo apt install mingw-w64` が要�
 
 ```bash
 tools/fetch_onnxruntime.sh win-dml
+export PATH="$PWD/.venv/bin:$PATH"   # cmake と ninja は pip 版（sudo が使えないため）
 cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-posix.cmake \
   -DLIBRA_BUILD_PYTHON=OFF -DLIBRA_BUILD_TESTS=OFF -DLIBRA_ORT_DIR=$PWD/third_party/onnxruntime/onnxruntime-win-x64-directml-1.24.4
 cmake --build build-win                  # → build-win/libra-engine/libra.exe と DLL

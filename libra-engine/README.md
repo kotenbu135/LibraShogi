@@ -17,6 +17,7 @@ cmake --build build                      # → build/libra-engine/libra（隣に
 Windows 版（WSL の mingw-w64 posix 版でクロスビルド。依存は静的リンク、ONNX Runtime と DirectML の DLL だけ同梱）:
 
 ```bash
+export PATH="$PWD/.venv/bin:$PATH"   # cmake と ninja は pip 版（sudo が使えないため）
 cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-posix.cmake \
   -DLIBRA_BUILD_PYTHON=OFF -DLIBRA_BUILD_TESTS=OFF -DLIBRA_ORT_DIR=$PWD/third_party/onnxruntime/onnxruntime-win-x64-directml-1.24.4
 cmake --build build-win                  # → build-win/libra-engine/libra.exe + onnxruntime.dll・onnxruntime_providers_shared.dll・DirectML.dll

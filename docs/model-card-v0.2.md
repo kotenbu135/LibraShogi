@@ -183,6 +183,7 @@ zip の中の `MODEL-CARD.md` は、この節を埋める前の版になる（zi
 
 ```bash
 # 1. Windows 版をクロスビルド（libra-engine/README.md）
+export PATH="$PWD/.venv/bin:$PATH"   # cmake と ninja は pip 版（sudo が使えないため）
 cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-posix.cmake \
   -DLIBRA_BUILD_PYTHON=OFF -DLIBRA_BUILD_TESTS=OFF -DLIBRA_ORT_DIR=$PWD/third_party/onnxruntime/onnxruntime-win-x64-directml-1.24.4
 cmake --build build-win
