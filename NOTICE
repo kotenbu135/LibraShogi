@@ -10,7 +10,7 @@ Licenses:
   - Source code:               Apache License 2.0 (see LICENSE)
   - Documentation (docs/):     CC BY 4.0 (see LICENSES/CC-BY-4.0.txt)
   - Self-play game data:       CC0 1.0 (see LICENSES/CC0-1.0.txt)
-  - Trained weights:           Apache License 2.0 (model card: docs/model-card-v0.1.md)
+  - Trained weights:           Apache License 2.0 (model card: docs/model-card-v0.2.md)
   - King-placement table JSON: CC0 1.0 (see LICENSES/CC0-1.0.txt)
 
 Third-party components and their licenses are listed in LICENSES/README.md.
