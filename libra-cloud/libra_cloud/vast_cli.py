@@ -330,7 +330,8 @@ def launch_argv(a: argparse.Namespace, run_dir: Path, d: Path) -> list[str]:
     return ["bash", "-c", f"{shlex.join(prep)} && exec {shlex.join(work)}"]
 
 
-CONTINUE_KEYS = ("run", "gpu", "max_dph", "min_rel", "min_cpu_ghz", "min_cores", "max_inet_cost", "n_games", "rent", "bid_margin", "worker_id")
+CONTINUE_KEYS = ("run", "job", "scale_dir", "gpu", "max_dph", "min_rel", "min_cpu_ghz", "min_cores", "max_inet_cost", "n_games", "rent",
+                 "bid_margin", "worker_id")
 MIN_CONTINUE_H = 0.25     # 残りがこれより短ければ借り直さない（借りてから打ち始めるまで 2〜6 分かかる）
 DEADLINE_SLACK_S = 1800   # セッションの鎖の締め切り = 最初の開始 + 時間 + これ（借り直しの待ちで際限なく延びないように）
 
