@@ -58,10 +58,12 @@ v0.1 の重み（旧 run の step 477,636）は種にしていない。下の 5.
 
 ## 4. 再現に使うコードの版
 
-**タグ `v0.2` のコミット**（配る `libra.exe` はそこから作る。§9）。
+**タグ `v0.2` のコミット。**
+
+- **配った `libra.exe` は `02877e0`（2026-09-21 23:04）でクロスビルドした。** タグのコミットとの間で `libra-engine`・`libra-net`・`libra-sim`・`libra-search` に**ソースの変更は無い**（`git diff --stat` が `libra-engine/README.md` の 1 行だけ）。
 
 - **学習に効くパッケージ（`libra-net`・`libra-sim`・`libra-search`）は `0487aa2`（2026-09-19 19:54、自己対局の投了。既定は無効）から変わっていない。** step 317,975 に達したのは 2026-09-21 17:22 なので、この重みを出したコードはその版。
-- それ以降に `main` へ入ったのは、記録と判定（`libra-league` の `progress.py`・`review.py`）とエンジンの 2 点だけ。エンジンの 2 点は**版の名乗りを `LibraShogi 0.2.0` にしたこと**と、**`Scale_Table` の既定を実行ファイルの隣の `scale.json` にしたこと**（[decisions.md](decisions.md) 2026-09-21）で、指し手の選び方は変えていない。
+- それ以降に `main` へ入ったのは、記録と判定（`libra-league` の `progress.py`・`review.py`）とエンジンの 2 点だけ。エンジンの 2 点は**版の名乗りを `LibraShogi 0.0.2` から `0.2.0` にしたこと**と、**`Scale_Table` の既定を実行ファイルの隣の `scale.json` にしたこと**（[decisions.md](decisions.md) 2026-09-21）で、指し手の選び方は変えていない。
 
 ## 5. 計測
 
@@ -172,12 +174,16 @@ GUI で何も入れなくても玉配置表が使われる（v0.1 では手で�
 
 ## 8. 検証（SHA-256）
 
-Release の `SHA256SUMS` と同じ値をここに写す（§9 で配布物を作ってから）。
-zip の中の `MODEL-CARD.md` は、この節を埋める前の版になる（zip の中身が zip 自身のハッシュを持てないため）。
+```
+4138d4784e094023e9e65de1377e1db18bfaa4d779ef88a9ff67d3b90b547efc  libra-v0.2.pt
+be0d5b1906085b30ee32136303d67b837e59cbdd028cf2d7022975cba554c61d  libra-v0.2.onnx
+dabdaf8270acd2cf4b732c271ab7cb62ca756cfba006f802e264d7de82701cb0  scale-v0.2.json
+ba7043d64bd4007d1a4ac1b68816be27f6764e8cc190b4ee88149e7549c0b0f2  libra-v0.2-windows-x64.zip
+65dca6d740c674793cb816f375e2331691c3bc63685616b36ca24aa09cb3b762  libra-v0.2-selfplay-sample.jsonl.gz
+```
 
-```
-（配布物を作ってから書く）
-```
+Release の `SHA256SUMS` と同じ。**`tools/package_release.sh` を 2 回続けて回し、5 つとも同じ値になることを確かめた**（zip と標本の gzip は日時を固定して詰めるため。§9）。
+**zip の中の `MODEL-CARD.md` は、この節を埋める前の版**（zip の中身が zip 自身のハッシュを持てないため）。それ以外は同じ。
 
 ## 9. 配布物の作り方
 
