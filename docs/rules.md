@@ -1,9 +1,9 @@
 # 天秤将棋 ルール仕様（Libra の唯一の正）
 
 - ライセンス: CC BY 4.0。条文は自分の言葉で書き直し、出典を各節に記す。
-- 布石フェーズ（1〜40 手目）と 41 手目の裁定: 天秤将棋のルールページ https://tenbinshogi.com/rules/ （2026-09-21 取得。旧サイト https://fusekishogi.com/rules/ の同じ頁も併存し、布石将棋の原ルールは shogitter）。§3.2 の二飛香はルール設計者の決定（2026-09-13、Issue #1）で、2026-09-21 の時点では両方のルールページに入っている。
+- 布石フェーズ（1〜40 手目）と 41 手目の裁定: 天秤将棋のルールページ https://tenbinshogi.com/rules/ （2026-09-21 取得。布石将棋の原ルールは shogitter）。§3.2 の二飛香はルール設計者の決定（2026-09-13、Issue #1）で、このルールページにも入っている。
 - 41 手目以降の本将棋: 世界コンピュータ将棋選手権 大会ルール（コンピュータ将棋協会、第 36 回用 http://www2.computer-shogi.org/wcsc36/rule.pdf 、2026-09-11 取得、SHA-256 `9387db362c1eb1aa87b294c314c68be6f54d7f9a8165b8a3bb69e7b80a1b5bed`）。以下「大会ルール」。
-- マッチの裁定はハーネス（libra-league）が本書で行う。公開版サイト・desktop GUI・学習アリーナの規定とは異なる点を §7 に列挙する。
+- マッチの裁定はハーネス（libra-league）が本書で行う。desktop GUI・学習アリーナの規定とは異なる点を §8 に列挙する。
 - 手数上限は大会ルールどおり 320 手、**41 手目を本将棋の 1 手目として数える**（ルール設計者の決定、2026-09-11。§5.4）。libra-sim の `max_ply` は設定値で、既定 320。
 
 ## 1. 用語と座標
@@ -139,9 +139,8 @@ libra-sim（`libra-sim/tests/perft.cpp`）で固定している perft 値。後�
 | 部品 | 千日手 | 手数上限 | 入玉 | 41 手目の裁定 | 非合法手 |
 |---|---|---|---|---|---|
 | Libra（本書） | 4 回で引き分け、連続王手は王手側負け | 本将棋 320 手で引き分け（41 手目起点、`max_ply` で変更可） | 27 点宣言法。`win` を検証 | 本書 §3.4 | 負け |
-| 公開版 fuseki-shogi-web `6c4c1f7` | 同じ | 本将棋 320 手で引き分け（`MAX_NORMAL_MOVES = 320`） | 合意による持将棋あり。AI の `win` は無検証で宣言勝ち | 同じ | 負け |
 | desktop GUI 0.10.0 `8a4d176`（以降 0.10.3 まで同じ） | 同じ（`src/state/game.ts`。40 手完了局面を 1 回目に数える） | 同じ（本将棋 320 手、`MAX_NORMAL_MOVES`） | 同じ。`win` を検証し、不当な宣言は宣言側の負け | 同じ（wasm の `verifyFinalSfen`） | 1 回聞き直し、2 回目で一時停止 |
 | 大会ルール（WCSC36） | 同じ | 320 手 | 同じ | — | 負け |
 
-- **二飛香（§3.2、2026-09-13 決定）**: Libra（libra-sim、tenbinshogi.com の WASM）は 2026-09-13 から適用する。公開版 fusekishogi.com・オンラインの判定役（kotenbu135/fuseki-shogi-web#1）と desktop GUI（kotenbu135/tenbin-shogi-desktop#1、0.8.0 でリリース）も 2026-09-13 に入った。desktop 0.8.0 より前の GUI は二飛香が無く、人の側だけ二飛香の手が通る（Libra はその局面を非合法として `bad position` を出し投了する）。
+- **二飛香（§3.2、2026-09-13 決定）**: Libra（libra-sim、tenbinshogi.com の WASM）は 2026-09-13 から適用する。desktop GUI（kotenbu135/tenbin-shogi-desktop#1、0.8.0 でリリース）も 2026-09-13 に入った。desktop 0.8.0 より前の GUI は二飛香が無く、人の側だけ二飛香の手が通る（Libra はその局面を非合法として `bad position` を出し投了する）。
 - 二飛香より前（2026-09-13 まで）の天秤将棋の棋譜（L-S の `~/libra-run/ls-v0`、搾取者 `~/libra-run/lx-v0` の自己対局、計測対局）は、陣の多くが二飛香に当たるので新しい規定では再生できない。
