@@ -1,20 +1,20 @@
 {
  "schema": 1,
  "run": "ls",
- "generated": "2026-09-21 22:23:56",
- "t": 1789997036.9,
+ "generated": "2026-09-22 01:20:06",
+ "t": 1790007607.0,
  "process": "running",
  "flags": [],
  "now": {
   "step": 328834,
-  "generation": 532,
-  "games_total": 3720574,
+  "generation": 533,
+  "games_total": 3720689,
   "games_per_day_1h": null,
-  "window_games": 1860287,
+  "window_games": 1860344,
   "active_games": 512,
-  "elapsed_h": 85.88,
+  "elapsed_h": 85.92,
   "heldout_games": 20000,
-  "status_time": "2026-09-21 22:23:54",
+  "status_time": "2026-09-22 01:20:05",
   "train": null,
   "gen": null
  },
@@ -6627,15 +6627,15 @@
    "gen_heldout_fuseki_corr_v": 0.6401
   },
   {
-   "t": 1789997034.7,
+   "t": 1790007605.3,
    "step": 328834,
-   "games_total": 3720574,
+   "games_total": 3720689,
    "gpd": null,
    "gpd_5m": null,
-   "window": 1860287,
-   "rss_mb": 19517,
+   "window": 1860344,
+   "rss_mb": 19974,
    "swap_mb": 0,
-   "gpu_mb": 526,
+   "gpu_mb": 546,
    "loss": null,
    "policy": null,
    "value": null,
@@ -6653,7 +6653,7 @@
    "rootq_minus_z_normal": null,
    "t_train_sample": 0.0,
    "t_train_step": 0.0,
-   "t_sp_eval": 99.61,
+   "t_sp_eval": 99.88,
    "sp_games": null,
    "sp_draw": null,
    "sp_plies": null,
@@ -6676,7 +6676,7 @@
   }
  ],
  "review": {
-  "time": "2026-09-21 22:23:56",
+  "time": "2026-09-22 01:20:06",
   "run": "ls",
   "items": [
    {
@@ -6744,7 +6744,7 @@
       ]
      },
      "gap_games": 410926,
-     "behind_games": 490801,
+     "behind_games": 490916,
      "score": 0.855
     }
    },
@@ -6768,14 +6768,14 @@
       ]
      },
      "gap_games": null,
-     "behind_games": 29861,
+     "behind_games": 29976,
      "score": 0.615
     }
    },
    {
     "name": "M4 参照 ckpt_000646699.pt",
     "verdict": "まだ無い",
-    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、2,482,034 局前）",
+    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、2,482,149 局前）",
     "values": {
      "last": {
       "t": 1789725300.1884296,
@@ -6792,7 +6792,7 @@
       ]
      },
      "gap_games": 395416,
-     "behind_games": 2482034,
+     "behind_games": 2482149,
      "score": 0.895
     }
    },
@@ -6816,7 +6816,7 @@
       ]
      },
      "gap_games": 411144,
-     "behind_games": 493314,
+     "behind_games": 493429,
      "score": 0.835
     }
    },
