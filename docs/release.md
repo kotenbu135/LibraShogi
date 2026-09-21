@@ -125,6 +125,9 @@ bin/libra export --ckpt ~/libra-run/releases/v0.2/libra-v0.2.pt --out ~/libra-ru
 - **全組（492 組）を検証対局で作り直す**: `bin/libra-scale seq run --dir ~/libra-run/ls/scale/seq-v0.2 --table ~/libra-run/ls/scale/scale-v0.2.json --notify windows`（手順は libra-scale/README.md の seq）。
   v0.1 は 303,677 局・約 12 時間（クラウドの GPU 1 台を足して）。**この間は ls・lx を止める**（§8-B）。
   終わったら表にする: `bin/libra-scale seq table --dir ~/libra-run/ls/scale/seq-v0.2 --out ~/libra-run/ls/scale/scale-v0.2.1.json`
+  できた `scale-v0.2.1.json` が**検証済みの表で、配る表はこれ**。`tools/package_release.sh` は重みの置き場の `scale-v0.2.json` という名前を見るので、写す:
+  `cp ~/libra-run/ls/scale/scale-v0.2.1.json ~/libra-run/releases/v0.2/scale-v0.2.json`
+  **`bin/libra-scale build` の出力（`~/libra-run/ls/scale/scale-v0.2.json`）を写さない。** あちらは探索だけで付けたあたりで、検証対局の結果が入っていない。
 - **借りた GPU を足して短くする**（2026-09-21 のユーザーの依頼）: seq の run を始めてから、台ごとに
   `bin/libra-vast --root ~/libra-run/cloud-scale-<n> start --job scale --scale-dir <seq の run> --worker-id vs<n>`
   （手順と注意は libra-cloud/README.md §玉配置表の全組の検証対局）。v0.1 の実測（手元 200 局/分、借りた GPU 240 局/分・実効 $0.226/h）からの目安:
@@ -246,7 +249,7 @@ tools/package_release.sh v0.2 ~/libra-run/releases/v0.2 '<v0.2 の重みに到�
    （16MiB ごとに分け、`src/engine/libra/model.ts` に貼る行と `.gitignore` に足す行を出す）
 2. `src/engine/libra/model.ts` の `LIBRA_MODEL` を差し替える（`name`・`parts`・`bytes`・`sha256`・`step`）。
 3. `.gitignore` の `!public/models/…` を新しいファイル名に直し、**古い重みの行を消す**（ワイルドカードにしない。配布経路に黙って混ざらないようにするため）。
-4. 玉配置表を取り込む: `node scripts/kings/import-scale.mjs ~/libra-run/ls/scale/scale-v0.2.json`（表の step が `LIBRA_MODEL.step` と違えば止まる）。
+4. 玉配置表を取り込む: `node scripts/kings/import-scale.mjs ~/libra-run/releases/v0.2/scale-v0.2.json`（§2 で写した検証済みの表）（表の step が `LIBRA_MODEL.step` と違えば止まる）。
 5. 一致試験の局面集を作り直す: `PYTHONPATH=… libra_oracle.py <games.jsonl> 24`（tenbin-shogi-web/CLAUDE.md のコマンド）。
 6. `npm test` と `npm run e2e` を通す。
 7. **ハンデ表**（両玉の置き場所。decisions.md 2026-09-19）は v0.2 の `scale.json` から作り直してから出す。
