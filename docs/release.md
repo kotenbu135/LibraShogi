@@ -231,6 +231,14 @@ tools/package_release.sh v0.2 ~/libra-run/releases/v0.2 '<v0.2 の重みに到�
 
 1. `git tag -a v0.2 <§1 で控えたコミット> -m "Libra v0.2 (step <step>)"` → `git push origin v0.2`
 2. GitHub Release を作り、`dist/` の中身（zip・`.onnx`・`.pt`・`scale-v0.2.json`・自己対局の標本・`SHA256SUMS`）を添付する。
+   本文は [release-notes-v0.2.md](release-notes-v0.2.md) に置いてあるので、`--notes-file` で渡す。
+
+   ```bash
+   cd ~/LibraShogi && D=~/libra-run/releases/v0.2/dist
+   gh release create v0.2 --title "Libra v0.2 (step 317,975)" --notes-file docs/release-notes-v0.2.md \
+     "$D/libra-v0.2-windows-x64.zip" "$D/libra-v0.2.onnx" "$D/libra-v0.2.pt" \
+     "$D/scale-v0.2.json" "$D/libra-v0.2-selfplay-sample.jsonl.gz" "$D/SHA256SUMS"
+   ```
 3. 本文に書くこと（v0.1 の本文に倣う）:
    - **v0.1 からどれだけ強くなったか**（§3 の直接対局 1,000 局の Elo と区間）
    - 外部エンジンとの計測の条件（ハンデ付きであること、読む回数、相手の持ち時間）と結果
@@ -304,13 +312,13 @@ tools/package_release.sh v0.2 ~/libra-run/releases/v0.2 '<v0.2 の重みに到�
 
 ## 9. チェックリスト
 
-- [ ] §0 総局数 360 万局の自動計測が終わったことを確かめ、ユーザーに報告した
-- [ ] §8 の A〜F をユーザーに確かめた
-- [ ] §1 重みを `~/libra-run/releases/v0.2/` に固定し、コミットを控えた
-- [ ] §2 玉配置表を作り直し、`v_hat_minus_w` を measurements.md に書いた
-- [ ] §3 強さを測った（rating・v0.1 との直接対局・外部 40 局）
-- [ ] §4 `docs/model-card-v0.2.md` を書き、NOTICE を直した
-- [ ] §5 配布物を 2 回作ってハッシュが一致し、展開した `libra.exe` が動いた
+- [x] §0 総局数 360 万局の自動計測が終わったことを確かめ、ユーザーに報告した
+- [x] §8 の A〜F をユーザーに確かめた
+- [x] §1 重みを `~/libra-run/releases/v0.2/` に固定し、コミットを控えた
+- [x] §2 玉配置表を作り直し、`v_hat_minus_w` を measurements.md に書いた
+- [x] §3 強さを測った（rating・v0.1 との直接対局 1,000 局。外部 40 局は記録が空で**未計測**。モデルカード §5.6）
+- [x] §4 `docs/model-card-v0.2.md` を書き、NOTICE を直した
+- [x] §5 配布物を 2 回作ってハッシュが一致し、展開した `libra.exe` が動いた
 - [ ] §6 タグを push し、Release を公開し、data/README.md に行を足した
 - [ ] §7 サイトの重み・玉配置表・一致試験を差し替え、`npm test` と e2e が通った
 - [ ] decisions.md に決定を、measurements.md に実測を 1 行ずつ書いた
