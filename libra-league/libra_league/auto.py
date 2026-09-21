@@ -73,6 +73,21 @@ def children_peak_mb() -> int | None:
         return None
 
 
+def _log_tail(path: Path, lines: int = 5) -> list[str]:
+    """失敗したジョブの理由を state に残すための auto.log の末尾。
+
+    計測ジョブの出力は `auto.log` にしか書かれず、終了コードも state の history に埋もれて公開されないので、
+    **失敗が黙って消えていた**（2026-09-21 に判明。外部計測が 280 万局を最後に 3 回続けて 1 局も記録を
+    残しておらず、原因はホストのログを見ないと分からなかった）。progress に出すので、ホームの絶対パスは
+    `~` に直す（公開リポジトリに利用者名を出さない）。"""
+    try:
+        raw = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    home = str(Path.home())
+    return [s[:200] for s in (t.strip().replace(home, "~") for t in raw if t.strip())][-lines:]
+
+
 def _mem_note(job: dict) -> str:
     """ログの末尾に付けるメモリの一言（前後のランナーの RSS と、計測ジョブの最大）。読めない環境では空。"""
     a, b, c = job.get("rss_start_mb"), job.get("rss_end_mb"), job.get("peak_child_mb")
@@ -813,10 +828,17 @@ class AutoJobs:
                 self.record_best(job)
             elif job.get("kind") == "reference" and rc == 0:
                 self.record_reference(job)
+            if rc != 0:
+                # 失敗の理由は auto.log にしか出ない。末尾を state に写して progress と review から見えるようにする
+                job["tail"] = _log_tail(self.sd.root / "auto.log")
             st["history"] = (st["history"] + [job])[-20:]
             st["running"] = None
-            self.log(f"auto: {job.get('kind')} finished rc={rc} ({job['finished'] - job.get('started', job['finished']):.0f}s)"
-                     + _mem_note(job))
+            secs = job["finished"] - job.get("started", job["finished"])
+            if rc == 0:
+                self.log(f"auto: {job.get('kind')} finished rc={rc} ({secs:.0f}s)" + _mem_note(job))
+            else:
+                self.log(f"auto: {job.get('kind')} FAILED rc={rc} ({secs:.0f}s): "
+                         + (job["tail"][-1] if job.get("tail") else "auto.log is empty") + _mem_note(job))
             self.proc = None
             self.current = None
             (self.sd.root / JOB_FILE).unlink(missing_ok=True)

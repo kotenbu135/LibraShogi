@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from libra_league.auto import AutoJobs, append_metrics, collect_anchor, archive_checkpoint, collect_evals, collect_matches, list_archives, load_metrics
+from libra_league.auto import AutoJobs, _log_tail, append_metrics, collect_anchor, archive_checkpoint, collect_evals, collect_matches, list_archives, load_metrics
 from libra_league.cli import main
 from libra_league.config import load_config
 from libra_league.state import StateDir
@@ -795,3 +795,59 @@ def test_auto_job_records_memory_around_the_run(tmp_path):
     assert done["rc"] == 0
     if Path("/proc/self/status").exists():
         assert done["rss_end_mb"] > 0 and "runner rss" in lines[-1]
+
+
+def _run_one_job(jobs, out: Path) -> dict:
+    """待ち行列のジョブを 1 つ起動して、終わるまで poll する。"""
+    assert jobs.poll() is True
+    for _ in range(200):
+        if jobs.proc is not None and jobs.proc.poll() is not None:
+            break
+        time.sleep(0.05)
+    jobs.poll()
+    return jobs.state["auto"]["history"][-1]
+
+
+def test_a_failed_job_says_why_instead_of_disappearing(tmp_path):
+    """失敗した計測ジョブは終了コードと auto.log の末尾を履歴に残し、log に FAILED と出す。
+
+    2026-09-21 まで、失敗は auto.log に埋もれて誰も気づけなかった（外部計測が 280 万局を最後に
+    3 回続けて 1 局も記録を残していないのに、判定はずっと「続ける」だった）。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    cfg = load_config(None)
+    cfg["auto"] = {"enabled": True, "every_games": 0, "match_games": 0, "anchor_games": 0, "best_games": 0}
+    lines: list[str] = []
+    jobs = AutoJobs(sd, cfg, {"games_total": 0}, lines.append,
+                    cmd_prefix=[sys.executable, "-c", "import sys; print('cannot open EvalDir'); sys.exit(3)"])
+    out = tmp_path / "m.jsonl"
+    jobs.state["auto"]["queue"].append({"kind": "match", "args": [], "out": str(out)})
+    done = _run_one_job(jobs, out)
+    assert done["rc"] == 3
+    assert done["tail"] and "cannot open EvalDir" in done["tail"][-1]
+    assert "FAILED rc=3" in lines[-1] and "cannot open EvalDir" in lines[-1]
+
+
+def test_a_job_that_worked_keeps_no_tail(tmp_path):
+    """正常に終わったジョブには auto.log の末尾を付けない（履歴が太らないように）。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    cfg = load_config(None)
+    cfg["auto"] = {"enabled": True, "every_games": 0, "match_games": 0, "anchor_games": 0, "best_games": 0}
+    lines: list[str] = []
+    jobs = AutoJobs(sd, cfg, {"games_total": 0}, lines.append, cmd_prefix=[sys.executable, "-c", "pass"])
+    jobs.state["auto"]["queue"].append({"kind": "match", "args": [], "out": str(tmp_path / "m.jsonl")})
+    done = _run_one_job(jobs, tmp_path / "m.jsonl")
+    assert done["rc"] == 0 and "tail" not in done
+    assert "FAILED" not in lines[-1]
+
+
+def test_the_tail_does_not_leak_the_home_path(tmp_path, monkeypatch):
+    """末尾は progress ブランチ（公開）に載るので、ホームの絶対パスは ~ に直す。"""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    log = tmp_path / "auto.log"
+    log.write_text(f"\nopening {tmp_path / 'home'}/libra-run/ls/matches/a.jsonl failed\n\n", encoding="utf-8")
+    tail = _log_tail(log)
+    assert tail == ["opening ~/libra-run/ls/matches/a.jsonl failed"]
+    assert str(tmp_path / "home") not in tail[0]
+    assert _log_tail(tmp_path / "knowhere.log") == []       # ログがまだ無くても落ちない

@@ -142,3 +142,35 @@ def test_m4_reference_uses_the_last_two_points(tmp_path):
     items = refs(old)
     assert items["M4 参照 old.pt"]["verdict"] == NA and "もう測っていない" in items["M4 参照 old.pt"]["why"]
     assert items["M4 参照 old.pt"]["values"]["behind_games"] == 1600000
+
+
+def test_review_reports_a_failed_measurement_job(tmp_path):
+    """計測ジョブが失敗したら判定に出す。2026-09-21 まで、外部計測が 3 回続けて 1 局も記録を
+    残していないのに判定はずっと「続ける」だった（理由は auto.log にしか出ていなかった）。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    sd.write_state({"auto": {"history": [
+        {"kind": "best", "rc": 0},
+        {"kind": "match", "rc": 3, "tail": ["opening ~/fuseki-shogi-ai/vendor/yaneuraou_eval failed"]},
+    ]}})
+    r = review(sd)
+    item = next(i for i in r["items"] if i["name"] == "計測ジョブ")
+    assert item["verdict"] == WARN
+    assert "1 件が失敗（match）" in item["why"] and "yaneuraou_eval" in item["why"]
+    assert item["values"]["n_failed"] == 1
+    assert r["verdict"] == WARN          # run 全体の判定にも出る
+
+
+def test_review_says_the_jobs_are_fine_when_they_are(tmp_path):
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    sd.write_state({"auto": {"history": [{"kind": "best", "rc": 0}, {"kind": "match", "rc": 0}]}})
+    item = next(i for i in review(sd)["items"] if i["name"] == "計測ジョブ")
+    assert item["verdict"] == OK and item["values"]["n_failed"] == 0
+
+
+def test_review_has_no_job_item_before_anything_ran(tmp_path):
+    """履歴がまだ無い run では項目を出さない（「まだ無い」が増えるだけなので）。"""
+    sd = StateDir(tmp_path / "x")
+    sd.create()
+    assert not any(i["name"] == "計測ジョブ" for i in review(sd)["items"])
