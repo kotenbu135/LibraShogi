@@ -1,6 +1,6 @@
 # LibraShogi
 
-天秤将棋（[ルール](https://fusekishogi.com/rules/)）の AI「Libra」。**自己対局だけで学習**し、既存の将棋 AI のコード・評価関数・重み・棋譜・評価値を内部にも学習信号にも使っていない。
+天秤将棋（[ルール](https://tenbinshogi.com/rules/)）の AI「Libra」。**自己対局だけで学習**し、既存の将棋 AI のコード・評価関数・重み・棋譜・評価値を内部にも学習信号にも使っていない。
 コードは Apache-2.0、文書は CC BY 4.0、自己対局データと玉配置表は CC0。天秤将棋の AI を作る後続の人が、ルールの仕様・シミュレータ・対局ハーネス・学習の一式をそのまま使えるように公開している。
 
 *LibraShogi is an AI for Tenbin Shogi (a shogi variant with a 40-ply piece-placement phase and a king-placement "balance" opening), trained from self-play only, with no code, weights or game records from existing shogi engines. Code is Apache-2.0, documents CC BY 4.0, self-play data CC0. Documentation is in Japanese; the rules specification ([docs/rules.md](docs/rules.md)) and the USI protocol extension ([docs/protocol.md](docs/protocol.md)) are the places to start for another implementation.*
@@ -98,4 +98,4 @@ bin/libra run        # 自己対局と学習（状態は ~/libra-run/ls）。sto
 
 ## 質問・不具合
 
-[Issues](https://github.com/kotenbu135/LibraShogi/issues) へ。ルールの解釈に関わるものは [docs/rules.md](docs/rules.md) の節を示す。天秤将棋のルールそのもの（fusekishogi.com）の話はルール設計者の判断になる。
+[Issues](https://github.com/kotenbu135/LibraShogi/issues) へ。ルールの解釈に関わるものは [docs/rules.md](docs/rules.md) の節を示す。天秤将棋のルールそのもの（tenbinshogi.com）の話はルール設計者の判断になる。
