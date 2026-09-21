@@ -1,6 +1,6 @@
 # LibraShogi
 
-天秤将棋（https://fusekishogi.com/rules/）の AI「Libra」。設計は docs/libra-design.md、実行計画は docs/libra-local.md。
+天秤将棋（https://tenbinshogi.com/rules/）の AI「Libra」。設計は docs/libra-design.md、実行計画は docs/libra-local.md。
 **新しいセッションではまず本ファイル → docs/runbook.md → docs/decisions.md の末尾 → docs/measurements.md の末尾を読み、`bin/libra status` と `bin/libra --run lx status` で稼働状態を確かめてから作業する。**
 ユーザー（ルール設計者、git user は kotenbu）とのやり取りは日本語。
 

@@ -8,7 +8,7 @@
 
 ## 1. 何のモデルか
 
-**天秤将棋**（https://fusekishogi.com/rules/ 、本リポジトリの規定は [rules.md](rules.md)）を指す AI「Libra」の方策・価値ネット。
+**天秤将棋**（https://tenbinshogi.com/rules/ 、本リポジトリの規定は [rules.md](rules.md)）を指す AI「Libra」の方策・価値ネット。
 1 手目から 40 手目までの布石（駒を打って陣を作る段階）と、41 手目以降の本将棋の両方を 1 つのネットで扱う。
 USI を拡張したエンジン（`libra` / `libra.exe`、[protocol.md](protocol.md)）から ONNX Runtime で読み、MCGS（Gumbel AlphaZero 系の探索）の評価に使う。
 
