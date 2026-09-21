@@ -15,7 +15,7 @@
 namespace libra_engine {
 
 using namespace libra;
-const char* VERSION = "0.0.2";
+const char* VERSION = "0.2.0";
 
 static double now_s() {
   using namespace std::chrono;
