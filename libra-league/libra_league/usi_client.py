@@ -20,6 +20,9 @@ class UsiEngine:
         self.q: queue.Queue[str | None] = queue.Queue()
         self.id_name = ""
         self.declared: dict[str, str] = {}
+        # 相手の標準エラーの末尾。2026-09-21 まで捨てていたので、相手が起動できずに落ちた理由がどこにも
+        # 残らなかった（外部計測が 3 回続けて 1 局も記録せず、原因はホストでしか分からなかった）
+        self.stderr_tail: list[str] = []
 
     def _reader(self) -> None:
         assert self.proc and self.proc.stdout
@@ -30,12 +33,28 @@ class UsiEngine:
             self.q.put(line)
         self.q.put(None)
 
+    def _stderr_reader(self) -> None:
+        """標準エラーは USI の行ではないので待ち行列に混ぜず、末尾だけ持っておく（落ちた理由になる）。"""
+        assert self.proc and self.proc.stderr
+        for line in self.proc.stderr:
+            line = line.rstrip("\r\n")
+            if not line.strip():
+                continue
+            if self.log:
+                self.log(f"[{self.name}] ! {line}")
+            self.stderr_tail = (self.stderr_tail + [line[:200]])[-10:]
+
     def send(self, line: str) -> None:
         assert self.proc and self.proc.stdin
         if self.log:
             self.log(f"[{self.name}] > {line}")
         self.proc.stdin.write(line + "\n")
         self.proc.stdin.flush()
+
+    def _why(self) -> str:
+        """落ちた理由として添える標準エラーの末尾（`cmd` は呼ぶ側が持っているので出さない）。"""
+        time.sleep(0.05)  # 読み取りの糸が最後の行を拾うのを待つ
+        return (" | stderr: " + " / ".join(self.stderr_tail)) if self.stderr_tail else ""
 
     def wait_for(self, pred, timeout: float) -> list[str]:
         """pred(line) が真になるまでの行を返す（最後の行を含む）。時間切れは TimeoutError。"""
@@ -44,23 +63,24 @@ class UsiEngine:
         while True:
             remain = end - time.time()
             if remain <= 0:
-                raise TimeoutError(f"{self.name}: no response within {timeout}s (last: {lines[-3:]})")
+                raise TimeoutError(f"{self.name}: no response within {timeout}s (last: {lines[-3:]})" + self._why())
             try:
                 line = self.q.get(timeout=remain)
             except queue.Empty:
                 continue
             if line is None:
-                raise RuntimeError(f"{self.name}: process exited")
+                raise RuntimeError(f"{self.name}: process exited" + self._why())
             lines.append(line)
             if pred(line):
                 return lines
 
-    def start(self, ready_timeout: float = 1200.0) -> None:
+    def start(self, ready_timeout: float = 1200.0, usi_timeout: float = 60.0) -> None:
         self.proc = subprocess.Popen(self.cmd, cwd=self.cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                     stderr=subprocess.DEVNULL, text=True, bufsize=1)
+                                     stderr=subprocess.PIPE, text=True, bufsize=1)
         threading.Thread(target=self._reader, daemon=True).start()
+        threading.Thread(target=self._stderr_reader, daemon=True).start()
         self.send("usi")
-        for line in self.wait_for(lambda l: l == "usiok", 60):
+        for line in self.wait_for(lambda l: l == "usiok", usi_timeout):
             t = line.split()
             if line.startswith("id name "):
                 self.id_name = line[len("id name "):]

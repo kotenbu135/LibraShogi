@@ -471,8 +471,16 @@ def main(argv: list[str] | None = None) -> int:
         libra = UsiEngine("libra", [str(root / "bin" / "libra-usi")], cwd=str(root), options=lopts, log=lambda s: logf and logf.write(s + "\n"))
         opp = UsiEngine("opp", ocmd, cwd=opp_cwd, options=oopts, log=lambda s: logf and logf.write(s + "\n"))
         log(f"starting engines: libra={libra.cmd} opp={ocmd}")
-        libra.start()
-        opp.start()
+        # 起動できないときは理由を 1 行で残して終わる。素の traceback だと、相手が何で落ちたのかが
+        # どこにも出なかった（2026-09-21。外部計測が 3 回続けて 1 局も記録せず rc=1 で終わっていた）
+        for eng in (libra, opp):
+            try:
+                eng.start()
+            except (TimeoutError, RuntimeError, OSError) as e:
+                log(f"match: {eng.name} を起動できない（{' '.join(str(t) for t in eng.cmd)}、cwd={eng.cwd}）: {type(e).__name__}: {e}")
+                libra.quit()
+                opp.quit()
+                return 1
         log(f"libra: {libra.id_name}  opp: {opp.id_name}")
         try:
             summary = run_match(libra, opp, a.games, a.go, out, log=log, first_placer=a.first_placer, go_args_b=a.go_opp,
