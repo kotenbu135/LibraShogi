@@ -119,6 +119,7 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 - 作り直すとき、前の `config.toml` は `config.toml.bak-<時刻>` に残し、変わったキーを log.txt に並べる。ブリッジ（libra-cloud）・ワーカーの束・`libra status` などはこれまで通り `<run>/config.toml` を読むので、影響しない。
 - **見るとき**: `bin/libra [--run lx] config`（設定の正・その PC の上書き・**反映待ちの違い**を出す。書き換えない）。`--json` もある。
 - **リポジトリにまだ無いラン**: そのランの `config.toml` をそのまま写して作る（中身を推測して書くと学習の設定を黙って変えるため）。`bin/libra [--run lx] config --adopt`、または `progress` ブランチの `progress/<run-id>-config.toml`（効いている設定そのもの。ホームは `~` に直してある）から。ランナーは**リポジトリの作業ツリーには書かない**（あとで `git pull` とぶつかるため）。
+- **設定がどこにも無い run は起動しない**（2026-09-21 から）。リポジトリの `config/<run-id>.toml` も `<run>/config.toml` も無いまま `libra run` が来たら、理由を `log.txt` と標準エラーに出して終了コード 4 で終わる（監視役は起動し直さない）。空のディレクトリに既定値を書いて乱数初期化から学習を始め、誰も設定していない重みが本物の run と GPU を分け合うのを止めるため（同日に `~/libra-run/lx` で 14 分起きた）。新しい run を始めるときは `config/<run-id>.toml` を置くか `--config <ファイル>` を付ける。
 - 環境変数 `LIBRA_CONFIG_REF` で読むところを変えられる（既定 `origin/main`、`none` で作業ツリーのファイル）。
 - 公開リポジトリなので、`config/` には絶対パスを書かず `~` を使い（読むときに展開される）、秘密情報を置かない。
 
