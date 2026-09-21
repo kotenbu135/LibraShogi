@@ -30,6 +30,13 @@ max_moves_per_game = 400
 mate_nodes_root = 200
 proof_nodes = 1000
 proof_min_ply = 36
+# 投了（2026-09-21 に有効にした。v0.3 の 1 つ目。docs/v0.3-plan.md §3、出典と実測は docs/measurements.md
+# 2026-09-19）。0.90・1 手・10 局に 1 局は最後まで打つ ＝ AlphaGo Zero の形。節約 17%、局/日 1.21 倍、
+# 誤投了 2.6%（原典の基準 5% の内側）。**計測の対局では投了しない**（evaluate.play_match が 0 に上書きする）
+resign_threshold = 0.9
+resign_runs = 1             # 1 手だけ下回れば投了（既定と同じ。明示しておく）
+resign_disable_prob = 0.1   # 10 局に 1 局は投了せず最後まで打つ（誤投了を測り続けるため）
+resign_min_ply = 40         # 布石の 40 手が終わるまでは投了しない
 
 [selfplay]
 n_games = 512
