@@ -39,6 +39,24 @@ bin/libra-vast stop                                              # 残りの局�
 bin/libra-vast cleanup --yes                                     # libra- のラベルのインスタンスをすべて消す（残ったとき）
 ```
 
+### 玉配置表の全組の検証対局に GPU を足す（`--job scale`）
+
+`libra-scale seq` は手元の GPU だけだと丸 1 日かかる（v0.1 は 303,677 局）。借りた GPU を足すと、その台数ぶん短くなる。
+
+```bash
+# 1. 手元で seq の run を始める（config.json・active.json ができてから借りる）
+bin/libra-scale seq run --dir ~/libra-run/ls/scale/seq-v0.2 --table ~/libra-run/ls/scale/scale-v0.2.json --notify windows
+# 2. 台ごとに --root と --worker-id を分けて起動する（同時に動かせるセッションは --root ごとに 1 つ）
+bin/libra-vast --root ~/libra-run/cloud-scale-1 start --job scale --scale-dir ~/libra-run/ls/scale/seq-v0.2   --gpu "RTX 5080" --max-dph 0.30 --hours 5 --rent on-demand --worker-id vs1
+bin/libra-vast --root ~/libra-run/cloud-scale-2 start --job scale --scale-dir ~/libra-run/ls/scale/seq-v0.2   --gpu "RTX 5080" --max-dph 0.30 --hours 5 --rent on-demand --worker-id vs2
+bin/libra-vast --root ~/libra-run/cloud-scale-1 status    # 台ごとに見る。止めるときも --root ごとに stop
+```
+
+- **借り方は on-demand にする。** 検証対局のセッションは**ホストを失っても借り直さない**（`vast_worker.py` の借り直しは自己対局だけ）ので、
+  入札で止められるとその台は戻らない。入札の実測は 11 回中 11 回・平均 0.5 時間で止められている（measurements.md 2026-09-20）。
+- `--root ~/libra-run/cloud` は自己対局が使っているので、検証対局には別の置き場所を使う（費用の集計とコンソールの表示が混ざらない）。
+- 全部の組が打ち切られるとブリッジが抜け、インスタンスは自動で消える（時間が余っていても課金は止まる）。
+
 | ファイル | 内容 |
 |---|---|
 | `libra_cloud/vast_cli.py`（`bin/libra-vast`） | セッション（`~/libra-run/cloud/<run>-<時刻>/`）を作り、束の作成と `vast_worker.py` を setsid で切り離して起動する。同時に動かせるのは置き場所（`--root`）ごとに 1 つ。2 台目は別の `--root`（例 `~/libra-run/cloud2`）と別のワーカー名（`start --worker-id vast2`）で起動する（コンソールは `~/libra-run/cloud` しか見ないので、2 台目は 1 台目より先に終わるように `--hours` を決める。1 台目が終わった後に 2 台目のインスタンスが残ると、コンソールが「後始末」を促し、押すと 2 台目も消える）。停止はブリッジが動いていれば `bridge/STOP`、借りる途中ならプロセスグループに SIGTERM。`~/.venvs/vastai` の Python で動く |

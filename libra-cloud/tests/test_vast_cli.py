@@ -407,3 +407,61 @@ def test_history_counts_what_each_interruption_cost(tmp_path: Path, capsys):
     assert vast_cli.main(["--root", str(root), "history", "--run-root", str(tmp_path / "runs")]) == 0
     out = capsys.readouterr().out
     assert "打ち切り 1 回" in out and "借り直せず 0 回" in out and "打ち切りが無ければ" in out
+
+
+def _scale_dir(tmp_path: Path, pairs: list | None = None) -> Path:
+    """libra-scale seq run が作る状態のディレクトリ（最低限、起動の検査が読むぶんだけ）。"""
+    d = tmp_path / "scale" / "seq-v0.2"
+    d.mkdir(parents=True)
+    _write(d / "config.json", {"model": str(tmp_path / "libra-v0.2.pt"), "sims": 96})
+    _write(d / "active.json", {"pairs": [["5i", "5a"]] if pairs is None else pairs})
+    return d
+
+
+def test_start_scale_needs_a_seq_run_that_still_has_pairs(tmp_path: Path, monkeypatch, capsys):
+    base = ["start", "--job", "scale", "--gpu", "RTX 5080", "--max-dph", "0.3", "--hours", "5"]
+    # --scale-dir が無い
+    assert vast_cli.main(_argv(tmp_path, *base)) == 2
+    assert "--scale-dir" in capsys.readouterr().out
+    # seq の run がまだ始まっていない（config.json が無い）
+    missing = tmp_path / "scale" / "seq-v0.2"
+    assert vast_cli.main(_argv(tmp_path, *base, "--scale-dir", str(missing))) == 2
+    assert "libra-scale seq run" in capsys.readouterr().out
+    # 打ち切っていない組がもう無い
+    done = _scale_dir(tmp_path / "done", pairs=[])
+    assert vast_cli.main(_argv(tmp_path, *base, "--scale-dir", str(done))) == 2
+    assert "打ち切っていない組がありません" in capsys.readouterr().out
+    assert Sessions(tmp_path / "cloud").current() is None
+
+
+def test_start_scale_launches_with_the_seq_run(tmp_path: Path, monkeypatch, capsys):
+    d_scale = _scale_dir(tmp_path)
+    seen = {}
+
+    def fake_argv(a, run_dir, d):
+        seen.update(run_dir=run_dir, job=a.job)
+        return ["bash", "-c", "echo 'credit $9.00; run x'; sleep 60"]
+
+    monkeypatch.setattr(vast_cli, "launch_argv", fake_argv)
+    argv = _argv(tmp_path, "start", "--job", "scale", "--scale-dir", str(d_scale), "--gpu", "RTX 5080",
+                 "--max-dph", "0.3", "--hours", "5", "--rent", "on-demand", "--worker-id", "vs1")
+    assert vast_cli.main(argv) == 0
+    assert seen["run_dir"] == d_scale and seen["job"] == "scale"
+    assert "玉配置表の検証対局" in capsys.readouterr().out
+    cur = Sessions(tmp_path / "cloud").current()
+    assert cur is not None and cur.name.startswith("seq-v0.2-")   # セッション名は seq の run の名前
+    s = json.loads((cur / "session.json").read_text(encoding="utf-8"))
+    try:
+        assert s["job"] == "scale" and s["scale_dir"] == str(d_scale) and s["worker_id"] == "vs1"
+    finally:
+        os.kill(s["pid"], 15)
+
+
+def test_launch_argv_scale_prepares_the_seq_bundle(tmp_path: Path):
+    import argparse
+
+    a = argparse.Namespace(gpu="RTX 5080", max_dph=0.30, hours=5.0, min_rel=0.94, min_cpu_ghz=4.4, min_cores=16, max_inet_cost=0.02,
+                           n_games=512, rent="on-demand", bid_margin=0.1, job="scale", worker_id="vs1")
+    cmd = vast_cli.launch_argv(a, tmp_path / "seq-v0.2", tmp_path / "s")[2]
+    assert f"--scale-dir {tmp_path / 'seq-v0.2'}" in cmd and "--job scale" in cmd and "--id vs1" in cmd
+    assert "--ckpt" not in cmd and "--run-dir" not in cmd   # 学習側の run は要らない

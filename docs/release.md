@@ -113,8 +113,25 @@ bin/libra export --ckpt ~/libra-run/releases/v0.2/libra-v0.2.pt --out ~/libra-ru
 
 重みが変われば釣り合う組も変わるので、**版ごとに作り直す**。v0.2 の表は Release の添付にもサイトのハンデ表にもなる。
 
+- まず探索で全組のあたりを付ける（v0.1 は 39 秒。ls を止めなくてよい）:
+  `bin/libra-scale build --model ~/libra-run/releases/v0.2/libra-v0.2.pt --sims 1600 --out ~/libra-run/ls/scale/scale-v0.2.json`
 - **全組（492 組）を検証対局で作り直す**: `bin/libra-scale seq run --dir ~/libra-run/ls/scale/seq-v0.2 --table ~/libra-run/ls/scale/scale-v0.2.json --notify windows`（手順は libra-scale/README.md の seq）。
   v0.1 は 303,677 局・約 12 時間（クラウドの GPU 1 台を足して）。**この間は ls・lx を止める**（§8-B）。
+  終わったら表にする: `bin/libra-scale seq table --dir ~/libra-run/ls/scale/seq-v0.2 --out ~/libra-run/ls/scale/scale-v0.2.1.json`
+- **借りた GPU を足して短くする**（2026-09-21 のユーザーの依頼）: seq の run を始めてから、台ごとに
+  `bin/libra-vast --root ~/libra-run/cloud-scale-<n> start --job scale --scale-dir <seq の run> --rent on-demand --worker-id vs<n>`
+  （手順と注意は libra-cloud/README.md §玉配置表の全組の検証対局）。v0.1 の実測（手元 200 局/分、借りた GPU 240 局/分・実効 $0.226/h）からの目安:
+
+  | 借りる台数 | かかる時間 | 費用 |
+  |---|---|---|
+  | 0（手元だけ） | 約 25 時間 | $0 |
+  | 1 | 約 11.5 時間 | 約 $2.6 |
+  | 2 | 約 7.5 時間 | 約 $3.4 |
+  | 4 | 約 4.5 時間 | 約 $4.1 |
+  | 6 | 約 3 時間 | 約 $4.2 |
+
+  **費用は台数を増やしてもほとんど増えない**（借りた GPU が打つ 1 局の値段は変わらず、増える台数のぶん手元の遅い GPU に頼らなくなるだけ）。
+  準備（1 台あたり 5〜15 分）と打ち切りぶんで 1〜2 割の余裕を見る。
 - 上位だけでよいなら `bin/libra-scale build --sims 1600` → `verify --top 48 --games 100`。こちらは **ls・lx を止めずに GPU を共有したまま回す**（decisions.md 2026-09-15）。
 - 終わったら `verify.v_hat_minus_w`（検証した組の V̂ と実際の勝率の差）を measurements.md に 1 行書く。標準誤差の 2 倍を超えて 0 から離れていたら学習目標の偏りを疑う（v0.1 は −0.008）。
 
