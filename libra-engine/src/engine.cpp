@@ -33,6 +33,10 @@ static std::string env_or(const char* name, const std::string& def) {
   return v && *v ? std::string(v) : def;
 }
 
+// 玉配置表の既定の場所。DNN_Model と同じく実行ファイルの隣を見る（docs/release.md §8-D、ユーザーの決定 2026-09-21）。
+// 配布物の zip は exe の隣に scale.json を入れるので、GUI の登録で手でパスを入れなくても表が使われる。
+static std::string default_scale_path() { return exe_dir() + "/scale.json"; }
+
 Engine::Engine() {
   opts_ = {
       {"Fuseki_Mode", "tenbin"},
@@ -43,7 +47,7 @@ Engine::Engine() {
       {"DNN_Provider", env_or("LIBRA_PROVIDER", "auto")},
       {"Sims_Fuseki", "400"},
       {"Sims_Normal", "800"},
-      {"Scale_Table", ""},
+      {"Scale_Table", default_scale_path()},
       {"USI_Ponder", "false"},
       {"Declare_Win", "false"},
       {"Mate_Nodes", "2000"},
@@ -72,7 +76,7 @@ void Engine::declare_options() const {
   out("option name DNN_Provider type combo default " + opts_.at("DNN_Provider") + " var auto var cuda var dml var cpu");
   out("option name Sims_Fuseki type spin default 400 min 1 max 1000000");
   out("option name Sims_Normal type spin default 800 min 1 max 1000000");
-  out("option name Scale_Table type string default <empty>");
+  out("option name Scale_Table type string default " + opts_.at("Scale_Table"));
   out("option name USI_Ponder type check default false");
   out("option name Declare_Win type check default false");
   out("option name Mate_Nodes type spin default 2000 min 0 max 10000000");
@@ -155,13 +159,16 @@ void Engine::info_lines(const SearchResult& r, double elapsed_s, const char* pha
 // scale.json（libra-scale）の "balanced": [["5i","5a"], ...] だけを読む最小の走査
 bool Engine::load_scale(std::string* err) {
   const std::string path = opts_.at("Scale_Table");
+  if (err) err->clear();
   if (path == scale_loaded_) return true;
   scale_.clear();
   scale_loaded_ = path;
   if (path.empty()) return true;
   std::ifstream f(path, std::ios::binary);
   if (!f) {
-    if (err) *err = "cannot open Scale_Table " + path;
+    // 既定の場所にファイルが無いのは普通のこと（表を同梱しない使い方）。そのまま探索で置くので黙る。
+    // 利用者が自分で入れたパスが開けないときだけ言う。
+    if (err && path != default_scale_path()) *err = "cannot open Scale_Table " + path;
     return false;
   }
   std::string s((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -262,7 +269,7 @@ void Engine::go(const std::vector<std::string>& args) {
     return;
   }
   // 両玉の配置: 玉配置表（Scale_Table）があれば釣り合い集合から一様に選ぶ
-  if (!load_scale(&err)) out("info string " + err);
+  if (!load_scale(&err) && !err.empty()) out("info string " + err);
   std::string sm;
   if (scale_move(pos, &sm) && pos.is_legal(move_from_usi(sm))) {
     out("info depth 1 multipv 1 score cp 0 winrate 0.5000 nodes 0 time 0 pv " + sm);
