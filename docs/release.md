@@ -126,7 +126,7 @@ bin/libra export --ckpt ~/libra-run/releases/v0.2/libra-v0.2.pt --out ~/libra-ru
   v0.1 は 303,677 局・約 12 時間（クラウドの GPU 1 台を足して）。**この間は ls・lx を止める**（§8-B）。
   終わったら表にする: `bin/libra-scale seq table --dir ~/libra-run/ls/scale/seq-v0.2 --out ~/libra-run/ls/scale/scale-v0.2.1.json`
 - **借りた GPU を足して短くする**（2026-09-21 のユーザーの依頼）: seq の run を始めてから、台ごとに
-  `bin/libra-vast --root ~/libra-run/cloud-scale-<n> start --job scale --scale-dir <seq の run> --rent on-demand --worker-id vs<n>`
+  `bin/libra-vast --root ~/libra-run/cloud-scale-<n> start --job scale --scale-dir <seq の run> --worker-id vs<n>`
   （手順と注意は libra-cloud/README.md §玉配置表の全組の検証対局）。v0.1 の実測（手元 200 局/分、借りた GPU 240 局/分・実効 $0.226/h）からの目安:
 
   | 借りる台数 | かかる時間 | 費用 |

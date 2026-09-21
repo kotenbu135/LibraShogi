@@ -13,7 +13,8 @@
 
 --job scale は玉配置表の全組の検証対局（libra-scale seq）のワーカー: 束は `python -m libra_cloud.prepare --scale-dir <seq の run>`、
 ホストで libra-scale seq worker（bench/host_scale.sh）、ブリッジは libra_cloud.scale_bridge。--run-dir の代わりに --scale-dir を渡す。
-全部の組が止まるとブリッジが抜けてインスタンスを消す。ホストを失っても借り直さない。
+全部の組が止まるとブリッジが抜けてインスタンスを消す。ホストを失ったときは自己対局と同じく残りの時間で借り直す
+（2026-09-21。入札は平均 0.5 時間で止められるので、借り直さないと入札が使えなかった）。打ち切った組が無くなっていれば start が断る。
 
     ~/.venvs/vastai/bin/python libra-cloud/vast_worker.py --job scale --scale-dir ~/libra-run/ls/scale/seq-v0.1 --gpu "RTX 4090" \\
       --max-dph 0.25 --hours 20 --rent bid --bundle <dir>/bundle.tar.gz --out ~/libra-run/cloud-scale/<名前>
@@ -264,10 +265,12 @@ def main() -> int:
         log(f"result {out / 'result.json'} est cost ${result.get('est_cost_usd', 0)}")
         # ホストを失った（入札で止められた・落ちた）なら、残りの時間で次のセッションを起動する（ユーザーの決定「残り時間で借り直す」）。
         # 停止（STOP・シグナル）なら借り直さない。残りの時間と締め切りの判定は bin/libra-vast start --continue-from が行う
-        if a.job == "selfplay" and result.get("lost") and not stopping and not (out / "bridge" / "STOP").exists():
+        if result.get("lost") and not stopping and not (out / "bridge" / "STOP").exists():
             try:
-                p = subprocess.run([str(REPO / "bin" / "libra-vast"), "--root", str(out.parent), "start", "--continue-from", out.name,
-                                    "--run-root", str(run_dir.parent)], capture_output=True, text=True, timeout=120)
+                # --job scale は run-root を見ない（打つ組は --scale-dir から。session.json が持っている）
+                extra = [] if a.job == "scale" else ["--run-root", str(run_dir.parent)]
+                p = subprocess.run([str(REPO / "bin" / "libra-vast"), "--root", str(out.parent), "start", "--continue-from", out.name, *extra],
+                                   capture_output=True, text=True, timeout=120)
                 msg = (p.stdout + p.stderr).strip().replace("\n", " ")[:300]
                 if p.returncode == 0:
                     nxt = (out.parent / "current").read_text(encoding="utf-8").strip()

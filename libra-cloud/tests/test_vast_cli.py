@@ -465,3 +465,47 @@ def test_launch_argv_scale_prepares_the_seq_bundle(tmp_path: Path):
     cmd = vast_cli.launch_argv(a, tmp_path / "seq-v0.2", tmp_path / "s")[2]
     assert f"--scale-dir {tmp_path / 'seq-v0.2'}" in cmd and "--job scale" in cmd and "--id vs1" in cmd
     assert "--ckpt" not in cmd and "--run-dir" not in cmd   # 学習側の run は要らない
+
+
+def test_continue_from_keeps_the_scale_job(tmp_path: Path, monkeypatch, capsys):
+    """入札で止められた検証対局の台を借り直すとき、--job scale と --scale-dir が次のセッションに引き継がれる。"""
+    d_scale = _scale_dir(tmp_path)
+    ss = Sessions(tmp_path / "cloud")
+    prev = ss.create("seq-v0.2")
+    now = time.time()
+    _write(prev / "session.json", {"run": "ls", "job": "scale", "scale_dir": str(d_scale), "gpu": "RTX 5090", "max_dph": 0.60,
+                                   "hours": 3.0, "min_rel": 0.94, "min_cpu_ghz": 4.4, "min_cores": 16, "max_inet_cost": 0.02,
+                                   "n_games": 512, "rent": "bid", "bid_margin": 0.1, "worker_id": "vs3", "started": now - 1800,
+                                   "pid": None, "deadline": now - 1800 + 3 * 3600 + 1800})
+    _write(prev / "instance.json", {"instance": 5, "t_bridge": now - 1800})   # 0.5 時間打ってから止められた
+    seen = {}
+
+    def fake_argv(a, run_dir, d):
+        seen.update(job=a.job, run_dir=run_dir, hours=a.hours, worker_id=a.worker_id, rent=a.rent)
+        return ["bash", "-c", "echo 'credit $9.00; run x'; sleep 60"]
+
+    monkeypatch.setattr(vast_cli, "launch_argv", fake_argv)
+    assert vast_cli.main(_argv(tmp_path, "start", "--continue-from", prev.name)) == 0
+    assert seen["job"] == "scale" and seen["run_dir"] == d_scale and seen["worker_id"] == "vs3" and seen["rent"] == "bid"
+    assert 2.4 < seen["hours"] <= 2.5   # 3 時間のうち 0.5 時間使った残り
+    s = json.loads((ss.current() / "session.json").read_text(encoding="utf-8"))
+    try:
+        assert s["job"] == "scale" and s["scale_dir"] == str(d_scale) and s["continues"] == prev.name
+    finally:
+        os.kill(s["pid"], 15)
+
+
+def test_continue_from_stops_when_every_pair_is_done(tmp_path: Path, monkeypatch, capsys):
+    """全部の組が打ち切られた後にホストを失っても借り直さない（もう打つものが無いのに課金しない）。"""
+    d_scale = _scale_dir(tmp_path, pairs=[])
+    ss = Sessions(tmp_path / "cloud")
+    prev = ss.create("seq-v0.2")
+    now = time.time()
+    _write(prev / "session.json", {"run": "ls", "job": "scale", "scale_dir": str(d_scale), "gpu": "RTX 5090", "max_dph": 0.60,
+                                   "hours": 3.0, "min_rel": 0.94, "min_cpu_ghz": 4.4, "min_cores": 16, "max_inet_cost": 0.02,
+                                   "n_games": 512, "rent": "bid", "bid_margin": 0.1, "worker_id": "vs3", "started": now - 1800,
+                                   "pid": None, "deadline": now + 7200})
+    _write(prev / "instance.json", {"instance": 5, "t_bridge": now - 1800})
+    monkeypatch.setattr(vast_cli, "launch_argv", lambda a, run_dir, d: ["bash", "-c", "sleep 60"])
+    assert vast_cli.main(_argv(tmp_path, "start", "--continue-from", prev.name)) == 2
+    assert "打ち切っていない組がありません" in capsys.readouterr().out
