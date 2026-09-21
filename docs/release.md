@@ -319,6 +319,6 @@ tools/package_release.sh v0.2 ~/libra-run/releases/v0.2 '<v0.2 の重みに到�
 - [x] §3 強さを測った（rating・v0.1 との直接対局 1,000 局。外部 40 局は記録が空で**未計測**。モデルカード §5.6）
 - [x] §4 `docs/model-card-v0.2.md` を書き、NOTICE を直した
 - [x] §5 配布物を 2 回作ってハッシュが一致し、展開した `libra.exe` が動いた
-- [ ] §6 タグを push し、Release を公開し、data/README.md に行を足した
+- [x] §6 タグを push し、Release を公開し、data/README.md に行を足した（2026-09-21 16:19 UTC 公開。6 ファイルの digest は SHA256SUMS と一致）
 - [ ] §7 サイトの重み・玉配置表・一致試験を差し替え、`npm test` と e2e が通った
 - [ ] decisions.md に決定を、measurements.md に実測を 1 行ずつ書いた
