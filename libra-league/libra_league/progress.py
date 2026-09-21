@@ -157,6 +157,12 @@ def snapshot(sd: StateDir, cfg: dict | None = None, points: int = 120, now: floa
             # 今の固定の参照と、勝ちすぎて自動で外したもの（reference_rotate。docs/runbook.md §6）
             "references": [Path(x).name for x in (auto.get("references") or [])],
             "references_retired": [Path(x).name for x in (auto.get("references_retired") or [])],
+            # 直近の計測ジョブの終わり方。rc != 0 は失敗で、tail は auto.log の末尾（ホストにしか無い）。
+            # これが無かったので外部計測の失敗が 3 回続けて気づかれなかった（2026-09-21、auto._log_tail）
+            "jobs": [{"kind": j.get("kind"), "rc": j.get("rc"),
+                      "secs": (round(j["finished"] - j["started"]) if j.get("finished") and j.get("started") else None),
+                      "out": Path(str(j.get("out") or "")).name, "tail": j.get("tail")}
+                     for j in (auto.get("history") or [])[-8:]],
         },
         "auto_cfg": {k: acfg.get(k) for k in ("enabled", "every_games", "eval_games", "eval_sims", "anchor_games",
                                               "best_games", "reference_games", "reference_ckpts", "reference_rotate",
