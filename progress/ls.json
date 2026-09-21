@@ -1,20 +1,20 @@
 {
  "schema": 1,
  "run": "ls",
- "generated": "2026-09-21 19:42:30",
- "t": 1789987350.4,
+ "generated": "2026-09-21 19:44:30",
+ "t": 1789987470.5,
  "process": "running",
  "flags": [],
  "now": {
-  "step": 328512,
+  "step": 328604,
   "generation": 531,
-  "games_total": 3717195,
-  "games_per_day_1h": 579277,
-  "window_games": 1858597,
+  "games_total": 3718223,
+  "games_per_day_1h": 584907,
+  "window_games": 1859111,
   "active_games": 512,
-  "elapsed_h": 85.74,
+  "elapsed_h": 85.78,
   "heldout_games": 20000,
-  "status_time": "2026-09-21 19:42:30",
+  "status_time": "2026-09-21 19:44:30",
   "train": {
    "loss": 2.113524,
    "policy": 1.466768,
@@ -89,8 +89,8 @@
   "anchor_offset": 972.5,
   "best_step": 317975,
   "best_stall": 0,
-  "queue": 3,
-  "running": "match",
+  "queue": 0,
+  "running": null,
   "last_archive_games": 3600108,
   "references": [
    "ckpt_000281893.pt"
@@ -6636,7 +6636,7 @@
   }
  ],
  "review": {
-  "time": "2026-09-21 19:42:30",
+  "time": "2026-09-21 19:44:30",
   "run": "ls",
   "items": [
    {
@@ -6704,7 +6704,7 @@
       ]
      },
      "gap_games": 410926,
-     "behind_games": 487422,
+     "behind_games": 488450,
      "score": 0.855
     }
    },
@@ -6728,14 +6728,14 @@
       ]
      },
      "gap_games": null,
-     "behind_games": 26482,
+     "behind_games": 27510,
      "score": 0.615
     }
    },
    {
     "name": "M4 参照 ckpt_000646699.pt",
     "verdict": "まだ無い",
-    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、2,478,655 局前）",
+    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、2,479,683 局前）",
     "values": {
      "last": {
       "t": 1789725300.1884296,
@@ -6752,7 +6752,7 @@
       ]
      },
      "gap_games": 395416,
-     "behind_games": 2478655,
+     "behind_games": 2479683,
      "score": 0.895
     }
    },
@@ -6776,16 +6776,16 @@
       ]
      },
      "gap_games": 411144,
-     "behind_games": 489935,
+     "behind_games": 490963,
      "score": 0.835
     }
    },
    {
     "name": "局/日（1 時間平均）",
     "verdict": "続ける",
-    "why": "579,277",
+    "why": "584,907",
     "values": {
-     "gpd": 579277
+     "gpd": 584907
     }
    }
   ],
