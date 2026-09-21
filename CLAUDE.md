@@ -84,4 +84,4 @@ libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX �
 残りの主な作業:
 - 強さ: 本体の後退の原因を確かめて直す / 世代が進んだら scale.json と搾取者の main.pt を作り直す / libra-cloud（11〜12 月の予算の配分はユーザーの判断待ち）
 - エンジン: 複数葉の同時評価と fp16 で速くする
-- 周辺: desktop 側への Issue（終局判定、玉配置表）/ docs/match_report.md / **v0.2 の公開（手順は docs/release.md。出すのは Elo の伸びが頭打ちになってから）** / 1.0 の公開準備（LICENSES、モデルカード、Releases の zip）
+- 周辺: desktop 側への Issue（終局判定、玉配置表）/ docs/match_report.md / **v0.2 の公開（手順は docs/release.md。引き金は総局数 360 万局の自動計測の完了。2026-09-21 のユーザーの決定）** / 1.0 の公開準備（LICENSES、モデルカード、Releases の zip）
