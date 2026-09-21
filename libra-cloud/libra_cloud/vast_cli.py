@@ -2,6 +2,8 @@
 """vast.ai の自己対局ワーカーを起動・停止・確認するコマンド（bin/libra-vast。管理コンソールの「クラウド」タブもこれを呼ぶ）。
 
     bin/libra-vast start --run ls --gpu "RTX 5070 Ti" --max-dph 0.28 --hours 3
+    bin/libra-vast --root ~/libra-run/cloud-scale-1 start --job scale --scale-dir ~/libra-run/ls/scale/seq-v0.2 \
+      --gpu "RTX 5080" --max-dph 0.30 --hours 5 --rent on-demand --worker-id vs1   # 玉配置表の検証対局に GPU を足す
     bin/libra-vast status [--json] [--account]
     bin/libra-vast history [--json]
     bin/libra-vast stop
@@ -10,6 +12,7 @@
 
 1 回の起動を「セッション」と呼び、~/libra-run/cloud/<run>-<時刻>/ に置く（session.json、launcher.log、束 worker/、
 vast_worker.py の出力: instance.json・setup.log・bridge/・result.json）。同時に動かせるセッションは 1 つ（cloud/current が指す）。
+2 台以上を同時に回すときは --root と --worker-id を台ごとに分ける（玉配置表の検証対局を短時間で終わらせるときの既定の使い方）。
 start は束の作成と vast_worker.py を setsid で切り離して起動し、すぐ返る（wsl.exe が終わっても動き続ける）。
 stop はブリッジが動いていれば bridge/STOP を置き（ワーカーを止めて残りの局を取ってからインスタンスを消す）、
 まだ借りている途中ならプロセスグループに SIGTERM を送る（インスタンスを消して抜ける）。
@@ -307,11 +310,20 @@ def waste_lines(w: dict) -> str:
 
 
 def launch_argv(a: argparse.Namespace, run_dir: Path, d: Path) -> list[str]:
-    """束を作ってから vast_worker.py を起動するコマンド（bash の exec で、プロセスの pid は起動のまま vast_worker.py になる）。"""
-    prep = [str(PROJECT_PY), "-m", "libra_cloud.prepare", "--worker", "--ckpt", str(run_dir / "checkpoints" / "latest.pt"),
-            "--config", str(run_dir / "config.toml"), "--out", str(d / "worker"), "--n-games", str(a.n_games)]
+    """束を作ってから vast_worker.py を起動するコマンド（bash の exec で、プロセスの pid は起動のまま vast_worker.py になる）。
+
+    --job scale では束が玉配置表の seq の run（config.json・active.json・fp16 の重み）になり、
+    ホストで host_scale.sh、手元で libra_cloud.scale_bridge が動く（vast_worker.py --job scale）。"""
+    scale = getattr(a, "job", "selfplay") == "scale"
+    if scale:
+        prep = [str(PROJECT_PY), "-m", "libra_cloud.prepare", "--scale-dir", str(run_dir), "--out", str(d / "worker")]
+        job = ["--job", "scale", "--scale-dir", str(run_dir)]
+    else:
+        prep = [str(PROJECT_PY), "-m", "libra_cloud.prepare", "--worker", "--ckpt", str(run_dir / "checkpoints" / "latest.pt"),
+                "--config", str(run_dir / "config.toml"), "--out", str(d / "worker"), "--n-games", str(a.n_games)]
+        job = ["--run-dir", str(run_dir)]
     work = [str(VAST_PY), "-u", str(REPO / "libra-cloud" / "vast_worker.py"), "--gpu", a.gpu, "--max-dph", str(a.max_dph),
-            "--hours", str(a.hours), "--run-dir", str(run_dir), "--bundle", str(d / "worker" / "bundle.tar.gz"), "--out", str(d),
+            "--hours", str(a.hours), *job, "--bundle", str(d / "worker" / "bundle.tar.gz"), "--out", str(d),
             "--min-rel", str(a.min_rel), "--min-cpu-ghz", str(a.min_cpu_ghz), "--min-cores", str(a.min_cores),
             "--max-inet-cost", str(a.max_inet_cost), "--n-games", str(a.n_games), "--rent", a.rent, "--bid-margin", str(a.bid_margin),
             "--id", getattr(a, "worker_id", "vast1")]
@@ -359,32 +371,51 @@ def cmd_start(a: argparse.Namespace) -> int:
     elif cur is not None and pid_alive((read_json(cur / "session.json") or {}).get("pid")):
         print(f"既に動いています: {cur}（止めるときは stop）")
         return 1
-    run_dir = Path(a.run_root).expanduser() / a.run
-    cfg_path = run_dir / "config.toml"
-    if not cfg_path.exists():
-        print(f"run がありません: {cfg_path}")
-        return 2
-    cfg = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
-    if (cfg.get("exploiter") or {}).get("main_ckpt"):
-        print(f"{a.run} は搾取者の run なので、ワーカーの局を足せません")
-        return 2
-    if not (cfg.get("workers") or {}).get("enabled") and not a.force:
-        print(f"{cfg_path} に [workers] enabled = true がありません。書いて {a.run} を停止 → 起動してから始めてください（局を取り込めないまま課金されるため）")
-        return 2
-    if not (run_dir / "checkpoints" / "latest.pt").exists():
-        print(f"チェックポイントがありません: {run_dir / 'checkpoints' / 'latest.pt'}")
-        return 2
-    d = ss.create(a.run)
+    if a.job == "scale":
+        # 玉配置表の全組の検証対局に GPU を足す。手元の seq の run が先に動いていて（config.json・active.json を作る）、
+        # まだ全部の組が止まっていないことだけを確かめる。打ち切った組を送っても無駄に打たせるだけなので。
+        if not a.scale_dir:
+            print("--job scale には --scale-dir が要ります（例 ~/libra-run/ls/scale/seq-v0.2）")
+            return 2
+        run_dir = Path(a.scale_dir).expanduser()
+        for name in ("config.json", "active.json"):
+            if not (run_dir / name).exists():
+                print(f"{run_dir / name} がありません。先に手元で bin/libra-scale seq run --dir {run_dir} --table <scale-*.json> を始めてください")
+                return 2
+        if not json.loads((run_dir / "active.json").read_text(encoding="utf-8")).get("pairs"):
+            print(f"{run_dir} は打ち切っていない組がありません（もう打つものが無いので借りません）")
+            return 2
+        name = run_dir.name
+    else:
+        run_dir = Path(a.run_root).expanduser() / a.run
+        cfg_path = run_dir / "config.toml"
+        if not cfg_path.exists():
+            print(f"run がありません: {cfg_path}")
+            return 2
+        cfg = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
+        if (cfg.get("exploiter") or {}).get("main_ckpt"):
+            print(f"{a.run} は搾取者の run なので、ワーカーの局を足せません")
+            return 2
+        if not (cfg.get("workers") or {}).get("enabled") and not a.force:
+            print(f"{cfg_path} に [workers] enabled = true がありません。書いて {a.run} を停止 → 起動してから始めてください（局を取り込めないまま課金されるため）")
+            return 2
+        if not (run_dir / "checkpoints" / "latest.pt").exists():
+            print(f"チェックポイントがありません: {run_dir / 'checkpoints' / 'latest.pt'}")
+            return 2
+        name = a.run
+    d = ss.create(name)
     with open(d / "launcher.log", "ab") as logf:
         p = subprocess.Popen(launch_argv(a, run_dir, d), stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                              start_new_session=True, cwd=str(REPO), env=dict(os.environ, PYTHONPATH=PROJECT_PATH))
-    write_json(d / "session.json", {"run": a.run, "gpu": a.gpu, "max_dph": a.max_dph, "hours": a.hours, "min_rel": a.min_rel,
+    write_json(d / "session.json", {"run": a.run, "job": a.job, "scale_dir": a.scale_dir, "gpu": a.gpu, "max_dph": a.max_dph,
+                                    "hours": a.hours, "min_rel": a.min_rel,
                                     "min_cpu_ghz": a.min_cpu_ghz, "min_cores": a.min_cores, "max_inet_cost": a.max_inet_cost, "n_games": a.n_games,
                                     "rent": a.rent, "bid_margin": a.bid_margin, "worker_id": a.worker_id, "started": time.time(), "pid": p.pid,
                                     "deadline": cont["deadline"] if cont else time.time() + a.hours * 3600 + DEADLINE_SLACK_S,
                                     "continues": cont["continues"] if cont else None})
     how = "入札" if a.rent == "bid" else "on-demand"
-    print(f"起動しました: {d.name}（pid {p.pid}。{a.gpu} を{how}で最大 ${a.max_dph:.2f}/h、{a.hours:g} 時間。準備に 5〜15 分）")
+    what = "玉配置表の検証対局" if a.job == "scale" else "自己対局"
+    print(f"起動しました: {d.name}（pid {p.pid}。{what}に {a.gpu} を{how}で最大 ${a.max_dph:.2f}/h、{a.hours:g} 時間。準備に 5〜15 分）")
     return 0
 
 
@@ -619,6 +650,9 @@ def main(argv: list[str] | None = None) -> int:
                      help="ワーカー名（対局ファイル名・seed・ls の workers の内訳）。2 台目を別の --root で動かすときは vast2 など別の名前にする")
     p_s.add_argument("--continue-from", default=None,
                      help="ホストを失ったセッション名。その設定と残りの時間・締め切りで次のセッションを起動する（vast_worker.py が呼ぶ）")
+    p_s.add_argument("--job", choices=("selfplay", "scale"), default="selfplay",
+                     help="selfplay: 学習側の run に局を足す（既定）。scale: 玉配置表の全組の検証対局（libra-scale seq）に GPU を足す")
+    p_s.add_argument("--scale-dir", default=None, help="--job scale の seq の run（例 ~/libra-run/ls/scale/seq-v0.2）")
     for p in (p_s, sub.add_parser("offers", help="検索したオファーを安い順に、落ちた理由と 1 つ緩めれば通る条件を付けて出す（借りない）")):
         p.add_argument("--gpu", default="RTX 5070 Ti")
         p.add_argument("--max-dph", type=float, default=0.28, help="1 時間あたりの上限（$、ストレージ込み）")
