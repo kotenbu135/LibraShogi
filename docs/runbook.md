@@ -45,7 +45,16 @@ docs/libra-local.md §7〜8 の実装。状態はすべて `~/libra-run/<run-id>
 
 Windows 側: `%USERPROFILE%\libra\` に `libra-run.bat`（本体 ls）/ `libra-run-lx.bat`（搾取者 lx）と、**ls と lx の両方に効く** `libra-stop.bat` / `libra-status.bat`。デスクトップに status / stop の写し（`install.sh` は前に写した libra-pause.bat / libra-resume.bat を消す）。**bat / vbs は `tools/windows/*.in` から `install.sh` が生成する**（ディストロ名と WSL 内の `bin/libra` の場所を埋める）。リポジトリを別の場所に置いたときや、ディストロを入れ替えたときは `install.sh` を回し直す。
 
-## 3. Windows Update で再起動しても続くようにする
+## 3. 再起動したときの扱い（2026-09-21 から自動で始めない）
+
+**ls・lx は、人がコンソールの「起動」を押さないかぎり始まらない**（**ユーザーの決定** 2026-09-21「手動で操作しない限り ls、lx を動かさないようにしたい」）。
+同日に PC を再起動したら、下のタスクのログオンのきっかけで ls と lx が勝手に始まり、空になっていた lx は既定値のまま乱数初期化から 14 分学習した（decisions.md 同日）。
+
+- **タスク スケジューラの 2 つのタスクは残したまま、「ログオン時」のきっかけだけを無効にする**（タスク スケジューラ → 「LibraShogi run」→ プロパティ → トリガー → 「ログオン時」を編集して「有効」のチェックを外す。「LibraShogi run lx」も同じ）。
+  タスク自体は残るので、**コンソールの「起動」（`schtasks /Run`）は今まで通り動く**（きっかけは自動で始めるためのもので、手で走らせるのには要らない）。
+- 再起動のあとは、**人がコンソールの「起動」を押すまで止まったまま**になる。押し忘れると局/日 がそのぶん減る。
+- **番人（終了コード 4）はこの取りこぼしを全部は防げない**: 設定がどこにも無い run だけを止めるので、`<run>/config.toml` が既に書かれてしまった run（9/21 の `~/libra-run/lx` がそれ）は止められない。**使わない run のディレクトリは横に避ける**。
+
 
 1. タスク スケジューラに「LibraShogi run」（本体 ls、ログオン 1 分後）と「LibraShogi run lx」（搾取者 lx、ログオン 2 分後）を登録済み（`%USERPROFILE%\libra\LibraShogi-run.xml` / `LibraShogi-run-lx.xml`）。それぞれ `wscript.exe libra-run-hidden.vbs` / `libra-run-lx-hidden.vbs` → `wsl.exe -d <ディストロ> -- <repo>/bin/libra [--run lx] run` を非表示で起動する（vbs は `install.sh` が生成する。ファイル名は変わらないので、タスクの登録はそのままでよい）。実行時間の上限なし。タスクの「失敗時に 1 分後に再起動（999 回まで）」は起動後の異常終了には効かない（9/13 に lx が CUDA の abort で落ちたまま 4.7 h 止まった）。
    **`libra run` は監視役**で、ランナー本体（子の `run --no-supervise`）が異常終了したら 60 秒後に起動し直す。起動し直さないのは、停止（STOP フラグ、終了コード 0）、二重起動（終了コード 3）、Ctrl+C・kill・`wsl --shutdown`（SIGINT/SIGTERM/SIGHUP）、待機中に STOP が置かれたとき。15 分未満で落ちるのが 5 回続いたら諦めて止まる。記録は log.txt の `supervisor:` 行と `stdout.log`。待機中（最大 60 秒）は status が `not running` と出る。
