@@ -1,20 +1,20 @@
 {
  "schema": 1,
  "run": "ls",
- "generated": "2026-09-22 09:36:08",
- "t": 1790037368.2,
+ "generated": "2026-09-22 09:45:04",
+ "t": 1790037904.6,
  "process": "running",
  "flags": [],
  "now": {
-  "step": 349787,
-  "generation": 582,
-  "games_total": 3954428,
+  "step": 350086,
+  "generation": 583,
+  "games_total": 3957994,
   "games_per_day_1h": null,
-  "window_games": 1977214,
+  "window_games": 1978997,
   "active_games": 512,
-  "elapsed_h": 93.8,
+  "elapsed_h": 93.92,
   "heldout_games": 20000,
-  "status_time": "2026-09-22 09:36:06",
+  "status_time": "2026-09-22 09:45:03",
   "train": null,
   "gen": null
  },
@@ -6531,13 +6531,13 @@
    "gen_heldout_fuseki_corr_v": 0.6411
   },
   {
-   "t": 1790037366.5,
-   "step": 349787,
-   "games_total": 3954428,
+   "t": 1790037903.1,
+   "step": 350086,
+   "games_total": 3957994,
    "gpd": null,
-   "gpd_5m": 0,
-   "window": 1977214,
-   "rss_mb": 20712,
+   "gpd_5m": 385786,
+   "window": 1978997,
+   "rss_mb": 20728,
    "swap_mb": 0,
    "gpu_mb": 526,
    "loss": null,
@@ -6557,7 +6557,7 @@
    "rootq_minus_z_normal": null,
    "t_train_sample": 0.0,
    "t_train_step": 0.0,
-   "t_sp_eval": 99.53,
+   "t_sp_eval": 98.41,
    "sp_games": null,
    "sp_draw": null,
    "sp_plies": null,
@@ -6580,21 +6580,21 @@
   }
  ],
  "review": {
-  "time": "2026-09-22 09:36:08",
+  "time": "2026-09-22 09:45:04",
   "run": "ls",
   "items": [
    {
     "name": "M1 一般化（本将棋の価値の相関）",
     "verdict": "続ける",
-    "why": "held-out の相関 0.6827 → 0.6926（200,000 局。横ばいは想定どおりで、伸びは M2・M4 で見る）、窓の中との差 +0.041",
+    "why": "held-out の相関 0.6827 → 0.6959（200,000 局。横ばいは想定どおりで、伸びは M2・M4 で見る）、窓の中との差 +0.011",
     "values": {
      "heldout_corr_first": 0.6827,
-     "heldout_corr_last": 0.6926,
-     "window_corr_last": 0.7207,
-     "gap": 0.041100000000000025,
-     "fall": 0.00990000000000002,
+     "heldout_corr_last": 0.6959,
+     "window_corr_last": 0.707,
+     "gap": 0.011099999999999999,
+     "fall": 0.01319999999999999,
      "heldout_corr_best": 0.7131,
-     "n_rows": 10
+     "n_rows": 11
     }
    },
    {
@@ -6648,7 +6648,7 @@
       ]
      },
      "gap_games": 410926,
-     "behind_games": 724655,
+     "behind_games": 728221,
      "score": 0.855
     }
    },
@@ -6672,14 +6672,14 @@
       ]
      },
      "gap_games": null,
-     "behind_games": 263715,
+     "behind_games": 267281,
      "score": 0.615
     }
    },
    {
     "name": "M4 参照 ckpt_000646699.pt",
     "verdict": "まだ無い",
-    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、2,715,888 局前）",
+    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、2,719,454 局前）",
     "values": {
      "last": {
       "t": 1789725300.1884296,
@@ -6696,7 +6696,7 @@
       ]
      },
      "gap_games": 395416,
-     "behind_games": 2715888,
+     "behind_games": 2719454,
      "score": 0.895
     }
    },
@@ -6720,7 +6720,7 @@
       ]
      },
      "gap_games": 411144,
-     "behind_games": 727168,
+     "behind_games": 730734,
      "score": 0.835
     }
    },
