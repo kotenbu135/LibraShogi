@@ -1,0 +1,120 @@
+# 搾取者 lx（~/libra-run/lx）の設定の正。ここを直して main に入れ、コンソールの停止 → 起動で効く
+# （docs/runbook.md §設定の管理）。**config/ls.toml を土台に、搾取者で違えるところだけを変えたもの**で、
+# 違えた 11 か所の出所・理由・確かめる計測は docs/lx-settings.md の表。**写す元が無いので推測で書かない**
+# という runbook の原則の例外で、~/libra-run/lx/config.toml は 2026-09-21 に空のディレクトリで libra run が
+# 走って書かれた既定値そのままだった（run_id = "ls"、やり直しの原因になった窓 10 万局・replay_ratio 4）。
+# docs/v0.3-plan.md §1 と docs/decisions.md 2026-09-22 を参照。学習データに関わる値は CLAUDE.md 11 に従う。
+run_id = "lx"
+seed = 3                     # ls は 2。別の run なので別の種にする（同じ種でも局は違うが、揃える理由が無い）
+
+# 搾取者のネットは本体より小さい（1.9M 対 10.2M）。docs/runbook.md §搾取者、docs/measurements.md
+# 2026-09-11・09-14。1.9M の搾取者が 10.2M の本体に 86〜90% 勝つのが v0.1 で見つかった穴で、
+# 収束の物差し（対本体勝率）を過去の記録と比べられるようにするため、同じ大きさのまま始める。
+# 計画書 §5 の「リーグは搾取者 1 体を 10% の計算で回すだけ」もこの大きさを前提にしている。
+[net]
+d_model = 192
+n_layers = 4
+n_heads = 8
+d_ff = 768
+dropout = 0.0
+
+# 探索は本体と同じ（読みの回数・Gumbel・σ・証明探索）。搾取者だけ違うのは下の 2 つ。
+[search]
+full_sims = 96
+fast_sims = 24
+full_prob = 0.25
+gumbel_m_full = 16
+gumbel_m_fast = 8
+c_visit = 50.0
+c_scale = 1.0
+gumbel_rescale = false
+cpuct = 1.5
+draw_value = 0.0
+max_ply = 320
+count_from_41 = true
+policy_topk = 32
+max_moves_per_game = 400
+mate_nodes_root = 200
+proof_nodes = 1000
+proof_min_ply = 36
+# 搾取者の玉配置は後手玉四段目を除く 36×27 から一様（2026-09-11 の決定）。四段目は 3 手目の桂打ちが
+# docs/rules.md §3.4 の遮断不能になり 40 手完了時の裁定で先手の勝ちが決まるので、穴を探す対局にならない。
+# 本体 ls は設計どおり 36×36 一様のまま（選ぶ側が悪い配置も評価できるように）。docs/v0.3-plan.md §1・§5
+prune_gote_rank4 = true
+# **搾取者は投了しない**（本体 ls は 2026-09-21 から 0.9）。搾取者の収束の判定は「対本体勝率が頭打ちになるか」
+# で、過去の記録（2026-09-12 の 4.5 時間で 50%、2026-09-14 の 87〜88% で頭打ち）と比べる。投了を入れると
+# 誤投了 2.6%（docs/measurements.md 2026-09-19）がその勝率にそのまま乗るので、物差しを濁さない側を採る。
+# lx は全体の計算の約 1 割なので、投了で稼げる 1.2 倍は全体にほとんど効かない
+resign_threshold = 0.0
+
+[selfplay]
+n_games = 64                 # 本体は 512。docs/runbook.md §搾取者（GPU メモリ約 1.7 GB）
+threads = 4                  # 本体は 12（512 局）。局数の比では 1.5 だが、相手の手は 10.2M のネットで読むので多めに取る
+infer_dtype = "float16"
+openings = ""                # 搾取者は布石を読まない（書き出す側）。[exploiter] openings_out を本体が読む
+openings_prob = 0.1
+openings_reload_seconds = 600
+
+# 学習則は本体と同じ（2026-09-17 のやり直しで決めた形）。窓 10 万局・replay_ratio 4 は窓の記憶を起こした
+# 設定なので、搾取者でも使わない。上限だけ RAM のために本体より小さくする（docs/lx-settings.md §1）
+[train]
+batch_size = 1024
+lr = 0.0002
+weight_decay = 0.0001
+warmup_steps = 1000
+replay_ratio = 1.0
+window_games = 100000
+window_frac = 0.5
+window_games_max = 500000    # 本体は 200 万局。1 局 約 6 KB（搾取者の局は平均 117 手で本体の 94 手より長い）
+                             # で約 3 GB。本体のランナーが 22.5 GB 使っていて WSL の割当が 48 GB のため
+min_window_games = 2000
+train_every_games = 256
+policy_weight = 1.0
+value_weight = 1.0
+v41_weight = 0.5
+lambda_z = 1.0
+mirror_prob = 0.5
+grad_clip = 1.0
+
+[run]
+checkpoint_minutes = 10
+status_seconds = 30
+chunk_games = 100
+keep_checkpoints = 3
+heldout_every_chunks = 20
+heldout_games = 20000
+gen_minutes = 0
+gen_games = 20000
+gen_positions = 4000
+
+# 凍結した本体との対局（docs/runbook.md §搾取者リーグ、docs/decisions.md 2026-09-13・09-14）。
+# main_source を指してあるので、凍結相手 lx/main.pt は**起動直後に本体の最新から作られる**（手作業は要らない）。
+[exploiter]
+main_ckpt = "~/libra-run/lx/main.pt"                    # 凍結した本体の置き場所
+main_dtype = "float16"
+main_source = "~/libra-run/ls/checkpoints/latest.pt"    # 作り直しの元。空なら作り直さない
+refresh_hours = 24.0         # 24 時間経ったら作り直す（初回は起動直後）
+refresh_steps = 25000        # 本体が凍結相手より 25,000 step 進んだら作り直す（本体の約 4.9k step/h で約 5 h）
+refresh_check_minutes = 5.0
+# 搾取者の手の木の中で、本体の手番の葉の方策を凍結した本体のネットから取る（価値は常に搾取者のネット）。
+# Wang+ 2023 の A-MCTS に倣う形で、docs/exploiter-literature.md。**変えない**（2026-09-14 に、評価ハーネスの
+# 「根の手番のネットで木を丸ごと評価する」形を流用して、論文が誤りとした探索のまま 3 日動いた。CLAUDE.md 8）
+opponent_prior = true
+openings_out = "~/libra-run/lx/openings.json"  # 搾取者が勝った布石。本体 ls の [selfplay] openings が読む（③）
+openings_minutes = 60.0
+openings_chunks = 50
+openings_moves = 12
+pool_out = "~/libra-run/lx/pool"               # 過去の自分。本体 ls の [league] pool が読む（④）
+pool_keep = 30
+
+[auto]
+enabled = false              # 自動計測（archive・最強比・固定の参照・対外対局）は本体の物差し。搾取者では回さない
+
+[workers]
+enabled = false              # vast.ai のワーカーは搾取者の run では無効（docs/runbook.md §自己対局ワーカー）
+
+[league]
+enabled = false              # 本体と過去の搾取者の対局は本体 ls 側の設定。搾取者の run では無効
+
+[progress]
+enabled = true               # lx の数値も progress ブランチから読めるようにする（Elo は無いので rating は空になる）

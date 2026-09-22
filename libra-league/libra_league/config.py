@@ -41,6 +41,11 @@ DEFAULTS: dict[str, Any] = {
         "resign_disable_prob": 0.1,
         "resign_min_ply": 40,
         "defer_root_proof": True,  # 根の証明探索を GPU の評価中に解く（棋譜は変わらない。false で apply の中で解く）
+        # 後手玉を一〜三段目に限る（四段目は 3 手目の桂打ちで先手の裁定勝ち。docs/rules.md §3.4）。搾取者 lx は true、
+        # 本体 ls は false のまま（選ぶ側が悪い配置も評価できるように。docs/decisions.md 2026-09-11）。
+        # 読むのは C++（libra-search/python/bindings.cpp の getb）だけだが、ここに無いと config/lx.toml が
+        # 起動のたびに「今のプログラムが知らない設定」として警告に出る（unknown_keys）
+        "prune_gote_rank4": False,
     },
     "selfplay": {
         "n_games": 512,

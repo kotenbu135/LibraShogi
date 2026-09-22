@@ -249,3 +249,25 @@ def test_run_refuses_to_start_without_any_config(tmp_path, monkeypatch, capsys):
     (root / "config.toml").write_text("[train]\nlr = 0.001\n", encoding="utf-8")
     cfg, info = resolve(StateDir(root), None, None, ref="none", log=lambda m: None)
     assert cfg["train"]["lr"] == 0.001 and info["source"].endswith("config.toml")
+
+
+def test_shipped_configs_have_no_unknown_keys():
+    """リポジトリの config/*.toml に、今のプログラムが知らない鍵が無いこと。
+
+    設定は `origin/main` から読むのにプログラムは手元の作業ツリーなので、知らない鍵は起動のたびに
+    WARNING になる（`unknown_keys`）。**警告が出るのが当たり前になると本物の見落としに気付けない**ので、
+    リポジトリに置く設定の側で先に止める。2026-09-22 に `config/lx.toml` の `search.prune_gote_rank4`
+    （読むのは C++ だけで Python の既定に無かった）でこれを踏んだ。
+    """
+    import tomllib
+
+    from libra_league.config import unknown_keys
+
+    cfg_dir = Path(__file__).resolve().parents[2] / "config"
+    files = sorted(cfg_dir.glob("*.toml"))
+    assert files, f"{cfg_dir} に設定が無い"
+    for f in files:
+        with open(f, "rb") as fh:
+            parsed = tomllib.load(fh)
+        assert unknown_keys(parsed) == [], f"{f.name}: 知らない鍵 {unknown_keys(parsed)}"
+        assert parsed.get("run_id") == f.stem, f"{f.name}: run_id が {parsed.get('run_id')} でファイル名と違う"
