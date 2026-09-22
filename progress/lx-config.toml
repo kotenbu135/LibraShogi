@@ -1,0 +1,146 @@
+# このファイルは `libra run` が作り直す。直接編集しても次の起動で上書きされる。
+# 設定の正はリポジトリの origin/main:config/lx.toml（docs/runbook.md §設定の管理）。
+# その PC だけの上書きは config.local.toml に置く。
+run_id = "lx"
+seed = 7
+
+[net]
+d_model = 192
+n_layers = 4
+n_heads = 6
+d_ff = 768
+dropout = 0.0
+
+[search]
+full_sims = 96
+fast_sims = 24
+full_prob = 0.25
+gumbel_m_full = 16
+gumbel_m_fast = 8
+c_visit = 50.0
+c_scale = 1.0
+gumbel_rescale = false
+cpuct = 1.5
+draw_value = 0.0
+max_ply = 320
+count_from_41 = true
+policy_topk = 32
+max_moves_per_game = 400
+mate_nodes_root = 200
+proof_nodes = 1000
+proof_min_ply = 36
+resign_threshold = 0.0
+resign_runs = 1
+resign_disable_prob = 0.1
+resign_min_ply = 40
+defer_root_proof = true
+prune_gote_rank4 = true
+
+[selfplay]
+n_games = 64
+threads = 4
+infer_dtype = "float16"
+compile = "max-autotune"
+openings = ""
+openings_prob = 0.1
+openings_reload_seconds = 600
+
+[exploiter]
+main_ckpt = "~/libra-run/lx/main.pt"
+main_dtype = "float16"
+main_source = "~/libra-run/ls/checkpoints/latest.pt"
+refresh_hours = 24.0
+refresh_steps = 25000
+refresh_check_minutes = 5.0
+opponent_prior = true
+openings_out = "~/libra-run/lx/openings.json"
+openings_minutes = 60.0
+openings_chunks = 50
+openings_moves = 12
+pool_out = "~/libra-run/lx/pool"
+pool_keep = 30
+
+[league]
+enabled = false
+pool = ""
+n_games = 64
+threads = 4
+recent = 30
+switch_games = 256
+pool_check_minutes = 10.0
+
+[train]
+batch_size = 512
+lr = 0.0003
+weight_decay = 0.0001
+warmup_steps = 1000
+replay_ratio = 1.0
+window_games = 100000
+window_frac = 0.5
+window_games_max = 500000
+min_window_games = 500
+train_every_games = 64
+policy_weight = 1.0
+value_weight = 1.0
+v41_weight = 0.5
+lambda_z = 1.0
+mirror_prob = 0.5
+grad_clip = 1.0
+compile = "max-autotune"
+
+[workers]
+enabled = false
+ingest_seconds = 10.0
+max_lag_steps = 2000
+
+[run]
+checkpoint_minutes = 10
+status_seconds = 30
+chunk_games = 100
+keep_checkpoints = 3
+export_onnx = true
+metrics_minutes = 5
+calib_minutes = 60
+calib_games = 20000
+heldout_every_chunks = 20
+heldout_games = 20000
+gen_minutes = 0
+gen_games = 20000
+gen_positions = 4000
+
+[auto]
+enabled = false
+every_games = 0
+eval_games = 100
+eval_sims = 96
+eval_concurrent = 64
+eval_threads = 4
+chain_eval = true
+anchor_games = 100
+anchor_rebaseline = 0.85
+best_games = 0
+best_stall_alert = 3
+reference_ckpts = []
+reference_games = 0
+reference_rotate = 0.0
+reference_min = 1
+match_games = 10
+match_go = "movetime 1000"
+match_go_opp = ""
+match_opponent_opt = "Threads=2,Fuseki_Rules=2"
+match_libra_opt = ""
+match_fuseki = "engine"
+match_opponent = ""
+match_opponent_cwd = ""
+match_libra_standard = false
+match_use_best = true
+
+[progress]
+enabled = true
+repo = ""
+branch = "progress"
+dir = "progress"
+push = true
+heartbeat_minutes = 180
+min_seconds = 120
+metrics_points = 120

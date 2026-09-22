@@ -1,0 +1,192 @@
+{
+ "schema": 1,
+ "run": "lx",
+ "generated": "2026-09-23 07:28:56",
+ "t": 1790116136.3,
+ "process": "running",
+ "flags": [],
+ "now": {
+  "step": 0,
+  "generation": 0,
+  "games_total": 0,
+  "games_per_day_1h": null,
+  "window_games": 0,
+  "active_games": 64,
+  "elapsed_h": 0.01,
+  "heldout_games": 0,
+  "status_time": "2026-09-23 07:28:56",
+  "train": null,
+  "gen": null
+ },
+ "auto": {
+  "anchor_step": null,
+  "anchor_offset": null,
+  "best_step": null,
+  "best_stall": 0,
+  "queue": 0,
+  "running": null,
+  "last_archive_games": null,
+  "references": [],
+  "references_retired": [],
+  "jobs": []
+ },
+ "auto_cfg": {
+  "enabled": false,
+  "every_games": 0,
+  "eval_games": 100,
+  "eval_sims": 96,
+  "anchor_games": 100,
+  "best_games": 0,
+  "reference_games": 0,
+  "reference_ckpts": [],
+  "reference_rotate": 0.0,
+  "reference_min": 1,
+  "match_games": 10,
+  "match_go": "movetime 1000",
+  "match_go_opp": "",
+  "match_opponent_opt": "Threads=2,Fuseki_Rules=2",
+  "match_libra_opt": "",
+  "match_fuseki": "engine",
+  "match_opponent": "",
+  "match_libra_standard": false,
+  "match_use_best": true
+ },
+ "best": [],
+ "anchor": [],
+ "reference": [],
+ "matches": [],
+ "archives": [],
+ "metrics": [
+  {
+   "t": 1790116136.2,
+   "step": 0,
+   "games_total": 0,
+   "gpd": null,
+   "gpd_5m": null,
+   "window": 0,
+   "rss_mb": 1668,
+   "swap_mb": 0,
+   "gpu_mb": 156,
+   "loss": null,
+   "policy": null,
+   "value": null,
+   "v41": null,
+   "policy_acc": null,
+   "grad_norm": null,
+   "lr": null,
+   "steps": null,
+   "train_avg": null,
+   "target_minus_z": null,
+   "v41_minus_z": null,
+   "draw_target": null,
+   "draw_actual": null,
+   "rootq_minus_z_fuseki": null,
+   "rootq_minus_z_normal": null,
+   "t_train_sample": 0.0,
+   "t_train_step": 0.0,
+   "t_sp_eval": 100.09,
+   "sp_games": null,
+   "sp_draw": null,
+   "sp_plies": null,
+   "sp_sente": null,
+   "sp_sennichite": null,
+   "sp_perpetual_check": null,
+   "sp_max_ply": null,
+   "sp_resign": null,
+   "sp_ruling41": null,
+   "sp_no_legal_move": null,
+   "sp_mate_found": null,
+   "gen_window_corr_v": null,
+   "gen_window_policy_acc": null,
+   "gen_window_policy_ce": null,
+   "gen_window_fuseki_corr_v": null,
+   "gen_heldout_corr_v": null,
+   "gen_heldout_policy_acc": null,
+   "gen_heldout_policy_ce": null,
+   "gen_heldout_fuseki_corr_v": null
+  }
+ ],
+ "review": {
+  "time": "2026-09-23 07:28:56",
+  "run": "lx",
+  "items": [
+   {
+    "name": "M1 一般化（本将棋の価値の相関）",
+    "verdict": "まだ無い",
+    "why": "gen の行が 0 個（200,000 局の窓）",
+    "values": {}
+   },
+   {
+    "name": "M2 最強比",
+    "verdict": "まだ無い",
+    "why": "evalbest.jsonl がまだ無い",
+    "values": {}
+   },
+   {
+    "name": "M3 基準比",
+    "verdict": "まだ無い",
+    "why": "evalanchor.jsonl がまだ無い",
+    "values": {}
+   },
+   {
+    "name": "M4 参照",
+    "verdict": "まだ無い",
+    "why": "evalreference.jsonl がまだ無い",
+    "values": {}
+   }
+  ],
+  "verdict": "まだ無い",
+  "thresholds": {
+   "gen_games": 200000,
+   "gen_max_gap": 0.1,
+   "gen_max_fall": 0.03,
+   "gen_min_corr": 0.6,
+   "best_stall_alert": 3,
+   "reference_stale_games": 800000,
+   "gpd_min": 0,
+   "job_history": 8
+  }
+ },
+ "scaling": {
+  "band": [
+   0.2,
+   0.8
+  ],
+  "cost_per_1m_usd": 8.0,
+  "references": {},
+  "curve": {
+   "base": null,
+   "offsets": {},
+   "dropped": [],
+   "via": {},
+   "points": [],
+   "intervals": [],
+   "fit": null
+  },
+  "outlook": null,
+  "notes": [
+   "天井・床に触れていない区間が 0 本しかない（3 本以上で傾きの向きを見る）"
+  ]
+ },
+ "rating": {
+  "nodes": {},
+  "anchor": null,
+  "pairs": [],
+  "dropped": [],
+  "fit": null,
+  "converged": true,
+  "iters": 0,
+  "n_evals": 0,
+  "curve": {
+   "points": [],
+   "intervals": [],
+   "fit": null,
+   "fit_recent": null,
+   "recent_doublings": 4,
+   "thin": [],
+   "min_games": 200,
+   "anchor": null,
+   "misfit": null
+  }
+ }
+}
