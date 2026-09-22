@@ -69,7 +69,9 @@ class UsiEngine:
             except queue.Empty:
                 continue
             if line is None:
-                raise RuntimeError(f"{self.name}: process exited" + self._why())
+                # 標準出力の末尾も添える。やねうら王は起動の失敗を標準出力に書いて終わるので、
+                # stderr だけだと「process exited」しか残らない（2026-09-22 の外部計測で実際にそうなった）
+                raise RuntimeError(f"{self.name}: process exited (last: {lines[-3:]})" + self._why())
             lines.append(line)
             if pred(line):
                 return lines
