@@ -129,6 +129,7 @@ Windows 側のファイルの正は `tools/windows/`（`install.sh` で `C:\User
 - **見るとき**: `bin/libra [--run lx] config`（設定の正・その PC の上書き・**反映待ちの違い**を出す。書き換えない）。`--json` もある。
 - **リポジトリにまだ無いラン**: そのランの `config.toml` をそのまま写して作る（中身を推測して書くと学習の設定を黙って変えるため）。`bin/libra [--run lx] config --adopt`、または `progress` ブランチの `progress/<run-id>-config.toml`（効いている設定そのもの。ホームは `~` に直してある）から。ランナーは**リポジトリの作業ツリーには書かない**（あとで `git pull` とぶつかるため）。
 - **設定がどこにも無い run は起動しない**（2026-09-21 から）。リポジトリの `config/<run-id>.toml` も `<run>/config.toml` も無いまま `libra run` が来たら、理由を `log.txt` と標準エラーに出して終了コード 4 で終わる（監視役は起動し直さない）。空のディレクトリに既定値を書いて乱数初期化から学習を始め、誰も設定していない重みが本物の run と GPU を分け合うのを止めるため（同日に `~/libra-run/lx` で 14 分起きた）。新しい run を始めるときは `config/<run-id>.toml` を置くか `--config <ファイル>` を付ける。
+- **C++ に触れる変更は `git pull` だけでは効かない。作り直しが要る**（`export PATH=$PWD/.venv/bin:$PATH && cmake --build build`、約 2 分）。設定は `origin/main` から読むので `git pull` すら要らないのに、**動くのは前に組み立てた `.so`** で、バインディングが知らない設定は**黙って読み飛ばされる**（警告も出ない。`config.unknown_keys` は Python 側の既定と比べるだけなので掛からない）。2026-09-21 に、投了（`resign_threshold = 0.9`）が 9/19 より前の `_search.so` に読み飛ばされ、7 時間ぶん投了なしで打った。**2026-09-22 から、部品より新しい C++ のソースがあると起動時に `log.txt` と `bin/libra config` に WARNING が出る**（`libra_league/build_check.py`）。
 - 環境変数 `LIBRA_CONFIG_REF` で読むところを変えられる（既定 `origin/main`、`none` で作業ツリーのファイル）。
 - 公開リポジトリなので、`config/` には絶対パスを書かず `~` を使い（読むときに展開される）、秘密情報を置かない。
 
