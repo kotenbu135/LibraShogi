@@ -55,3 +55,15 @@ def test_an_engine_that_never_answers_times_out_with_its_stderr():
     assert "no response within" in str(e.value)
     assert "waiting for the eval file" in str(e.value)
     eng.quit()
+
+
+def test_an_engine_that_complains_on_stdout_and_dies_says_what_it_printed():
+    """起動の失敗を標準出力に書いて終わる相手（やねうら王がそう）も、その行が理由に残る。
+
+    2026-09-22 の外部計測は `opp: process exited` だけで、標準エラーは空だった。"""
+    eng = UsiEngine("opp", _py("print('Error! : can not open the eval file EvalDir = vendor/yaneuraou_eval')"))
+    with pytest.raises(RuntimeError) as e:
+        eng.start(usi_timeout=5)
+    assert "process exited" in str(e.value)
+    assert "can not open the eval file" in str(e.value)
+    eng.quit()
