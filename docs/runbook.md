@@ -285,7 +285,7 @@ verify の最後のログ `v_hat - verify winrate`（scale.json の `verify.v_ha
 
 搾取者 lx（`~/libra-run/lx`、1.9M、64 局同時）は凍結した本体（`lx/main.pt`）と対局し、自分の手だけを学習する。偶数枠で搾取者が先手。本体の手番の手は本体のネットで木を丸ごと読む。lx の手番の手は、価値を lx のネット、木の中の本体の手番の葉の方策を本体のネットから取る（`[exploiter] opponent_prior`、既定 true。本体の応手を本体の方策で予測する。docs/exploiter-literature.md）。
 
-**凍結相手の作り直し**: `[exploiter]` の `refresh_hours`（24）が過ぎたとき、または `main_source`（本体の `checkpoints/latest.pt`）の step が凍結相手より `refresh_steps`（25,000。本体の約 4.9k step/h で約 5 h、vast.ai のワーカーを足すと約 3 h）以上進んだとき（`refresh_check_minutes` の 5 分ごとに step だけ読む）に、`main_source` を `main_ckpt` に写し、対本体成績を履歴（`state.json` の `exploiter.history`）へ移して 0 から数え直す。本体が強くなると古い相手への勝率が飽和し（2026-09-12 に 98.3%）、収束判定「対本体勝率が頭打ち」が意味を失うため。初回は起動直後に行う。
+**凍結相手の作り直し**: `[exploiter]` の `refresh_hours`（24）が過ぎたとき、または `main_source`（本体の `checkpoints/latest.pt`）の step が凍結相手より `refresh_steps`（25,000。本体の約 4.9k step/h で約 5 h、vast.ai のワーカーを足すと約 3 h）以上進んだとき（`refresh_check_minutes` の 5 分ごとに step だけ読む）に、`main_source` を `main_ckpt` に写し、対本体成績を履歴（`state.json` の `exploiter.history`）へ移して 0 から数え直す。本体が強くなると古い相手への勝率が飽和し（2026-09-12 に 98.3%）、収束判定「対本体勝率が頭打ち」が意味を失うため。**初回（`main_ckpt` のファイルがまだ無いとき）は `load_opponent` が起動直後に `main_source` から写して作る**（2026-09-22 に直した。それまでは作り直しの経路が「相手が既に居る」前提だったため、ゼロから始める搾取者の run は起動できなかった）。`main_source` も無いときは理由を出して落ちる（相手なしの搾取者は意味の無い自己対局になるため）。
 
 **布石**: `openings_minutes`（60）ごとに、作り直してからのチャンクだけから搾取者が勝った布石を `openings_out` に書く。本体 ls は `[selfplay] openings` でこれを読み、新規対局の 10%（`openings_prob`）をそこから始める。相手を作り直した時点で布石は空にする（古い相手の穴なので本体に渡さない）。手動で書き出すときは `bin/libra --run lx openings`。
 
