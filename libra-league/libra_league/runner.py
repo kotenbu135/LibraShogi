@@ -204,12 +204,34 @@ class Runner:
         return self.session_elapsed_offset + (time.time() - self.started)
 
     def load_opponent(self) -> None:
-        """搾取者モード: 凍結した本体を読む（cfg.exploiter.main_ckpt）。"""
+        """搾取者モード: 凍結した本体を読む（cfg.exploiter.main_ckpt）。
+
+        **初回の起動では main_ckpt のファイルがまだ無い**ので、main_source（本体ランの最新）から作る。
+        `maybe_refresh_main` は「相手が既に居る」ことを前提にしていて（`loop.opponent is None` で戻る）、
+        作り直しの経路では初回を賄えない。ここで作らないと搾取者の run は 1 度も起動できない
+        （2026-09-22 に lx をゼロから起動して分かった。docs/runbook.md §搾取者「初回は起動直後に行う」）。
+        """
         ex = self.cfg.get("exploiter", {})
         path = ex.get("main_ckpt") or ""
         if not path:
             return
-        sd = torch.load(Path(path).expanduser(), map_location=self.device, weights_only=False)
+        p = Path(path).expanduser()
+        if not p.exists():
+            src_s = str(ex.get("main_source") or "")
+            src = Path(src_s).expanduser()
+            if not src_s or not src.exists():
+                # 相手なしの搾取者は「ただの小さな自己対局」になり、気付かないまま GPU を食う（2026-09-21 の 14 分）。
+                # 黙って続けず、理由を残して落ちる（監視役は 5 回で諦め、log.txt に残る）
+                raise FileNotFoundError(
+                    f"exploiter: 凍結相手 {p} が無く、main_source からも作れない"
+                    f"（main_source={src_s or '未設定'}）。本体のチェックポイントを指してから起動する")
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_suffix(".pt.tmp")
+            shutil.copyfile(src, tmp)
+            os.replace(tmp, p)
+            self.exploiter_state()["refreshed_at"] = time.time()  # ここから refresh_hours を数える
+            self.log(f"exploiter: 凍結相手 {p} を {src} から作った（初回の起動）")
+        sd = torch.load(p, map_location=self.device, weights_only=False)
         m = LibraNet(NetConfig.from_dict(sd.get("config", {}).get("net", {}))).to(self.device)
         m.load_state_dict(sd["model"])
         assert self.loop is not None
