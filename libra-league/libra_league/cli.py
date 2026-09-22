@@ -280,6 +280,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"WARNING 今のプログラムが知らない設定 {len(info['unknown'])} 件（無視される。`git pull` で最新にする）:")
             for k in info["unknown"]:
                 print(f"  {k}")
+        from .build_check import stale_modules
+
+        for line in stale_modules():
+            print(f"WARNING C++ の部品を作り直していない: {line}"
+                  "（設定を変えても動きが変わらないことがある。`cmake --build build` で作り直す）")
         if info["changed"]:
             print(f"反映待ちの違い {len(info['changed'])} 件（コンソールの停止 → 起動で効く）:")
             for line in info["changed"]:

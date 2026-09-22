@@ -15,6 +15,7 @@ import torch
 from libra_net.model import LibraNet, NetConfig
 
 from .auto import AutoJobs, append_metrics, crossed_games_multiple, proc_mem_mb
+from .build_check import warn_lines as build_warn_lines
 from .progress import Publisher
 from .config import dump_toml, load_config
 from .runconfig import resolve as resolve_config
@@ -722,6 +723,10 @@ def main_run(root: Path, config_path: Path | None) -> None:
         sd.append_log(msg)
         lock.unlink(missing_ok=True)
         sys.exit(EXIT_NO_CONFIG)
+    # 設定は git pull だけで新しくなるが、C++ の部品は作り直さないと変わらない（2026-09-21 の投了）
+    for line in build_warn_lines():
+        print(line, flush=True)
+        sd.append_log(line)
     try:
         Runner(sd, cfg).run()
     finally:
