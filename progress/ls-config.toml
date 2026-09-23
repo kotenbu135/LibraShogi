@@ -34,6 +34,7 @@ resign_runs = 1
 resign_disable_prob = 0.1
 resign_min_ply = 40
 defer_root_proof = true
+prune_gote_rank4 = false
 
 [selfplay]
 n_games = 512
