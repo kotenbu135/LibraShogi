@@ -197,3 +197,28 @@ def test_runner_publishes_at_a_milestone(tmp_path):
     assert "from .progress import Publisher" in src and "self.progress = Publisher(sd, cfg, self.log)" in src
     assert "self.progress.maybe_publish(now, milestone=changed)" in src
     assert "changed = self.auto.poll()" in src
+
+
+def test_snapshot_carries_exploiter_winrate(tmp_path):
+    """搾取者の対本体勝率が json と md に出る（収束の判定に使う唯一の物差し。2026-09-23）。"""
+    sd = _run(StateDir(tmp_path / "lx"), tmp_path)
+    st = json.loads(sd.status_json.read_text(encoding="utf-8"))
+    st["exploiter"] = {"games": 1200, "wins": 900, "draws": 12, "losses": 288, "winrate": 0.755,
+                       "main_step": 415201, "source_step": 417000, "refreshed_at": 1790116136.0,
+                       "history": [{"t": 1, "main_step": 400000, "games": 800, "winrate": 0.612}]}
+    sd.status_json.write_text(json.dumps(st), encoding="utf-8")
+    s = snapshot(sd, {})
+    ex = s["exploiter"]
+    assert ex["winrate"] == 0.755 and ex["games"] == 1200 and ex["main_step"] == 415201
+    assert ex["history"][-1]["winrate"] == 0.612
+    md = format_md(s)
+    assert "| 対本体 勝率 | 75.5%" in md and "1,200 局" in md
+    assert "step 400,000: 61.2%" in md
+
+
+def test_snapshot_without_exploiter_is_none(tmp_path):
+    """本体 ls の run では status に exploiter が無いので行を出さない。"""
+    sd = _run(StateDir(tmp_path / "ls"), tmp_path)
+    s = snapshot(sd, {})
+    assert s["exploiter"] is None
+    assert "対本体 勝率" not in format_md(s)
