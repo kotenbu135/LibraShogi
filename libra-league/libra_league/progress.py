@@ -134,6 +134,7 @@ def snapshot(sd: StateDir, cfg: dict | None = None, points: int = 120, now: floa
     auto = state.get("auto") or {}
     anchor, best = auto.get("anchor") or {}, auto.get("best") or {}
     running = auto.get("running") or {}
+    ex = st.get("exploiter") or None
     out = {
         "schema": SCHEMA,
         "run": sd.root.name,
@@ -149,6 +150,12 @@ def snapshot(sd: StateDir, cfg: dict | None = None, points: int = 120, now: floa
             "train": {k: (st.get("train_avg") or st.get("train") or {}).get(k) for k in ("loss", "policy", "value", "v41", "policy_acc", "grad_norm", "lr", "steps")} if (st.get("train_avg") or st.get("train")) else None,
             "gen": st.get("gen"),
         },
+        # 搾取者の run（lx）の対本体成績。**収束の判定に使う唯一の物差し**なので、クラウドからも読めるようにする
+        # （2026-09-23 に lx を起動したとき、progress に無くてユーザーに status を貼ってもらう必要があった）。
+        # 本体 ls の run では status に exploiter が無いので None になる
+        "exploiter": ({k: ex.get(k) for k in ("games", "wins", "draws", "losses", "winrate",
+                                              "main_step", "source_step", "refreshed_at")}
+                      | {"history": (ex.get("history") or [])[-10:]}) if ex else None,
         "auto": {
             "anchor_step": anchor.get("step"), "anchor_offset": anchor.get("offset"),
             "best_step": best.get("step"), "best_stall": auto.get("best_stall"),
@@ -243,6 +250,21 @@ def _metric_lines(rows: list[dict]) -> list[str]:
     return L
 
 
+def _exploiter_lines(ex: dict | None) -> list[str]:
+    """搾取者の対本体成績（lx だけ）。凍結相手を作り直すたびに 0 から数え直すので、相手の step も並べる。"""
+    if not ex or not ex.get("games"):
+        return []
+    L = [f"| 対本体 勝率 | {_fmt((ex.get('winrate') or 0) * 100, 1)}%"
+         f"（{_fmt(ex.get('games'))} 局: 勝ち {_fmt(ex.get('wins'))}・引き分け {_fmt(ex.get('draws'))}・負け {_fmt(ex.get('losses'))}。"
+         f"凍結相手 step {_fmt(ex.get('main_step'))}） |"]
+    h = ex.get("history") or []
+    if h:
+        L.append("| 対本体 勝率（前の相手） | "
+                 + "、".join(f"step {_fmt(r.get('main_step'))}: {_fmt((r.get('winrate') or 0) * 100, 1)}%"
+                            f"（{_fmt(r.get('games'))} 局）" for r in h[-4:]) + " |")
+    return L
+
+
 def format_md(s: dict) -> str:
     """GitHub でそのまま読める短い要約（数値の正は同じ場所の .json）。"""
     n, a = s.get("now") or {}, s.get("auto") or {}
@@ -254,6 +276,7 @@ def format_md(s: dict) -> str:
          f"| 局/日（1 時間平均） | {_fmt(n.get('games_per_day_1h'))} |",
          f"| リプレイの窓 | {_fmt(n.get('window_games'))} |",
          *_metric_lines(s.get("metrics") or []),
+         *_exploiter_lines(s.get("exploiter")),
          f"| 最強の step | {_fmt(a.get('best_step'))}（足踏み {_fmt(a.get('best_stall'))}） |",
          f"| 基準の step | {_fmt(a.get('anchor_step'))}（offset {_fmt(a.get('anchor_offset'), plus=True)}） |"]
     b = (s.get("best") or [])[-1:]
