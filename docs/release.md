@@ -254,7 +254,9 @@ tools/package_release.sh v0.2 ~/libra-run/releases/v0.2 '<v0.2 の重みに到�
 
 ### tenbin-shogi-web
 
-1. 重みを分けて置く: `node scripts/models/split.mjs ~/libra-run/releases/v0.2/libra-v0.2.onnx --step <step>`
+1. 重みを fp16 で持つ形にしてから分けて置く（2026-09-23 から。ファイルが約半分になり、計算は fp32 のまま）:
+   `~/LibraShogi/.venv/bin/python scripts/models/fp16.py ~/libra-run/releases/v0.2/libra-v0.2.onnx`
+   → `node scripts/models/split.mjs ~/libra-run/releases/v0.2/libra-v0.2-fp16.onnx --step <step>`
    （16MiB ごとに分け、`src/engine/libra/model.ts` に貼る行と `.gitignore` に足す行を出す）
 2. `src/engine/libra/model.ts` の `LIBRA_MODEL` を差し替える（`name`・`parts`・`bytes`・`sha256`・`step`）。
 3. `.gitignore` の `!public/models/…` を新しいファイル名に直し、**古い重みの行を消す**（ワイルドカードにしない。配布経路に黙って混ざらないようにするため）。
