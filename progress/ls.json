@@ -1,20 +1,20 @@
 {
  "schema": 1,
  "run": "ls",
- "generated": "2026-09-23 16:09:13",
- "t": 1790147353.4,
+ "generated": "2026-09-23 18:45:27",
+ "t": 1790156727.2,
  "process": "running",
  "flags": [],
  "now": {
-  "step": 415201,
-  "generation": 725,
-  "games_total": 4709112,
+  "step": 419947,
+  "generation": 739,
+  "games_total": 4767227,
   "games_per_day_1h": null,
   "window_games": 2000000,
   "active_games": 512,
-  "elapsed_h": 117.05,
+  "elapsed_h": 119.27,
   "heldout_games": 20000,
-  "status_time": "2026-09-23 16:09:11",
+  "status_time": "2026-09-23 18:45:25",
   "train": null,
   "gen": null
  },
@@ -6895,13 +6895,109 @@
    "gen_heldout_fuseki_corr_v": 0.6957
   },
   {
-   "t": 1790147351.8,
-   "step": 415201,
-   "games_total": 4709112,
+   "t": 1790150082.8,
+   "step": 416902,
+   "games_total": 4729947,
+   "gpd": 659140,
+   "gpd_5m": 635462,
+   "window": 2000000,
+   "rss_mb": 22512,
+   "swap_mb": 0,
+   "gpu_mb": 8966,
+   "loss": 2.160634,
+   "policy": 1.509246,
+   "value": 0.436215,
+   "v41": 0.430344,
+   "policy_acc": 0.635327,
+   "grad_norm": 1.280696,
+   "lr": 0.0002,
+   "steps": 189,
+   "train_avg": true,
+   "target_minus_z": 0.0,
+   "v41_minus_z": -0.0457,
+   "draw_target": 0.0044,
+   "draw_actual": 0.0044,
+   "rootq_minus_z_fuseki": -0.0014,
+   "rootq_minus_z_normal": -0.0569,
+   "t_train_sample": 0.19,
+   "t_train_step": 11.08,
+   "t_sp_eval": 76.2,
+   "sp_games": null,
+   "sp_draw": null,
+   "sp_plies": null,
+   "sp_sente": null,
+   "sp_sennichite": null,
+   "sp_perpetual_check": null,
+   "sp_max_ply": null,
+   "sp_resign": null,
+   "sp_ruling41": null,
+   "sp_no_legal_move": null,
+   "sp_mate_found": null,
+   "gen_window_corr_v": 0.6806,
+   "gen_window_policy_acc": 0.6036,
+   "gen_window_policy_ce": 1.2307,
+   "gen_window_fuseki_corr_v": 0.6809,
+   "gen_heldout_corr_v": 0.5598,
+   "gen_heldout_policy_acc": 0.5532,
+   "gen_heldout_policy_ce": 1.2498,
+   "gen_heldout_fuseki_corr_v": 0.6935
+  },
+  {
+   "t": 1790153715.5,
+   "step": 419002,
+   "games_total": 4755666,
+   "gpd": 611441,
+   "gpd_5m": 585392,
+   "window": 2000000,
+   "rss_mb": 22669,
+   "swap_mb": 0,
+   "gpu_mb": 8966,
+   "loss": 2.155152,
+   "policy": 1.501387,
+   "value": 0.43789,
+   "v41": 0.431751,
+   "policy_acc": 0.632264,
+   "grad_norm": 1.274515,
+   "lr": 0.0002,
+   "steps": 168,
+   "train_avg": true,
+   "target_minus_z": 0.0,
+   "v41_minus_z": -0.0474,
+   "draw_target": 0.0038,
+   "draw_actual": 0.0038,
+   "rootq_minus_z_fuseki": 0.005,
+   "rootq_minus_z_normal": -0.0605,
+   "t_train_sample": 0.18,
+   "t_train_step": 11.1,
+   "t_sp_eval": 77.76,
+   "sp_games": 25719,
+   "sp_draw": 0.0032,
+   "sp_plies": 74.5,
+   "sp_sente": 0.6195,
+   "sp_sennichite": 0.0012,
+   "sp_perpetual_check": 0.0,
+   "sp_max_ply": 0.002,
+   "sp_resign": 0.6636,
+   "sp_ruling41": 0.2453,
+   "sp_no_legal_move": 0.0879,
+   "sp_mate_found": 0.3433,
+   "gen_window_corr_v": 0.676,
+   "gen_window_policy_acc": 0.6223,
+   "gen_window_policy_ce": 1.1385,
+   "gen_window_fuseki_corr_v": 0.6602,
+   "gen_heldout_corr_v": 0.5796,
+   "gen_heldout_policy_acc": 0.5785,
+   "gen_heldout_policy_ce": 1.2347,
+   "gen_heldout_fuseki_corr_v": 0.6931
+  },
+  {
+   "t": 1790156725.3,
+   "step": 419947,
+   "games_total": 4767227,
    "gpd": null,
    "gpd_5m": null,
    "window": 2000000,
-   "rss_mb": 20446,
+   "rss_mb": 20397,
    "swap_mb": 0,
    "gpu_mb": 526,
    "loss": null,
@@ -6921,7 +7017,7 @@
    "rootq_minus_z_normal": null,
    "t_train_sample": 0.0,
    "t_train_step": 0.0,
-   "t_sp_eval": 99.75,
+   "t_sp_eval": 97.97,
    "sp_games": null,
    "sp_draw": null,
    "sp_plies": null,
@@ -6944,21 +7040,21 @@
   }
  ],
  "review": {
-  "time": "2026-09-23 16:09:13",
+  "time": "2026-09-23 18:45:27",
   "run": "ls",
   "items": [
    {
     "name": "M1 一般化（本将棋の価値の相関）",
-    "verdict": "注意",
-    "why": "窓の中との差 +0.132 が 0.1 を超えた（窓の記憶）",
+    "verdict": "見直し",
+    "why": "held-out の相関 0.570 が 0.6（この run の最高 0.713）を下回った",
     "values": {
-     "heldout_corr_first": 0.5916,
-     "heldout_corr_last": 0.5907,
-     "window_corr_last": 0.7035,
-     "gap": 0.13219999999999998,
-     "fall": -0.0009000000000000119,
+     "heldout_corr_first": 0.5893,
+     "heldout_corr_last": 0.57,
+     "window_corr_last": 0.6587,
+     "gap": 0.0887,
+     "fall": -0.019300000000000095,
      "heldout_corr_best": 0.7131,
-     "n_rows": 11
+     "n_rows": 12
     }
    },
    {
@@ -6995,7 +7091,7 @@
    {
     "name": "M4 参照 ckpt_000062426.pt",
     "verdict": "まだ無い",
-    "why": "対 ckpt_000062426.pt: もう測っていない（最後は step 281893、1,479,339 局前）",
+    "why": "対 ckpt_000062426.pt: もう測っていない（最後は step 281893、1,537,454 局前）",
     "values": {
      "last": {
       "t": 1789951881.1436996,
@@ -7012,7 +7108,7 @@
       ]
      },
      "gap_games": 410926,
-     "behind_games": 1479339,
+     "behind_games": 1537454,
      "score": 0.855
     }
    },
@@ -7036,14 +7132,14 @@
       ]
      },
      "gap_games": 405681,
-     "behind_games": 272834,
+     "behind_games": 330949,
      "score": 0.575
     }
    },
    {
     "name": "M4 参照 ckpt_000646699.pt",
     "verdict": "まだ無い",
-    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、3,470,572 局前）",
+    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、3,528,687 局前）",
     "values": {
      "last": {
       "t": 1789725300.1884296,
@@ -7060,14 +7156,14 @@
       ]
      },
      "gap_games": 395416,
-     "behind_games": 3470572,
+     "behind_games": 3528687,
      "score": 0.895
     }
    },
    {
     "name": "M4 参照 win1m.pt",
     "verdict": "まだ無い",
-    "why": "対 win1m.pt: もう測っていない（最後は step 281893、1,481,852 局前）",
+    "why": "対 win1m.pt: もう測っていない（最後は step 281893、1,539,967 局前）",
     "values": {
      "last": {
       "t": 1789951515.1918266,
@@ -7084,7 +7180,7 @@
       ]
      },
      "gap_games": 411144,
-     "behind_games": 1481852,
+     "behind_games": 1539967,
      "score": 0.835
     }
    },
@@ -7155,7 +7251,7 @@
     }
    }
   ],
-  "verdict": "注意",
+  "verdict": "見直し",
   "thresholds": {
    "gen_games": 200000,
    "gen_max_gap": 0.1,
