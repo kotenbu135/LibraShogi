@@ -163,3 +163,23 @@ def test_publish_result_writes_to_a_branch_without_touching_main(tmp_path: Path,
     # main と HEAD は動かない（push はしない: remote が無いので commit を返すだけ）
     assert subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout == head
     assert subprocess.run(["git", "-C", str(repo), "status", "--short"], capture_output=True, text=True).stdout == ""
+
+
+def test_play_match_places_kings_uniformly_whatever_the_selfplay_bias(monkeypatch):
+    """計測の対局は自己対局の後手玉四段目の偏り（search.gote_rank4_prob）を持ち込まず、36×36 から一様に置く
+    （四段目の局は得点が両者 0.5 に寄るので、割合が変わると同じ強さの差でも Elo の出方が変わる）。"""
+    from libra_league import evaluate
+
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def fake_selfplay(cfg, *args):
+        seen.update(cfg)
+        raise Stop
+
+    monkeypatch.setattr(evaluate.librasearch, "SelfPlay", fake_selfplay)
+    with pytest.raises(Stop):
+        evaluate.play_match(None, None, {"full_sims": 8, "gote_rank4_prob": 0.05}, 1, 2, 1, 0, torch.device("cpu"), torch.float32)
+    assert seen["gote_rank4_prob"] < 0

@@ -49,6 +49,10 @@ struct SearchConfig {
   std::vector<std::vector<std::uint32_t>> openings;  // 開始局面の手順（玉 2 手を含む）。搾取者が見つけた布石を本体の分布に混ぜる
   float openings_prob = 0.0f;    // 新規対局が openings から始まる確率
   bool prune_gote_rank4 = false; // 後手玉を一〜三段目に限る（四段目は桂打ちで先手の裁定勝ち。libra-scale の剪定と同じ）
+  // 後手玉が四段目になる確率（四段目の 9 マスから一様、残りは一〜三段目の 27 マスから一様）。負なら 36 マスから一様（＝0.25）で、
+  // 乱数の引き方も入れる前と同じ（棋譜が変わらない）。prune_gote_rank4 が true ならそちらが優先（四段目は出ない）。
+  // 本体 ls の自己対局で 41 手目の裁定（docs/rules.md §3.4）で終わる局を減らすためのもの（docs/decisions.md 2026-09-24）
+  float gote_rank4_prob = -1.0f;
   // 投了（AlphaGo Zero [Silver+ 2017] Methods「Resignation」）。resign_threshold <= 0 で無効（既定）。
   // 規則: 手番側の探索後の値 root_q が −resign_threshold 以下の状態がその側の連続 resign_runs 手続いたら、
   // その手を指した後にその側が投了する。原典は「根と最善の子の両方が下回ったら」だが、棋譜に子の値を残していないので根だけで見る
