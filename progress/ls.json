@@ -1,29 +1,29 @@
 {
  "schema": 1,
  "run": "ls",
- "generated": "2026-09-25 00:15:56",
- "t": 1790262956.9,
+ "generated": "2026-09-25 00:17:57",
+ "t": 1790263077.2,
  "process": "running",
  "flags": [],
  "now": {
-  "step": 471203,
+  "step": 471263,
   "generation": 903,
-  "games_total": 5410178,
-  "games_per_day_1h": 613552,
+  "games_total": 5411065,
+  "games_per_day_1h": 613948,
   "window_games": 2000000,
   "active_games": 512,
-  "elapsed_h": 146.29,
+  "elapsed_h": 146.32,
   "heldout_games": 20000,
-  "status_time": "2026-09-25 00:15:56",
+  "status_time": "2026-09-25 00:17:57",
   "train": {
-   "loss": 2.212206,
-   "policy": 1.550952,
-   "value": 0.447175,
-   "v41": 0.428159,
-   "policy_acc": 0.632854,
-   "grad_norm": 1.321332,
+   "loss": 2.223242,
+   "policy": 1.560137,
+   "value": 0.44771,
+   "v41": 0.430789,
+   "policy_acc": 0.625776,
+   "grad_norm": 1.275148,
    "lr": 0.0002,
-   "steps": 180
+   "steps": 160
   },
   "gen": {
    "window": {
@@ -90,8 +90,8 @@
   "anchor_offset": 972.5,
   "best_step": 422614,
   "best_stall": 1,
-  "queue": 3,
-  "running": "match",
+  "queue": 0,
+  "running": null,
   "last_archive_games": 5200000,
   "references": [
    "ckpt_000281893.pt"
@@ -101,52 +101,6 @@
    "ckpt_000062426.pt"
   ],
   "jobs": [
-   {
-    "kind": "anchor",
-    "rc": 0,
-    "secs": 6006,
-    "out": "anchor-20260923-205141-117436-422614.json",
-    "tail": null
-   },
-   {
-    "kind": "match",
-    "rc": 1,
-    "secs": 33,
-    "out": "auto-20260923-205141-1.jsonl",
-    "tail": [
-     "written: ~anchor-20260923-205141-117436-422614.json",
-     "==== 2026-09-24 01:17:56 match: match --games 10 --go nodes 96 --out ~auto-20260923-205141-1.jsonl --go-opp nodes 1000 --fuseki self --fuseki-seed 4800001 --opponent ~/fuseki-sho",
-     "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
-     "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
-     "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
-    ]
-   },
-   {
-    "kind": "match",
-    "rc": 1,
-    "secs": 30,
-    "out": "auto-20260923-205141-2.jsonl",
-    "tail": [
-     "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
-     "==== 2026-09-24 01:18:29 match: match --games 10 --go nodes 96 --out ~auto-20260923-205141-2.jsonl --go-opp nodes 10000 --fuseki self --fuseki-seed 4800001 --opponent ~/fuseki-sh",
-     "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
-     "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
-     "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
-    ]
-   },
-   {
-    "kind": "match",
-    "rc": 1,
-    "secs": 30,
-    "out": "auto-20260923-205141-3.jsonl",
-    "tail": [
-     "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
-     "==== 2026-09-24 01:18:59 match: match --games 10 --go nodes 96 --out ~auto-20260923-205141-3.jsonl --go-opp nodes 100000 --fuseki self --fuseki-seed 4800001 --opponent ~/fuseki-s",
-     "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
-     "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
-     "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
-    ]
-   },
    {
     "kind": "match",
     "rc": 1,
@@ -180,6 +134,58 @@
     "secs": 7492,
     "out": "anchor-20260924-124508-117436-454803.json",
     "tail": null
+   },
+   {
+    "kind": "match",
+    "rc": 1,
+    "secs": 30,
+    "out": "auto-20260924-124508-1.jsonl",
+    "tail": [
+     "written: ~anchor-20260924-124508-117436-454803.json",
+     "==== 2026-09-25 00:15:56 match: match --games 10 --go nodes 96 --out ~auto-20260924-124508-1.jsonl --go-opp nodes 1000 --fuseki self --fuseki-seed 5200000 --opponent ~/fuseki-sho",
+     "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
+     "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
+     "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
+    ]
+   },
+   {
+    "kind": "match",
+    "rc": 1,
+    "secs": 30,
+    "out": "auto-20260924-124508-2.jsonl",
+    "tail": [
+     "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
+     "==== 2026-09-25 00:16:26 match: match --games 10 --go nodes 96 --out ~auto-20260924-124508-2.jsonl --go-opp nodes 10000 --fuseki self --fuseki-seed 5200000 --opponent ~/fuseki-sh",
+     "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
+     "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
+     "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
+    ]
+   },
+   {
+    "kind": "match",
+    "rc": 1,
+    "secs": 30,
+    "out": "auto-20260924-124508-3.jsonl",
+    "tail": [
+     "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
+     "==== 2026-09-25 00:16:57 match: match --games 10 --go nodes 96 --out ~auto-20260924-124508-3.jsonl --go-opp nodes 100000 --fuseki self --fuseki-seed 5200000 --opponent ~/fuseki-s",
+     "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
+     "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
+     "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
+    ]
+   },
+   {
+    "kind": "match",
+    "rc": 1,
+    "secs": 30,
+    "out": "auto-20260924-124508-4.jsonl",
+    "tail": [
+     "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
+     "==== 2026-09-25 00:17:27 match: match --games 10 --go nodes 96 --out ~auto-20260924-124508-4.jsonl --go-opp nodes 1000000 --fuseki self --fuseki-seed 5200000 --opponent ~/fuseki-",
+     "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
+     "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
+     "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
+    ]
    }
   ]
  },
@@ -7050,44 +7056,44 @@
    "gen_heldout_fuseki_corr_v": 0.691
   },
   {
-   "t": 1790262743.8,
-   "step": 471083,
-   "games_total": 5408636,
-   "gpd": 612610,
-   "gpd_5m": 610338,
+   "t": 1790263047.2,
+   "step": 471243,
+   "games_total": 5410857,
+   "gpd": 614475,
+   "gpd_5m": 632480,
    "window": 2000000,
-   "rss_mb": 22067,
+   "rss_mb": 22078,
    "swap_mb": 0,
    "gpu_mb": 8966,
-   "loss": 2.212206,
-   "policy": 1.550952,
-   "value": 0.447175,
-   "v41": 0.428159,
-   "policy_acc": 0.632854,
-   "grad_norm": 1.321332,
+   "loss": 2.223242,
+   "policy": 1.560137,
+   "value": 0.44771,
+   "v41": 0.430789,
+   "policy_acc": 0.625776,
+   "grad_norm": 1.275148,
    "lr": 0.0002,
-   "steps": 180,
+   "steps": 160,
    "train_avg": true,
    "target_minus_z": 0.0,
-   "v41_minus_z": -0.0426,
-   "draw_target": 0.0035,
-   "draw_actual": 0.0035,
-   "rootq_minus_z_fuseki": 0.0004,
-   "rootq_minus_z_normal": -0.061,
-   "t_train_sample": 0.16,
-   "t_train_step": 11.3,
-   "t_sp_eval": 76.14,
-   "sp_games": 6465,
-   "sp_draw": 0.0036,
-   "sp_plies": 72.4,
-   "sp_sente": 0.6132,
+   "v41_minus_z": -0.0395,
+   "draw_target": 0.0042,
+   "draw_actual": 0.0042,
+   "rootq_minus_z_fuseki": 0.0009,
+   "rootq_minus_z_normal": -0.0625,
+   "t_train_sample": 0.14,
+   "t_train_step": 9.62,
+   "t_sp_eval": 77.67,
+   "sp_games": 8686,
+   "sp_draw": 0.0035,
+   "sp_plies": 72.5,
+   "sp_sente": 0.6162,
    "sp_sennichite": 0.0014,
    "sp_perpetual_check": 0.0,
-   "sp_max_ply": 0.0022,
-   "sp_resign": 0.6498,
-   "sp_ruling41": 0.2569,
-   "sp_no_legal_move": 0.0897,
-   "sp_mate_found": 0.2509,
+   "sp_max_ply": 0.0021,
+   "sp_resign": 0.65,
+   "sp_ruling41": 0.2573,
+   "sp_no_legal_move": 0.0892,
+   "sp_mate_found": 0.252,
    "gen_window_corr_v": 0.6409,
    "gen_window_policy_acc": 0.5873,
    "gen_window_policy_ce": 1.219,
@@ -7099,7 +7105,7 @@
   }
  ],
  "review": {
-  "time": "2026-09-25 00:15:56",
+  "time": "2026-09-25 00:17:57",
   "run": "ls",
   "items": [
    {
@@ -7150,7 +7156,7 @@
    {
     "name": "M4 参照 ckpt_000062426.pt",
     "verdict": "まだ無い",
-    "why": "対 ckpt_000062426.pt: もう測っていない（最後は step 281893、2,180,405 局前）",
+    "why": "対 ckpt_000062426.pt: もう測っていない（最後は step 281893、2,181,292 局前）",
     "values": {
      "last": {
       "t": 1789951881.1436996,
@@ -7167,7 +7173,7 @@
       ]
      },
      "gap_games": 410926,
-     "behind_games": 2180405,
+     "behind_games": 2181292,
      "score": 0.855
     }
    },
@@ -7191,14 +7197,14 @@
       ]
      },
      "gap_games": 428190,
-     "behind_games": 125129,
+     "behind_games": 126016,
      "score": 0.65
     }
    },
    {
     "name": "M4 参照 ckpt_000646699.pt",
     "verdict": "まだ無い",
-    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、4,171,638 局前）",
+    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、4,172,525 局前）",
     "values": {
      "last": {
       "t": 1789725300.1884296,
@@ -7215,14 +7221,14 @@
       ]
      },
      "gap_games": 395416,
-     "behind_games": 4171638,
+     "behind_games": 4172525,
      "score": 0.895
     }
    },
    {
     "name": "M4 参照 win1m.pt",
     "verdict": "まだ無い",
-    "why": "対 win1m.pt: もう測っていない（最後は step 281893、2,182,918 局前）",
+    "why": "対 win1m.pt: もう測っていない（最後は step 281893、2,183,805 局前）",
     "values": {
      "last": {
       "t": 1789951515.1918266,
@@ -7239,57 +7245,68 @@
       ]
      },
      "gap_games": 411144,
-     "behind_games": 2182918,
+     "behind_games": 2183805,
      "score": 0.835
     }
    },
    {
     "name": "計測ジョブ",
     "verdict": "注意",
-    "why": "直近 8 件のうち 4 件が失敗（match）。最後の失敗: match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
+    "why": "直近 8 件のうち 5 件が失敗（match）。最後の失敗: match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
     "values": {
      "n_recent": 8,
-     "n_failed": 4,
+     "n_failed": 5,
      "failed": [
-      {
-       "kind": "match",
-       "rc": 1,
-       "tail": [
-        "written: ~anchor-20260923-205141-117436-422614.json",
-        "==== 2026-09-24 01:17:56 match: match --games 10 --go nodes 96 --out ~auto-20260923-205141-1.jsonl --go-opp nodes 1000 --fuseki self --fuseki-seed 4800001 --opponent ~/fuseki-sho",
-        "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
-        "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
-        "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
-       ]
-      },
-      {
-       "kind": "match",
-       "rc": 1,
-       "tail": [
-        "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
-        "==== 2026-09-24 01:18:29 match: match --games 10 --go nodes 96 --out ~auto-20260923-205141-2.jsonl --go-opp nodes 10000 --fuseki self --fuseki-seed 4800001 --opponent ~/fuseki-sh",
-        "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
-        "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
-        "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
-       ]
-      },
-      {
-       "kind": "match",
-       "rc": 1,
-       "tail": [
-        "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
-        "==== 2026-09-24 01:18:59 match: match --games 10 --go nodes 96 --out ~auto-20260923-205141-3.jsonl --go-opp nodes 100000 --fuseki self --fuseki-seed 4800001 --opponent ~/fuseki-s",
-        "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
-        "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
-        "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
-       ]
-      },
       {
        "kind": "match",
        "rc": 1,
        "tail": [
         "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
         "==== 2026-09-24 01:19:29 match: match --games 10 --go nodes 96 --out ~auto-20260923-205141-4.jsonl --go-opp nodes 1000000 --fuseki self --fuseki-seed 4800001 --opponent ~/fuseki-",
+        "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
+        "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
+        "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
+       ]
+      },
+      {
+       "kind": "match",
+       "rc": 1,
+       "tail": [
+        "written: ~anchor-20260924-124508-117436-454803.json",
+        "==== 2026-09-25 00:15:56 match: match --games 10 --go nodes 96 --out ~auto-20260924-124508-1.jsonl --go-opp nodes 1000 --fuseki self --fuseki-seed 5200000 --opponent ~/fuseki-sho",
+        "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
+        "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
+        "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
+       ]
+      },
+      {
+       "kind": "match",
+       "rc": 1,
+       "tail": [
+        "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
+        "==== 2026-09-25 00:16:26 match: match --games 10 --go nodes 96 --out ~auto-20260924-124508-2.jsonl --go-opp nodes 10000 --fuseki self --fuseki-seed 5200000 --opponent ~/fuseki-sh",
+        "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
+        "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
+        "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
+       ]
+      },
+      {
+       "kind": "match",
+       "rc": 1,
+       "tail": [
+        "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
+        "==== 2026-09-25 00:16:57 match: match --games 10 --go nodes 96 --out ~auto-20260924-124508-3.jsonl --go-opp nodes 100000 --fuseki self --fuseki-seed 5200000 --opponent ~/fuseki-s",
+        "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
+        "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
+        "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
+       ]
+      },
+      {
+       "kind": "match",
+       "rc": 1,
+       "tail": [
+        "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
+        "==== 2026-09-25 00:17:27 match: match --games 10 --go nodes 96 --out ~auto-20260924-124508-4.jsonl --go-opp nodes 1000000 --fuseki self --fuseki-seed 5200000 --opponent ~/fuseki-",
         "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
         "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
         "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
@@ -7301,9 +7318,9 @@
    {
     "name": "局/日（1 時間平均）",
     "verdict": "続ける",
-    "why": "613,552",
+    "why": "613,948",
     "values": {
-     "gpd": 613552
+     "gpd": 613948
     }
    }
   ],
