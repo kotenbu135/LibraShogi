@@ -119,10 +119,39 @@ ProofResult DfPn::solve(Position& pos, Problem& prob, bool or_node, std::uint64_
   // 年齢は同じ solve の項どうしでしか比べないので、solve ごとに数え直しても入れ替えは同じ。
   // 表をスレッドで共有すると clock_ の進みが速く、数え続けると solve の途中で一周して入れ替えを誤る
   clock_ = 0;
+  // 攻め方の根で、指せば即座に勝つ手（本将棋なら 1 手詰）を先に探す。df-pn は最初に証明した子を返し、最短の勝ちを選ばない
+  // ので、1 手詰があっても長い詰みの初手を指してしまう（v0.2 の自己対局で 1 手詰のあった局面の 39%）
+  if (or_node) {
+    MoveList ml;
+    prob.moves(pos, true, ml);
+    for (Move m : ml) {
+      pos.do_move(m);
+      ProofResult t = prob.terminal(pos, false);
+      pos.undo_move();
+      if (t == PROOF_PROVEN) {
+        ++nodes_;
+        if (best) *best = m;
+        return PROOF_PROVEN;
+      }
+    }
+  }
   mid(pos, prob, or_node, INF - 1, INF - 1, 0);
   Entry& r = look(node_key(pos));
   ProofResult res = r.pn == 0 ? PROOF_PROVEN : r.dn == 0 ? PROOF_DISPROVEN : PROOF_UNKNOWN;
   if (res == PROOF_PROVEN && or_node && best) {
+    // df-pn の証明手は最短とは限らない（3 手詰があっても 5 手詰の初手を返す）ので、決まった手数まで短い順に総当たりで探す。
+    // 1 手の勝ちは上で済んでいる。総当たりが上限の節点数を超えたら、df-pn の証明手に任せる
+    short_nodes_ = 0;
+    for (int n = 3; n <= prob.shortest_len(); n += 2) {
+      MoveList ml;
+      prob.moves(pos, true, ml);
+      for (Move m : ml)
+        if (win_after(pos, prob, m, n)) {
+          *best = m;
+          return res;
+        }
+      if (short_nodes_ > SHORT_NODES) break;
+    }
     *best = MOVE_NONE;
     MoveList ml;
     prob.moves(pos, true, ml);
@@ -138,6 +167,46 @@ ProofResult DfPn::solve(Position& pos, Problem& prob, bool or_node, std::uint64_
     }
   }
   return res;
+}
+
+// 攻め方の手番で、n 手以内（n は奇数）に勝てるか
+bool DfPn::win_within(Position& pos, Problem& prob, int n) {
+  MoveList ml;
+  prob.moves(pos, true, ml);
+  for (Move m : ml)
+    if (win_after(pos, prob, m, n)) return true;
+  return false;
+}
+
+// 攻め方が m を指した後、受け方のどの応手にも n − 2 手以内で勝てるか（m で勝てば真）
+bool DfPn::win_after(Position& pos, Problem& prob, Move m, int n) {
+  if (++short_nodes_ > SHORT_NODES) return false;
+  pos.do_move(m);
+  bool ok;
+  ProofResult t = prob.terminal(pos, false);
+  if (t != PROOF_UNKNOWN || n < 3) {
+    ok = t == PROOF_PROVEN;
+  } else {
+    MoveList rl;
+    prob.moves(pos, false, rl);
+    ok = true;
+    for (Move r : rl) {
+      if (++short_nodes_ > SHORT_NODES) {
+        ok = false;
+        break;
+      }
+      pos.do_move(r);
+      ProofResult t2 = prob.terminal(pos, true);
+      bool w = t2 == PROOF_PROVEN || (t2 == PROOF_UNKNOWN && win_within(pos, prob, n - 2));
+      pos.undo_move();
+      if (!w) {
+        ok = false;
+        break;
+      }
+    }
+  }
+  pos.undo_move();
+  return ok;
 }
 
 void DfPn::mid(Position& pos, Problem& prob, bool or_node, std::uint32_t thpn, std::uint32_t thdn, int depth) {
