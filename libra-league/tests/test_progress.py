@@ -222,3 +222,24 @@ def test_snapshot_without_exploiter_is_none(tmp_path):
     s = snapshot(sd, {})
     assert s["exploiter"] is None
     assert "対本体 勝率" not in format_md(s)
+
+
+def test_snapshot_carries_exploiter_curriculum(tmp_path):
+    """課程の途中は段と直近の勝率を出し、対本体勝率の行は出さない（弱くした相手の成績なので）。"""
+    sd = _run(StateDir(tmp_path / "lx"), tmp_path)
+    st = json.loads(sd.status_json.read_text(encoding="utf-8"))
+    st["exploiter"] = {"games": 0, "wins": 0, "draws": 0, "losses": 0, "winrate": 0.0, "main_step": 431623,
+                       "history": [], "curriculum": {"stage": 1, "stages": 6, "done": False, "sims": 2, "recent_games": 800,
+                                                     "recent_winrate": 0.4125, "games": 800, "wins": 330, "threshold": 0.75,
+                                                     "window": 2000, "history": []}}
+    sd.status_json.write_text(json.dumps(st), encoding="utf-8")
+    s = snapshot(sd, {})
+    assert s["exploiter"]["curriculum"]["sims"] == 2
+    md = format_md(s)
+    assert "| 課程 | 2/6 段目（本体の読み 2 回）、直近 800 局の勝率 41.2%（75% で次の段。この段 800 局） |" in md
+    assert "対本体 勝率" not in md
+    st["exploiter"]["curriculum"].update({"stage": 6, "done": True, "sims": None})
+    st["exploiter"].update({"games": 100, "wins": 10, "losses": 90, "winrate": 0.1})
+    sd.status_json.write_text(json.dumps(st), encoding="utf-8")
+    md = format_md(snapshot(sd, {}))
+    assert "| 課程 | 終えた（6 段。" in md and "| 対本体 勝率 | 10.0%" in md

@@ -155,7 +155,7 @@ def snapshot(sd: StateDir, cfg: dict | None = None, points: int = 120, now: floa
         # 本体 ls の run では status に exploiter が無いので None になる
         "exploiter": ({k: ex.get(k) for k in ("games", "wins", "draws", "losses", "winrate",
                                               "main_step", "source_step", "refreshed_at")}
-                      | {"history": (ex.get("history") or [])[-10:]}) if ex else None,
+                      | {"history": (ex.get("history") or [])[-10:], "curriculum": ex.get("curriculum")}) if ex else None,
         "auto": {
             "anchor_step": anchor.get("step"), "anchor_offset": anchor.get("offset"),
             "best_step": best.get("step"), "best_stall": auto.get("best_stall"),
@@ -252,9 +252,20 @@ def _metric_lines(rows: list[dict]) -> list[str]:
 
 def _exploiter_lines(ex: dict | None) -> list[str]:
     """搾取者の対本体成績（lx だけ）。凍結相手を作り直すたびに 0 から数え直すので、相手の step も並べる。"""
-    if not ex or not ex.get("games"):
+    if not ex:
         return []
-    L = [f"| 対本体 勝率 | {_fmt((ex.get('winrate') or 0) * 100, 1)}%"
+    L = []
+    cu = ex.get("curriculum")
+    if cu and not cu.get("done"):
+        rate = cu.get("recent_winrate")
+        L.append(f"| 課程 | {_fmt((cu.get('stage') or 0) + 1)}/{_fmt(cu.get('stages'))} 段目（本体の読み {_fmt(cu.get('sims'))} 回）、"
+                 f"直近 {_fmt(cu.get('recent_games'))} 局の勝率 {'-' if rate is None else _fmt(rate * 100, 1) + '%'}"
+                 f"（{_fmt((cu.get('threshold') or 0) * 100, 0)}% で次の段。この段 {_fmt(cu.get('games'))} 局） |")
+    elif cu:
+        L.append(f"| 課程 | 終えた（{_fmt(cu.get('stages'))} 段。対本体勝率は本番の読みの相手だけで数える） |")
+    if not ex.get("games"):
+        return L
+    L += [f"| 対本体 勝率 | {_fmt((ex.get('winrate') or 0) * 100, 1)}%"
          f"（{_fmt(ex.get('games'))} 局: 勝ち {_fmt(ex.get('wins'))}・引き分け {_fmt(ex.get('draws'))}・負け {_fmt(ex.get('losses'))}。"
          f"凍結相手 step {_fmt(ex.get('main_step'))}） |"]
     h = ex.get("history") or []

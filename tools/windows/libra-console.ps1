@@ -1746,6 +1746,13 @@ function Update-Panel([string]$run, $obj) {
         $v.exploiter.Text = "{0:P1}（{1} 局、相手 step {2}{3}{4}）" -f [double]$ex.winrate, (Format-Int $ex.games), (Format-Int $ex.main_step),
             $(if ($null -ne $ex.source_step -and $null -ne $ex.main_step) { "（本体より " + (Format-Int ([long]$ex.source_step - [long]$ex.main_step)) + " 古い）" } else { "" }),
             $(if ($null -ne $ex.refreshed_at) { "、作り直し " + (Format-Ago (From-Unix $ex.refreshed_at)) } else { "" })
+        # 課程の途中は本体を弱くして打っているので、対本体勝率ではなく段と直近の勝率を出す（docs/lx-settings.md）
+        $cu = $ex.curriculum
+        if ($null -ne $cu -and -not $cu.done) {
+            $rate = if ($null -ne $cu.recent_winrate) { "{0:P1}" -f [double]$cu.recent_winrate } else { "-" }
+            $v.exploiter.Text = "課程 {0}/{1} 段目（本体の読み {2} 回）: 直近 {3} 局 {4}（{5:P0} で次の段）" -f ([int]$cu.stage + 1), $cu.stages, $cu.sims,
+                (Format-Int $cu.recent_games), $rate, [double]$cu.threshold
+        }
     } else { $v.exploiter.Text = "-" }
     Set-RowVisible $u "exploiter" ($null -ne $st.exploiter)   # 本体には無い行なので隠して縦を詰める
     $rs = @($st.restarts)
