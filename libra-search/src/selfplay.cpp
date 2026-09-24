@@ -107,7 +107,8 @@ struct SelfPlay::Game {
   int slot = 0;
   int resign_run[2] = {0, 0};  // 投了の判定: 値が −しきい値 以下だった連続の手数（0 先手、1 後手）
   bool resign_off = false;     // この対局は投了させず最後まで打つ（resign_disable_prob）
-  bool idle = false;         // 外部駆動で局面待ち
+  bool idle = false;         // 外部駆動で局面待ち。retire した枠は終局の後もこれで止める
+  bool retired = false;      // 今の対局が終わったら次を始めない（retire）
   int forced_budget = -1;    // 外部駆動の読みの回数
   bool forced_full = true;
   SearchResult result;
@@ -169,6 +170,10 @@ void SelfPlay::set_openings(std::vector<std::vector<std::uint32_t>> openings, fl
 }
 
 void SelfPlay::set_active(int n) { active_ = std::max(1, std::min(n, int(games_.size()))); }
+
+void SelfPlay::retire(int slot) { games_.at(size_t(slot))->retired = true; }
+
+bool SelfPlay::retired(int slot) const { return games_.at(size_t(slot))->retired; }
 
 void SelfPlay::start_game(Game& g) {
   g.resign_run[0] = g.resign_run[1] = 0;
@@ -294,6 +299,18 @@ void SelfPlay::end_game(Game& g) {
     default: break;
   }
   g.done.push_back(std::move(g.rec));
+  if (g.retired) {  // 次の対局を始めずに止める（collect は行をゼロにし、apply は飛ばす）
+    g.idle = true;
+    g.pending = false;
+    g.proof_state = 0;
+    g.nodes.clear();
+    g.table.clear();
+    g.proof_cache.clear();
+    g.eval_cache.clear();
+    g.root_ready = false;
+    g.sims = 0;
+    return;
+  }
   start_game(g);
 }
 

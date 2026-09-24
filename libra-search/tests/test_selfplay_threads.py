@@ -392,3 +392,37 @@ def test_gote_rank4_prob_sets_the_share_of_rank4_gote_kings():
     # 既定（負）は 36 マスから一様で四段目は 4 分の 1
     share0 = sum(r == 3 for r in kings({}, 1000)) / 1000
     assert 0.2 < share0 < 0.3, share0
+
+
+def test_retire_stops_a_slot_after_its_current_game_and_leaves_the_others_unchanged():
+    """retire した枠は今の対局を最後まで打ってから止まる（次の対局を始めない）。ほかの枠の棋譜は変わらない
+    （評価対局で局数ちょうどで打ち切るのに使う。evaluate.play_match）。"""
+    n_games, rounds = 8, 1500
+
+    def run(retire_at: int | None):
+        sp = librasearch.SelfPlay(CFG, n_games, seed=3, threads=2)
+        sq = np.zeros((n_games, 81, ls.SQ_FEATS), np.float32)
+        glob = np.zeros((n_games, ls.GLOB_FEATS), np.float32)
+        done = []
+        for r in range(rounds):
+            if r == retire_at:
+                for s in (1, 6):
+                    sp.retire(s)
+            sp.collect(sq, glob)
+            sp.apply(*fake_net(sq, glob))
+            done += sp.take_finished()
+        return sp, done
+
+    _, ref = run(None)
+    sp, got = run(5)
+    assert sp.retired(1) and sp.retired(6) and not sp.retired(0)
+    by_slot = lambda recs, s: [canon(r) for r in recs if r["slot"] == s]  # noqa: E731
+    for s in range(n_games):
+        if s in (1, 6):
+            # 5 回目のラウンドでは 1 局目の途中なので、その 1 局だけ打って止まる
+            assert by_slot(got, s) == by_slot(ref, s)[:1] and len(by_slot(ref, s)) > 1
+            assert sp.idle(s)
+        else:
+            assert by_slot(got, s) == by_slot(ref, s)
+    with pytest.raises(IndexError):
+        sp.retire(n_games)

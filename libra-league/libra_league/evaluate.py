@@ -56,46 +56,147 @@ def calibration(games: list[dict], side_of: "callable", bins: int = 10) -> list[
     return reliability(np.array(qs), np.array(zs), bins).get("bins", [])
 
 
+PARTIAL_KEYS = ("slot", "result", "reason", "plies", "root_q")  # 途中経過に残す対局の項目（集計と較正に使うものだけ）
+
+
+def _load_partial(path: Path, header: dict) -> list[dict]:
+    """途中経過（1 行目が条件、以降 1 行 1 局）を読む。条件が違う・壊れているときは使わずに .stale へ退ける。
+    最後の行は書きかけで止められたことがあるので、読めない行は捨てる。"""
+    if not path.exists():
+        return []
+    games: list[dict] = []
+    ok = False
+    try:
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if i == 0:
+                ok = row == header
+                if not ok:
+                    break
+            elif isinstance(row, dict) and all(k in row for k in PARTIAL_KEYS):
+                games.append(row)
+    except OSError:
+        return []
+    if not ok:
+        path.replace(path.with_name(path.name + ".stale"))
+        return []
+    return games
+
+
 @torch.no_grad()
 def play_match(model_a: LibraNet, model_b: LibraNet, search_cfg: dict, n_games: int, concurrent: int, threads: int, seed: int,
-               device: torch.device, dtype: torch.dtype = torch.float16, log=None, search_cfg_b: dict | None = None) -> dict:
+               device: torch.device, dtype: torch.dtype = torch.float16, log=None, search_cfg_b: dict | None = None,
+               partial: Path | None = None, partial_tag: dict | None = None) -> dict:
+    """A と B を n_games 局打つ。A の先手（偶数枠）と後手（奇数枠）はちょうど半分ずつ（奇数なら先手が 1 局多い）。
+
+    局数ちょうどで止めるときに打ちかけの対局を捨てない: 枠ごとに「次の対局を始めてよいか」を始める前に決め
+    （`SelfPlay.retire`）、始めた対局はすべて数える。先に終わった n_games 局を取る形だと、打ちかけで残るのは長い対局なので
+    短い対局に偏り、同時に打つ数（concurrent）を増やすほど偏りが大きくなる（2026-09-24 まではこの形で、64 枠・2,000 局で約 3%）。
+
+    partial を渡すと、数えた対局を 1 局ずつ追記し、次に同じ条件で呼ばれたらその続きから打つ（ランの停止・起動で
+    計測ジョブが止められても、打ち終えた対局を捨てない）。続きは種を変えて打つ（同じ種だと同じ対局をもう一度打つため）。"""
     cfg = dict(search_cfg)
     cfg["full_prob"] = 1.0  # 評価は全読みで固定
     cfg["resign_threshold"] = 0.0  # 計測の対局では投了しない（誤投了が Elo に乗ると物差しが狂う。自己対局だけで使う）
     # 計測の対局は玉を 36×36 から一様に置く（後手玉四段目 25%）。四段目の局は 41 手目の裁定で先手が勝つので得点は両者 0.5 に寄り、
     # その割合が節目ごとに変わると同じ強さの差でも Elo の出方が変わる。自己対局の偏り（gote_rank4_prob）は持ち込まない
     cfg["gote_rank4_prob"] = -1.0
-    eng = librasearch.SelfPlay(cfg, concurrent, seed, threads)
+    # 根の証明探索は GPU の評価中に解く（自己対局と同じ。棋譜は変わらない: test_selfplay_threads.py）
+    cfg["defer_root_proof"] = True
+    header = {**(partial_tag or {}), "n_games": n_games, "search": {k: cfg[k] for k in sorted(cfg) if isinstance(cfg[k], (int, float, str, bool))},
+              "search_b": search_cfg_b or None}
+    games: list[dict] = _load_partial(partial, header) if partial is not None else []
+    resumed = len(games)
+    # 残りの局数（枠の偶奇ごと。偶数枠は A が先手）
+    need = [(n_games + 1) // 2, n_games // 2]
+    for g in games:
+        need[int(g["slot"]) % 2] -= 1
+    need = [max(0, x) for x in need]
+    per_side = max(1, min(max(1, concurrent // 2), max(need)))
+    n_slots = 2 * per_side
+    eng = librasearch.SelfPlay(cfg, n_slots, seed + resumed, threads)
     if search_cfg_b is not None:
         cfg_b = {**cfg, **search_cfg_b, "full_prob": 1.0}
         eng.set_side_config(cfg_b)  # B 側の探索設定（変えられるのは読む手の選び方だけ。ほかが違えば例外）
-    sq = np.zeros((concurrent, 81, ls.SQ_FEATS), np.float32)
-    glob = np.zeros((concurrent, ls.GLOB_FEATS), np.float32)
-    slot_swap = (np.arange(concurrent) % 2).astype(np.int8)  # 奇数枠は B が先手
-    games: list[dict] = []
+    # 要る局数より枠が多い側は、始めから止める枠を決めておき、その最初の対局は数えない（打つ前に決めるので偏らない）
+    ignore: set[int] = set()
+    retired = np.zeros(n_slots, bool)  # 今の対局が終わったら止める枠（eng.retire と同じ）
+
+    def retire(s: int) -> None:
+        retired[s] = True
+        eng.retire(s)
+
+    for p in (0, 1):
+        for r in range(need[p], per_side):
+            ignore.add(2 * r + p)
+            retire(2 * r + p)
+    started = [min(per_side, need[p]) for p in (0, 1)]  # 始めた（数える）対局の数
+    idle = np.zeros(n_slots, bool)  # 止めた枠で対局も終わった（評価に出さない）
+    pf = None
+    if partial is not None:
+        partial.parent.mkdir(parents=True, exist_ok=True)
+        if resumed == 0:
+            partial.write_text(json.dumps(header, ensure_ascii=False) + "\n", encoding="utf-8")
+        pf = open(partial, "a", encoding="utf-8")
+        if resumed and log:
+            log(f"eval: resume {resumed}/{n_games} games from {partial.name}")
+    sq = np.zeros((n_slots, 81, ls.SQ_FEATS), np.float32)
+    glob = np.zeros((n_slots, ls.GLOB_FEATS), np.float32)
+    slot_swap = (np.arange(n_slots) % 2).astype(np.int8)  # 奇数枠は B が先手
     t0 = time.time()
     last_log = 0
-    while len(games) < n_games:
-        eng.collect(sq, glob)
-        who = eng.root_turns() ^ slot_swap  # 0 なら A のネット、1 なら B
-        logits = np.zeros((concurrent, ls.POLICY_SIZE), np.float32)
-        wdl = np.zeros((concurrent, 3), np.float32)
-        sq_t = torch.from_numpy(sq).to(device).to(dtype)
-        gl_t = torch.from_numpy(glob).to(device).to(dtype)
-        for k, model in ((0, model_a), (1, model_b)):
-            idx = np.flatnonzero(who == k)
-            if idx.size == 0:
-                continue
-            it = torch.from_numpy(idx).to(device)
-            p, w, _ = model(sq_t[it], gl_t[it])
-            logits[idx] = p.float().cpu().numpy()
-            wdl[idx] = F.softmax(w.float(), dim=-1).cpu().numpy()
-        eng.apply(logits, wdl)
-        games.extend(eng.take_finished())
-        if log and len(games) - last_log >= 20:
-            last_log = len(games)
-            log(f"eval: {len(games)}/{n_games} games ({time.time() - t0:.0f}s)")
-    games = games[:n_games]
+    try:
+        while len(games) < n_games:
+            if idle.all():
+                raise RuntimeError(f"eval: all slots stopped at {len(games)}/{n_games} games")
+            eng.collect(sq, glob)
+            who = eng.root_turns() ^ slot_swap  # 0 なら A のネット、1 なら B
+            logits = np.zeros((n_slots, ls.POLICY_SIZE), np.float32)
+            wdl = np.zeros((n_slots, 3), np.float32)
+            sq_t = torch.from_numpy(sq).to(device).to(dtype)
+            gl_t = torch.from_numpy(glob).to(device).to(dtype)
+            outs = []
+            for k, model in ((0, model_a), (1, model_b)):
+                idx = np.flatnonzero((who == k) & ~idle)
+                if idx.size == 0:
+                    continue
+                it = torch.from_numpy(idx).to(device)
+                p, w, _ = model(sq_t[it], gl_t[it])
+                outs.append((idx, p, w))
+            eng.proof()  # GPU が評価している間に根の証明探索を解く
+            for idx, p, w in outs:
+                logits[idx] = p.float().cpu().numpy()
+                wdl[idx] = F.softmax(w.float(), dim=-1).cpu().numpy()
+            eng.apply(logits, wdl)
+            for g in eng.take_finished():
+                s = int(g["slot"])
+                if retired[s]:
+                    idle[s] = True
+                else:
+                    started[s % 2] += 1  # 終わった枠はすぐ次の対局を始めている
+                if s in ignore:
+                    ignore.discard(s)
+                    continue
+                row = {k: g[k] for k in PARTIAL_KEYS}
+                row["root_q"] = [round(float(q), 4) for q in row["root_q"]]
+                games.append(row)
+                if pf is not None:
+                    pf.write(json.dumps(row, ensure_ascii=False) + "\n")
+                    pf.flush()
+            # 次の回に止めずにおく枠がすべて終局しても、始めた対局が要る局数を超えないようにする（番号の大きい枠から止める）
+            for p in (0, 1):
+                live = [s for s in range(p, n_slots, 2) if not retired[s]]
+                for s in sorted(live, reverse=True)[:max(0, started[p] + len(live) - need[p])]:
+                    retire(s)
+            if log and len(games) - last_log >= 20:
+                last_log = len(games)
+                log(f"eval: {len(games)}/{n_games} games ({time.time() - t0:.0f}s)")
+    finally:
+        if pf is not None:
+            pf.close()
     # 集計: A が先手なのは偶数枠
     a_sente = {"w": 0, "d": 0, "l": 0}
     a_gote = {"w": 0, "d": 0, "l": 0}
@@ -131,6 +232,8 @@ def play_match(model_a: LibraNet, model_b: LibraNet, search_cfg: dict, n_games: 
         "gumbel_noise": bool(cfg.get("gumbel_noise", True)),
         "search_b": {k: v for k, v in (search_cfg_b or {}).items() if cfg.get(k) != v} or None,
         "seconds": round(time.time() - t0, 1),
+        "concurrent": n_slots,
+        "resumed_games": resumed,
     }
 
 
@@ -139,11 +242,14 @@ def main_eval(a: Path, b: Path, search_cfg: dict, n_games: int, concurrent: int,
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ma = load_model(a, device)
     mb = load_model(b, device)
+    # 打ち終えた対局は <out>.partial.jsonl に 1 局ずつ残し、止められて同じ引数で起動し直されたら続きから打つ（auto.py の積み直し）
+    partial = out.with_name(out.name + ".partial.jsonl") if out else None
     res = play_match(ma, mb, search_cfg, n_games, concurrent, threads, seed, device, log=lambda s: print(s, flush=True),
-                     search_cfg_b=search_cfg_b)
+                     search_cfg_b=search_cfg_b, partial=partial, partial_tag={"a": str(a), "b": str(b), "seed": seed})
     res["a"] = str(a)
     res["b"] = str(b)
     if out:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+        partial.unlink(missing_ok=True)
     return res
