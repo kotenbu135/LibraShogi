@@ -62,6 +62,9 @@ def play_match(model_a: LibraNet, model_b: LibraNet, search_cfg: dict, n_games: 
     cfg = dict(search_cfg)
     cfg["full_prob"] = 1.0  # 評価は全読みで固定
     cfg["resign_threshold"] = 0.0  # 計測の対局では投了しない（誤投了が Elo に乗ると物差しが狂う。自己対局だけで使う）
+    # 計測の対局は玉を 36×36 から一様に置く（後手玉四段目 25%）。四段目の局は 41 手目の裁定で先手が勝つので得点は両者 0.5 に寄り、
+    # その割合が節目ごとに変わると同じ強さの差でも Elo の出方が変わる。自己対局の偏り（gote_rank4_prob）は持ち込まない
+    cfg["gote_rank4_prob"] = -1.0
     eng = librasearch.SelfPlay(cfg, concurrent, seed, threads)
     if search_cfg_b is not None:
         cfg_b = {**cfg, **search_cfg_b, "full_prob": 1.0}

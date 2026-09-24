@@ -360,3 +360,35 @@ def test_side_config_applies_to_the_side_that_is_thinking():
     mixed_gote = visits(a, b, gote)
     only_a_gote, only_b_gote = visits(a, None, gote), visits(b, None, gote)
     assert mixed_gote[0] == only_b_gote[0] and mixed_gote[1] == only_a_gote[0]  # 後手の手番では入れ替わる
+
+
+def test_gote_rank4_prob_sets_the_share_of_rank4_gote_kings():
+    """gote_rank4_prob: 後手玉が四段目になる確率（残りは一〜三段目から一様）。先手玉の置き方は変えない。
+    prune_gote_rank4 が true ならそちらが優先（四段目は出ない）。"""
+
+    def kings(extra, n_games=400):
+        cfg = {"full_sims": 2, "fast_sims": 2, "proof_nodes": 0, "mate_nodes_root": 0, "max_moves_per_game": 1, **extra}
+        sp = librasearch.SelfPlay(cfg, 64, seed=3, threads=2)
+        sq = np.zeros((64, 81, ls.SQ_FEATS), np.float32)
+        glob = np.zeros((64, ls.GLOB_FEATS), np.float32)
+        rng = np.random.default_rng(0)
+        wdl = np.tile(np.array([[0.4, 0.2, 0.4]], np.float32), (64, 1))
+        done = []
+        while len(done) < n_games:
+            sp.collect(sq, glob)
+            sp.apply(rng.standard_normal((64, ls.POLICY_SIZE), dtype=np.float32), wdl)
+            done += sp.take_finished()
+        done = done[:n_games]
+        assert all(5 <= int(g["kb"]) % 9 <= 8 for g in done)
+        return [int(g["kw"]) % 9 for g in done]
+
+    assert all(r <= 2 for r in kings({"gote_rank4_prob": 0.0}))
+    assert all(r == 3 for r in kings({"gote_rank4_prob": 1.0}))
+    assert all(r <= 2 for r in kings({"gote_rank4_prob": 1.0, "prune_gote_rank4": True}))
+    ranks = kings({"gote_rank4_prob": 0.2}, 1000)
+    share = sum(r == 3 for r in ranks) / len(ranks)
+    assert 0.15 < share < 0.25, share  # 1,000 局で標準誤差 0.013
+    assert {r for r in ranks if r <= 2} == {0, 1, 2}
+    # 既定（負）は 36 マスから一様で四段目は 4 分の 1
+    share0 = sum(r == 3 for r in kings({}, 1000)) / 1000
+    assert 0.2 < share0 < 0.3, share0

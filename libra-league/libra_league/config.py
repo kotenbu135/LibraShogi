@@ -46,6 +46,10 @@ DEFAULTS: dict[str, Any] = {
         # 読むのは C++（libra-search/python/bindings.cpp の getb）だけだが、ここに無いと config/lx.toml が
         # 起動のたびに「今のプログラムが知らない設定」として警告に出る（unknown_keys）
         "prune_gote_rank4": False,
+        # 自己対局で後手玉が四段目になる確率。負なら 36 マスから一様（＝0.25。乱数の引き方も入れる前と同じ）。
+        # 四段目は 41 手目の裁定で先手の勝ちが決まるので、本体 ls ではこれで減らす（丸ごとは除かない。docs/v0.3-plan.md §2・§5）。
+        # 計測の対局（evaluate.play_match）はこの値を無視して一様に置く（目盛りを節目の間で揃えるため）
+        "gote_rank4_prob": -1.0,
     },
     "selfplay": {
         "n_games": 512,

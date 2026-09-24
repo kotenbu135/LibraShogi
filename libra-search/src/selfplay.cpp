@@ -228,7 +228,8 @@ void SelfPlay::start_game(Game& g) {
     g.pos.reset(MODE_TENBIN);
     g.pos.set_max_ply(cfg_.max_ply, cfg_.count_from_41);
   }
-  // 玉配置のペア: 既定は 36×36 から一様。cfg.king_pairs があればその中から一様（libra-scale の検証対局）
+  // 玉配置のペア: 既定は 36×36 から一様。cfg.king_pairs があればその中から一様（libra-scale の検証対局）。
+  // 後手玉の段は prune_gote_rank4（四段目なし）・gote_rank4_prob（四段目の確率）で偏らせられる（king_pairs があれば効かない）
   int kb, kw;
   if (cfg_.king_pairs.size() >= 2) {
     std::uniform_int_distribution<int> d(0, int(cfg_.king_pairs.size() / 2) - 1);
@@ -242,6 +243,16 @@ void SelfPlay::start_game(Game& g) {
       std::uniform_int_distribution<int> d27(0, 26);
       int x = d27(g.rng);
       kw = make_sq(x % 9, x / 9);
+    } else if (cfg_.gote_rank4_prob >= 0.0f) {
+      std::uniform_real_distribution<float> u(0.0f, 1.0f);
+      if (u(g.rng) < cfg_.gote_rank4_prob) {
+        std::uniform_int_distribution<int> d9(0, 8);
+        kw = make_sq(d9(g.rng), 3);
+      } else {
+        std::uniform_int_distribution<int> d27(0, 26);
+        int x = d27(g.rng);
+        kw = make_sq(x % 9, x / 9);
+      }
     } else {
       kw = make_sq(d(g.rng) % 9, d(g.rng) / 9);
     }
@@ -1096,7 +1107,7 @@ void SelfPlay::set_side_config(const SearchConfig& cfg) {
                     cfg.mate_nodes_root == cfg_.mate_nodes_root && cfg.proof_nodes == cfg_.proof_nodes &&
                     cfg.proof_min_ply == cfg_.proof_min_ply && cfg.external == cfg_.external &&
                     cfg.defer_root_proof == cfg_.defer_root_proof && cfg.eval_cache == cfg_.eval_cache &&
-                    cfg.prune_gote_rank4 == cfg_.prune_gote_rank4 && cfg.king_pairs == cfg_.king_pairs &&
+                    cfg.prune_gote_rank4 == cfg_.prune_gote_rank4 && cfg.gote_rank4_prob == cfg_.gote_rank4_prob && cfg.king_pairs == cfg_.king_pairs &&
                     cfg.openings == cfg_.openings && cfg.openings_prob == cfg_.openings_prob &&
                     cfg.resign_threshold == cfg_.resign_threshold && cfg.resign_runs == cfg_.resign_runs &&
                     cfg.resign_disable_prob == cfg_.resign_disable_prob && cfg.resign_min_ply == cfg_.resign_min_ply;
