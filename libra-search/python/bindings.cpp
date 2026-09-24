@@ -193,6 +193,8 @@ PYBIND11_MODULE(_search, m) {
              return out;
            })
       .def("set_active", &SelfPlay::set_active)
+      .def("retire", &SelfPlay::retire, py::arg("slot"))
+      .def("retired", &SelfPlay::retired, py::arg("slot"))
       .def("set_openings", &SelfPlay::set_openings, py::arg("openings"), py::arg("prob"))
       .def("clear_eval_cache", &SelfPlay::clear_eval_cache)
       .def("set_eval_cache", &SelfPlay::set_eval_cache, py::arg("on"))

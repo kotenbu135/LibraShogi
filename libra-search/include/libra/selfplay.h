@@ -125,6 +125,10 @@ class SelfPlay {
   std::vector<GameRecord> take_finished();
   SelfPlayStats stats() const { return stats_; }
   void set_active(int n);  // 同時進行数を絞る（throttle）。n 以降の対局は止めたまま保持する
+  // 枠 slot は今の対局が終わったら次の対局を始めずに止める（idle）。評価対局で局数ちょうどで打ち切るのに使う
+  // （途中の対局を捨てると短い対局に偏るため）。collect/apply の外で呼ぶ
+  void retire(int slot);
+  bool retired(int slot) const;
   void set_openings(std::vector<std::vector<std::uint32_t>> openings, float prob);  // 対局の合間（collect/apply の外）に呼ぶ
   // eval_cache: ネットの重みを替えたら呼ぶ（持っている評価を捨てる）。collect/apply の外で呼ぶ
   void clear_eval_cache() { ++eval_gen_; }
