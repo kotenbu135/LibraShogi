@@ -1,7 +1,7 @@
 # LibraShogi
 
 天秤将棋（https://tenbinshogi.com/rules/）の AI「Libra」。設計は docs/libra-design.md、実行計画は docs/libra-local.md。
-**新しいセッションではまず本ファイル → docs/runbook.md → docs/decisions.md の末尾 → docs/measurements.md の末尾を読み、`bin/libra status` と `bin/libra --run lx status` で稼働状態を確かめてから作業する。**
+**新しいセッションではまず本ファイル → docs/runbook.md → docs/decisions.md の末尾 → docs/measurements.md の末尾を読み、`bin/libra status` と `bin/libra --run lx status` で稼働状態を確かめてから作業する。** クラウドのセッションには `~/libra-run` が無いので、稼働状態は `progress` ブランチの `progress/<run-id>.json`・`.md` で読む。
 ユーザー（ルール設計者、git user は kotenbu）とのやり取りは日本語。
 
 ## 不変の制約
@@ -18,14 +18,14 @@ libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX �
 ビルド・起動・テスト・エンジンの駆動手順は `.claude/skills/run-librashogi/SKILL.md`（`/run-librashogi`）が正。ここに書いてある通りに動かす。人向けの同じ手順は docs/getting-started.md で、コマンドを変えるときは両方を直す。
 
 ## 作業の進め方
-1. **1 タスク 1 ブランチ**。`git checkout -b <task>` → 実装 → テスト全通過 → `git checkout main && git merge --ff-only <task> && git push origin main && git branch -d <task>`。PR は作らない（単独開発）。CI（.github/workflows/ci.yml、ubuntu-latest）が緑であることを push 後に `gh run list --limit 2` で確かめる。文書だけの変更（`docs/**`、`*.md`、`LICENSES/**`、`NOTICE`）では CI は走らない（`paths-ignore`）ので、確かめなくてよい。
+1. **1 タスク 1 ブランチ**。`git checkout -b <task>` → 実装 → テスト全通過 → `git checkout main && git merge --ff-only <task> && git push origin main && git branch -d <task>`。PR は作らない（単独開発）。クラウドのセッションは main に push できないので、指定のブランチから PR を作り、CI が緑なら squash merge する。CI（.github/workflows/ci.yml、ubuntu-latest）が緑であることを push 後に `gh run list --limit 2` で確かめる。文書だけの変更（`docs/**`、`*.md`、`LICENSES/**`、`NOTICE`）では CI は走らない（`paths-ignore`）ので、確かめなくてよい。
 2. **テストを先に書く**。C++ は `ctest --test-dir build/libra-sim` と `build/libra-search`、Python は SKILL.md の pytest 行。変更のたびに全部通す。パイプの `| tail` は終了コードを隠すので、コミット条件に使うときは pytest の結果行を目で確認する。
 3. **コミットは小さく**、メッセージは「何を・なぜ」を日本語で。`git commit -s`（DCO の Signed-off-by）を付け、末尾に `Co-Authored-By: <実際に書いたモデル名> <noreply@anthropic.com>`（例: `Claude Opus 5`。ユーザーの決定 2026-09-16）。
 4. **決定は docs/decisions.md に 1 行**（日付、内容、理由。ユーザーの決定はその旨を書く）。**実測値は docs/measurements.md に 1 行**（日付、条件、値、備考。予定と実測の差も書く）。文書は docs/runbook.md（運用）、docs/protocol.md（GUI との接続仕様）、docs/rules.md（ルール）。libra-design.md と libra-local.md はユーザーの計画書で、書き換えない（差異は protocol.md §4 と decisions.md に記録する）。
 5. **ユーザーに聞く事項**（勝手に決めない）: 対局棋譜（水匠5 との）の公開可否、vast.ai の利用開始、公開版サイトの規定を大会規定に揃えるか、desktop への終局判定追加の Issue を出す時期（Libra 側の準備ができたら起票する決定済み）、基準値マッチの持ち時間、大きな設計変更（ネットの形、学習則、ルール解釈）。それ以外は自分で決めて decisions.md に記録する。
-6. **報告は簡潔に**。結果を先に、数値は表、変更点は箇条書き。手順の説明を長々と書かない。中間報告は長い待ちの前に 1 回。
+6. **報告は結果を先に**。数値は表、変更点は箇条書き。言葉の選び方は「ユーザーへの説明」に従う。長い待ちに入る前には、何を待っているかを一言伝える。
 7. 秘密情報・外部コードの混入を疑う操作（clone、コピー）をする前に CONTRIBUTING.md のクリーンルーム方針を確認する。相手 AI（~/fuseki-shogi-ai）の内部は読まない（起動方法とオプションだけ）。
-8. **論文の手法を実装するときは、論文の方法の節（アルゴリズム・擬似コード・付録）を読んでから作り、実装との差異を docs/decisions.md に 1 行で残す**（何をそのまま使い、何を変え、なぜ変えたか）。計画書が論文を「理由」として引いているだけのときも、「やり方」は原典で確かめる。別の目的で作った部品を流用するときは、その部品の前提が新しい用途でも成り立つかを確かめて同じ行に書く。原典を読めなかったとき（認証・PDF が読めない）はその旨を書く。**論文以外（計画書の 1 行、会話、自分の案）から手法や値を入れるときも**、decisions.md に出典（無ければ「出典なし」）と、正しさを確かめる計測（何を・いつ）を書き、docs/method-evidence.md の表に行を足す。2026-09-15 に、出典のない設計の 1 行から作った布石の価値目標（λ 0.5、`soft_wdl`、41 手目の `root_q`）が、理由も確かめる計測も無いまま学習の初めから動き、目標が結果より約 0.02 低くなっていたため。2026-09-14 に、搾取者が評価ハーネスの「根の手番のネットで木を丸ごと評価する」形を流用して、Wang+ 2023 が誤りとした「相手の手を自分の方策で予測する」探索のまま 3 日動いていたため。
+8. **論文の手法を実装するときは、論文の方法の節（アルゴリズム・擬似コード・付録）を読んでから作り、実装との差異を docs/decisions.md に 1 行で残す**（何をそのまま使い、何を変え、なぜ変えたか）。計画書が論文を「理由」として引いているだけのときも、「やり方」は原典で確かめる。別の目的で作った部品を流用するときは、その部品の前提が新しい用途でも成り立つかを確かめて同じ行に書く。原典を読めなかったとき（認証・PDF が読めない）はその旨を書く。**論文以外（計画書の 1 行、会話、自分の案）から手法や値を入れるときも**、decisions.md に出典（無ければ「出典なし」）と、正しさを確かめる計測（何を・いつ）を書き、docs/method-evidence.md の表に行を足す。出典も確かめる計測も無い値や、前提を確かめずに流用した部品は、誤ったまま何日も学習を動かす（2026-09-14・09-15 の経緯は docs/decisions.md）。
 9. **手順が文書にある作業（docs/runbook.md、各パッケージの README、`.claude/skills/`）は、その手順を既定の案にする。** 別のやり方をすすめる前に、手順の文書と実装（CLI の `--help`、何を読み・何を書き・何を補っているか）を読み、別案が手順より良いことをデータで確かめる。すすめるときは「runbook の手順と違う」と明示し、手順が扱っていて別案が落とすものを並べる。根拠にする数値は出所（どの期間・世代か、搾取者の布石やリーグ対局の混入、設定の違い）を確かめてから出し、確かめていない数値は「未確認」と書く。確かめきれなければ手順どおりをすすめる。2026-09-15 に、玉配置表の作り方で runbook の libra-scale を読まずに「自己対局の実績から作る」案をすすめ、それが libra-scale の一部にすぎず、世代の混在と搾取者の布石の混入を見落としていたため（ユーザーの指摘）。
 10. **採用済みの手法（学習則・探索・設定値）を変える・やめる案を出す前に、採用の経緯を調べる。** 計画書（libra-design.md・libra-local.md）、docs/decisions.md、`git log -S`、過去の会話（~/.claude/projects）、計画書の参考文献と、その手法を扱う一次資料（論文・開発元の文書）で、誰が・何を根拠に・値をどう決めたかを確かめ、提案の前に示す。根拠の記録がなければ「記録なし」と書き、読めなかった資料は「未確認」と書く。2026-09-15 に、布石の価値目標に V̂41 を混ぜる方式の経緯を調べずに「結果 z だけにする」案をすすめたため（ユーザーの指摘「憶測で手法を変えたくない」）。
 
@@ -43,7 +43,7 @@ libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX �
 
 | 用語 | 言い換え |
 |---|---|
-| ls（本体）・lx（搾取者） | ls は自分自身と対局して強くなる本体。lx は本体の弱点を探す専門の練習相手（今はまだ無い） |
+| ls（本体）・lx（搾取者） | ls は自分自身と対局して強くなる本体。lx は本体の弱点を探す専門の練習相手 |
 | 自己対局・局/日 | AI 同士で打つ練習の対局。局/日は 1 日に打てる対局の数 |
 | step・学習 | 対局の記録から重みを少し直す 1 回分。step が進むほど学習が進んだ |
 | 重み・チェックポイント・archive | 重みは AI の頭脳の中身。その時点の重みを保存したものがチェックポイント、計測用に残したものが archive |
@@ -63,12 +63,12 @@ libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX �
 - 本体 L-S は `~/libra-run/ls`、搾取者 lx は `~/libra-run/lx` で常時稼働。2026-09-13 から二飛香（docs/rules.md §3.2）の系列（ls は旧 ls の step 229,590 の重みから、lx はゼロから）。旧ルールの系列は `~/libra-run/ls-v0`・`lx-v0` に残し再開しない（docs/runbook.md 冒頭）。ネットの形（[net]）は変えない（変えるなら新しい run-id）。
 - ls は `[auto]` で総局数 40 万局ごと（`every_games`。時間区切りは 2026-09-19 に廃止）に archive → 最強比・基準比の自己評価 1,000 局と固定の参照 200 局 → 外部計測 40 局を別プロセスで回す（docs/runbook.md §6）。結果は管理コンソールの Elo / 対外対局タブと `~/libra-run/ls/eval`・`matches`。
 - GPU を使う計測（速度比較など）はユーザーにコンソールから ls・lx を停止してもらってから行い、終わったら起動を依頼する。玉配置表（libra-scale）の作り直しは止めずに GPU を共有して回す（2026-09-15 のユーザーの決定、docs/runbook.md §玉配置表）。長い GPU 作業を共有のまま回したときは局/日が落ちる旨を measurements.md に書く。
-- 1 週間の局/日（9/18 ごろ）、2 週間ごとの 20 局計測、10 月中旬の基準値マッチ 20 局、12 月の 100 局は docs/libra-local.md §5 の予定に従う。
+- 2 週間ごとの 20 局計測、10 月中旬の基準値マッチ 20 局、12 月の 100 局は docs/libra-local.md §5 の予定に従う。
 - Windows 側の操作（デスクトップの bat、タスク スケジューラ「LibraShogi run」「LibraShogi run lx」）は docs/runbook.md §3。自動ログオンと GPU 電力上限は設定しない（ユーザーの決定）。
 
 ## 環境
 - WSL2 Ubuntu-24.04（ディストリ名は `Ubuntu-24.04`）、**マシンの RAM は 64 GB**（DDR5-6000、4 スロット中 2 枚）、RTX 5070 Ti、Ryzen 9 9950X3D。データは WSL 内の ext4。
-- **WSL の中で `free` が返すのは「マシンの搭載量」ではなく `%USERPROFILE%\.wslconfig` の `memory` で決めた上限**（2026-09-20 時点 48 GB。2026-09-20 15 時まで 32 GB だった）。メモリの余裕を判断するときは `free` だけを見ず、マシン全体の 64 GB と Windows 側の使用量（タスク マネージャー）も見る。2026-09-20 に、この行が「RAM 32 GB」と書いてあったせいで割当を搭載量と取り違え、窓を載せる余裕の判断を誤った（**ユーザーの指摘**）。
+- **WSL の中で `free` が返すのは「マシンの搭載量」ではなく `%USERPROFILE%\.wslconfig` の `memory` で決めた上限**（2026-09-20 時点 48 GB）。メモリの余裕を判断するときは `free` だけを見ず、マシン全体の 64 GB と Windows 側の使用量（タスク マネージャー）も見る。割当を搭載量と取り違えると、リプレイの窓が載るかの判断を誤る（ユーザーの指摘）。
 - **sudo が使えない**（apt 不可）。cmake / ninja / pybind11 / pytest / torch / onnxruntime は `.venv` の pip、node は `~/.nvm`。apt が要るものはユーザーに依頼する（mingw-w64 は導入済み）。
 - Python パッケージは pip install しない。`PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-scale`（bin/ のスクリプトと driver は自分で通す）。
 - Windows 版 libra.exe は WSL の mingw クロスビルド（CI も ubuntu-latest で同じ mingw-w64 posix のクロスビルドを確かめる）。置き場所は `%USERPROFILE%\libra\engine\`。
@@ -84,4 +84,4 @@ libra-sim（C++ シミュレータ、pybind11）/ libra-net（モデル、ONNX �
 残りの主な作業:
 - 強さ: 本体の後退の原因を確かめて直す / 世代が進んだら scale.json と搾取者の main.pt を作り直す / libra-cloud（11〜12 月の予算の配分はユーザーの判断待ち）
 - エンジン: 複数葉の同時評価と fp16 で速くする
-- 周辺: desktop 側への Issue（終局判定、玉配置表）/ docs/match_report.md / **v0.2 の公開（手順は docs/release.md。引き金は総局数 360 万局の自動計測の完了。2026-09-21 のユーザーの決定）** / 1.0 の公開準備（LICENSES、モデルカード、Releases の zip）
+- 周辺: desktop 側への Issue（終局判定、玉配置表）/ docs/match_report.md / 1.0 の公開準備（LICENSES、モデルカード、Releases の zip）
