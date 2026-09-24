@@ -86,7 +86,7 @@ bin/libra export                 # latest.pt → latest.onnx（チェックポ�
 bin/libra-scale show             # 玉配置表 ~/libra-run/ls/scale/scale.json
 ```
 
-起動は `nohup setsid bin/libra run >> ~/libra-run/ls/stdout.log 2>&1 &`（Windows ではタスク スケジューラ「LibraShogi run」/「LibraShogi run lx」がログオン時に起動）。
+起動は `nohup setsid bin/libra run >> ~/libra-run/ls/stdout.log 2>&1 &`（Windows では管理コンソールの「起動」がタスク スケジューラ「LibraShogi run」/「LibraShogi run lx」を `schtasks /Run` で起動する。ログオン時のきっかけは無効。docs/runbook.md）。
 
 ### Windows の管理コンソール（tools/windows/libra-console.ps1）
 
@@ -100,9 +100,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot "$
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -Do 'ls:status'     # ボタンと同じ呼び出しだけ実行（status/stop/eval-now/match-now。起動は含まない。本番の run に stop を送らない）
 powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot "$SHOT" -Tab 'lx,Elo'   # タブを選ぶ（上: ls, lx, クラウド, クラウド履歴 / グラフ: 局/日, Elo, 対外対局, 学習, 学習目標, 較正, 処理時間, 終局内訳, 手数, ログ）。カンマで両方
 powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "$S" -Screenshot "$SHOT" -Size 540x900   # 大きさを指定（最小 540x900。-Screenshot のときは前回の配置を戻さない）
-```
-
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$S" -UpdateDesktopModel   # desktop に登録した libra.exe の libra.onnx を latest.onnx に置き換える（desktop は起動しない）
+```
 
 要約行には `metrics=`（metrics.jsonl の点数）`evals=` `matches=` `archives=` も出る。自動計測は `bin/libra eval-now` / `match-now`（次のチェックポイントで実行、`~/libra-run/ls/auto.log`）。
 
@@ -131,7 +130,7 @@ PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-sca
 - **エンジンは既定で 64 葉をまとめて評価する**（`DNN_Batch_Size`、1 にすると 1 葉ずつ。libra-engine/README.md）。L-S・lx と同じ GPU を使うと遅くなるので、速度比較はコンソールで ls・lx を停止してもらってから（一時停止は廃止）。
 - **本番のランと GPU を共有する。** driver の `engine --provider cuda` や `runner --device cuda` は L-S・lx と同居できるが局/日を落とす。CPU で済む確認は `--device cpu` / `--provider cpu`（既定）。
 - **手数上限は 320 手・41 手目起点**（`SearchConfig.max_ply`）。256 ではない。
-- **玉配置の剪定**: 後手玉が四段目のペアは 3 手目の桂打ちで先手の裁定勝ち。搾取者 lx は `search.prune_gote_rank4 = true`、本体 L-S は 36×36 一様のまま。
+- **玉配置の剪定**: 後手玉が四段目のペアは 3 手目の桂打ちで先手の裁定勝ち。搾取者 lx は `search.prune_gote_rank4 = true`、本体 L-S の自己対局は後手玉四段目を 5% に減らす（`search.gote_rank4_prob = 0.05`）。計測の対局は 36×36 一様。
 
 ## Troubleshooting
 
@@ -140,5 +139,4 @@ PYTHONPATH=libra-sim/python:libra-search/python:libra-net:libra-league:libra-sca
 - **`cmake: ninja not found`**: `.venv/bin` を `PATH` の先頭に置く（ninja も cmake も pip 版）。
 - **`LIBRA_ORT_DIR に ONNX Runtime の展開先を指定してください`**: `tools/fetch_onnxruntime.sh linux-gpu`（または `linux-cpu`）を先に実行し、`-DLIBRA_ORT_DIR` にその展開先を渡す。
 - **`ONNX Runtime library not found`**: `build/libra-engine/` に `libonnxruntime.so.1` が写っていない。`cmake --build build` をやり直す（POST_BUILD で写す）。
-- **driver の `wait()` が毎回同じ `bestmove` を返す**: 受信行の走査位置を保持していなかった（修正済み、`self.cursor`）。
 - **Windows の bat が動かない**: bat は ASCII のみにする（UTF-8 の日本語コメントは cmd の Shift-JIS 解釈で改行を壊す）。WSL から試すときは `cmd.exe /c "C:\Users\$WINUSER\libra\libra-status.bat"` のように絶対パスで。bat / vbs は生成物なので、直すのは `tools/windows/*.in` のひな形。
