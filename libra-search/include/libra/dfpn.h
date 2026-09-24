@@ -16,12 +16,15 @@ struct Problem {
   virtual ProofResult terminal(Position& pos, bool or_node) = 0;
   // その節点で考える手。OR 節点で空なら反証、AND 節点で空なら証明
   virtual void moves(Position& pos, bool or_node, MoveList& out) = 0;
+  // 証明できた根で、この手数（奇数）までの最短の勝ちを総当たりで探す。1 なら即座の勝ちだけ
+  virtual int shortest_len() const { return 1; }
 };
 
 // 本将棋の詰み: 攻め方は王手だけ、受け方は全合法手。終端は libra-sim の裁定
 struct MateProblem : Problem {
   ProofResult terminal(Position& pos, bool or_node) override;
   void moves(Position& pos, bool or_node, MoveList& out) override;
+  int shortest_len() const override { return 5; }
 };
 
 // 布石: 先手が 40 手完了時に「後手玉が当たっている」（41 手目の裁定）を強制できるか。
@@ -67,6 +70,11 @@ class DfPn {
   int max_depth_ = 64;
   Entry& look(std::uint64_t key);
   void mid(Position& pos, Problem& prob, bool or_node, std::uint32_t thpn, std::uint32_t thdn, int depth);
+  // 最短の勝ちの総当たり（証明できた根でだけ使う）。short_nodes_ が上限を超えたら打ち切って偽を返す
+  static constexpr std::uint64_t SHORT_NODES = 20000;
+  std::uint64_t short_nodes_ = 0;
+  bool win_within(Position& pos, Problem& prob, int n);
+  bool win_after(Position& pos, Problem& prob, Move m, int n);
 };
 
 }  // namespace libra

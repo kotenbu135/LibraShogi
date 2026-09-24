@@ -120,6 +120,13 @@ int main() {
   CHECK(best == "L*7h" || best == "S*7h" || best == "G*7h");
   CHECK(mate("1k1ln3r/7p1/p1+S1Bsg2/1S1n1p2p/P6n1/4pPP2/BP3K1P1/2P1P3+n/3L1L3 b R2GSL5Pgp 93", 200, &best) == PROOF_PROVEN);
   CHECK(best == "G*8b");
+  // 3 手詰・5 手詰でも最短を選ぶ（v0.2 の自己対局で実際に指した長い詰みの初手は L*1g・G*3h・L*7h）
+  CHECK(mate("4l3G/7l1/p2n2+Rp1/5p2p/3gp2N1/6PPk/4NPS2/PP2L1K2/2Pr+p1G2 b SL3P2bg2sn3p 107", 200, &best) == PROOF_PROVEN);
+  CHECK(best == "S*2g");
+  CHECK(mate("2p1p1lp1/1p1p1g2k/p2bs1pg1/5ps2/5PP1N/PPP1P1Sn1/2B1+r1LLP/8G/2R2L1K1 w 2N2Pgsp 90", 200, &best) == PROOF_PROVEN);
+  CHECK(best == "S*3h");
+  CHECK(mate("2ppkg+R2/p3bp1pp/3Sp4/1p1s5/1nN6/2PP3P1/1P1+bL1P1P/1G2sP3/+l1K6 w R2GSLP2nl2p 110", 200, &best) == PROOF_PROVEN);
+  CHECK(best == "L*7g");
   // 置換表を使い回しても（前の solve の項は世代で空とみなす）、新しい表で解くのと同じ結果・節点数・証明手になる
   {
     const char* sfens[] = {"9/8k/6G2/9/9/9/9/9/K8 b RG 1", "8k/9/9/9/9/9/9/9/K8 b G 1", "4k4/9/4G4/9/9/9/9/9/3L1L2K b P 1",
