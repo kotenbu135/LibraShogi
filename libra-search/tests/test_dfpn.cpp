@@ -113,6 +113,13 @@ int main() {
     CHECK(r == PROOF_PROVEN);
     CHECK(move_to_usi(best_m) == "R*5b");
   }
+  // 1 手詰があれば、先に証明できる長い詰み（v0.2 の自己対局で実際に指した L*4b・4d8h+・S*8b）より 1 手詰を選ぶ
+  CHECK(mate("2+L2kn2/1s6r/3g1G1pb/1p1p1Pp1p/S8/g2PR4/P3PLPP1/1P2K1G1P/3L5 b 2NL4Pb2snp 75", 200, &best) == PROOF_PROVEN);
+  CHECK(best == "N*3c");
+  CHECK(mate("2kp5/2s3ppp/8r/p+SpNpb3/9/PpP1P1PPP/3GL+l3/5+r3/1LKN4g w GSNbgsnl4p 122", 200, &best) == PROOF_PROVEN);
+  CHECK(best == "L*7h" || best == "S*7h" || best == "G*7h");
+  CHECK(mate("1k1ln3r/7p1/p1+S1Bsg2/1S1n1p2p/P6n1/4pPP2/BP3K1P1/2P1P3+n/3L1L3 b R2GSL5Pgp 93", 200, &best) == PROOF_PROVEN);
+  CHECK(best == "G*8b");
   // 置換表を使い回しても（前の solve の項は世代で空とみなす）、新しい表で解くのと同じ結果・節点数・証明手になる
   {
     const char* sfens[] = {"9/8k/6G2/9/9/9/9/9/K8 b RG 1", "8k/9/9/9/9/9/9/9/K8 b G 1", "4k4/9/4G4/9/9/9/9/9/3L1L2K b P 1",

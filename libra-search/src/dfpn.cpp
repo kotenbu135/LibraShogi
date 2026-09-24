@@ -119,6 +119,22 @@ ProofResult DfPn::solve(Position& pos, Problem& prob, bool or_node, std::uint64_
   // 年齢は同じ solve の項どうしでしか比べないので、solve ごとに数え直しても入れ替えは同じ。
   // 表をスレッドで共有すると clock_ の進みが速く、数え続けると solve の途中で一周して入れ替えを誤る
   clock_ = 0;
+  // 攻め方の根で、指せば即座に勝つ手（本将棋なら 1 手詰）を先に探す。df-pn は最初に証明した子を返し、最短の勝ちを選ばない
+  // ので、1 手詰があっても長い詰みの初手を指してしまう（v0.2 の自己対局で 1 手詰のあった局面の 39%）
+  if (or_node) {
+    MoveList ml;
+    prob.moves(pos, true, ml);
+    for (Move m : ml) {
+      pos.do_move(m);
+      ProofResult t = prob.terminal(pos, false);
+      pos.undo_move();
+      if (t == PROOF_PROVEN) {
+        ++nodes_;
+        if (best) *best = m;
+        return PROOF_PROVEN;
+      }
+    }
+  }
   mid(pos, prob, or_node, INF - 1, INF - 1, 0);
   Entry& r = look(node_key(pos));
   ProofResult res = r.pn == 0 ? PROOF_PROVEN : r.dn == 0 ? PROOF_DISPROVEN : PROOF_UNKNOWN;
