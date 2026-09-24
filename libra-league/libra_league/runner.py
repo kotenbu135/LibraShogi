@@ -241,6 +241,7 @@ class Runner:
         self.exploiter_state()["main_step"] = self.opponent_step
         self.log(f"exploiter: opponent {path} step {sd.get('step', '?')} params {m.n_params()/1e6:.1f}M (even slots: exploiter sente; "
                  f"opponent_prior {'on' if prior else 'off'})")
+        self.apply_curriculum()
 
     # ---- 凍結相手の作り直しと布石の書き出し（搾取者の run だけ） ----
     def exploiter_state(self) -> dict:
@@ -248,6 +249,60 @@ class Runner:
         for k, v in (("main_step", None), ("refreshed_at", None), ("from_chunk", 0), ("history", [])):
             es.setdefault(k, v)
         return es
+
+    # ---- 課程（凍結した本体の読みの回数を段で上げる。docs/exploiter-literature.md §2.3・§3 の 7） ----
+    def curriculum_stages(self) -> list[int]:
+        return [int(x) for x in (self.cfg.get("exploiter", {}).get("curriculum_sims") or [])]
+
+    def curriculum_state(self) -> dict:
+        cs = self.exploiter_state().setdefault("curriculum", {})
+        for k, v in (("stage", 0), ("recent", []), ("games", 0), ("wins", 0), ("history", [])):
+            cs.setdefault(k, v)
+        return cs
+
+    def curriculum_active(self) -> bool:
+        """課程の途中か（段が設定されていて、まだ最後の段を越えていない）。"""
+        stages = self.curriculum_stages()
+        return bool(stages) and int(self.curriculum_state()["stage"]) < len(stages)
+
+    def apply_curriculum(self) -> None:
+        """今の段の読みの回数を相手の側に入れる。課程が無い run では何もしない（本番の経路を変えない）。"""
+        stages = self.curriculum_stages()
+        if not stages or self.loop is None or self.loop.opponent is None:
+            return
+        stage = int(self.curriculum_state()["stage"])
+        sims = stages[stage] if stage < len(stages) else None
+        self.loop.set_side_sims(sims)
+        self.log(f"exploiter: curriculum stage {min(stage, len(stages))}/{len(stages)}: opponent "
+                 + (f"{sims} sims" if sims is not None else "full search (curriculum done)"))
+
+    def record_exploiter_result(self, r: int) -> None:
+        """搾取者の 1 局の結果（搾取者から見て +1・0・−1）。課程の途中の局は段の成績だけに数え、対本体勝率には数えない。"""
+        if not self.curriculum_active():
+            self.exploiter_stats["games"] += 1
+            self.exploiter_stats["wins" if r > 0 else "draws" if r == 0 else "losses"] += 1
+            return
+        ex = self.cfg.get("exploiter", {})
+        cs = self.curriculum_state()
+        n = max(1, int(ex.get("curriculum_games", 2000)))
+        cs["recent"] = (cs["recent"] + [1.0 if r > 0 else 0.5 if r == 0 else 0.0])[-n:]
+        cs["games"] += 1
+        cs["wins"] += int(r > 0)
+        rate = sum(cs["recent"]) / len(cs["recent"])
+        if len(cs["recent"]) >= n and rate >= float(ex.get("curriculum_threshold", 0.75)):
+            stages = self.curriculum_stages()
+            stage = int(cs["stage"])
+            cs["history"] = (cs["history"] + [{"t": time.time(), "stage": stage, "sims": stages[stage], "games": cs["games"],
+                                                "winrate": round(rate, 4), "main_step": self.opponent_step}])[-40:]
+            self.log(f"exploiter: curriculum stage {stage + 1}/{len(stages)} cleared ({stages[stage]} sims, recent {rate:.1%} "
+                     f"over {len(cs['recent'])} games, {cs['games']} games at this stage)")
+            cs.update({"stage": stage + 1, "recent": [], "games": 0, "wins": 0})
+            if stage + 1 >= len(stages):
+                # ここから先が本番の相手。布石と対本体勝率はここから数える（弱い相手に勝った布石は本体に渡さない）
+                self.exploiter_state()["from_chunk"] = self.replay.chunk_index
+                self.exploiter_stats = {"games": 0, "wins": 0, "draws": 0, "losses": 0}
+            self.apply_curriculum()
+            self.sd.write_state(self.state)
 
     def refresh_main(self) -> None:
         """凍結相手を本体ランの最新で作り直す。今までの成績は履歴に移し、布石は空にして区切る。"""
@@ -270,6 +325,10 @@ class Runner:
         os.replace(tmp, dst)
         self.exploiter_stats = {"games": 0, "wins": 0, "draws": 0, "losses": 0}
         self.state.pop("exploiter_stats", None)
+        if self.curriculum_stages():
+            # 段はそのまま（Tseng+ 2025 の continuous-adversary も相手の重みを替えながら読みの段を保った）。
+            # 直近の勝率は前の相手に対するものなので数え直す
+            self.curriculum_state().update({"recent": [], "games": 0, "wins": 0})
         self.load_opponent()
         es["main_step"] = self.opponent_step
         es["refreshed_at"] = time.time()
@@ -330,6 +389,11 @@ class Runner:
         from .openings import openings_from_replay, write_openings
 
         es = self.exploiter_state()
+        if self.curriculum_active():
+            # 弱くした相手に勝った布石は本体の穴ではない。本体に渡さない（課程を終えた時点から数える）
+            write_openings(Path(out).expanduser(), [], str(self.sd.root))
+            self.log("exploiter: wrote 0 openings (curriculum in progress)")
+            return
         lines = openings_from_replay(self.sd.replay, int(ex.get("openings_chunks", 50)), int(ex.get("openings_moves", 12)),
                                      min_chunk=int(es.get("from_chunk", 0)))
         write_openings(Path(out).expanduser(), lines, str(self.sd.root))
@@ -525,6 +589,20 @@ class Runner:
             es["refreshed_at"] = xs.get("refreshed_at")
             es["source_step"] = xs.get("source_step")  # refresh_steps が有効なときだけ入る（本体の最新 step）
             es["history"] = xs.get("history", [])[-10:]
+            stages = self.curriculum_stages()
+            if stages:
+                cs = self.curriculum_state()
+                stage = int(cs["stage"])
+                rec = cs["recent"]
+                es["curriculum"] = {
+                    "stage": stage, "stages": len(stages), "done": stage >= len(stages),
+                    "sims": stages[stage] if stage < len(stages) else None,
+                    "recent_games": len(rec), "recent_winrate": round(sum(rec) / len(rec), 4) if rec else None,
+                    "games": cs["games"], "wins": cs["wins"],
+                    "threshold": float(self.cfg["exploiter"].get("curriculum_threshold", 0.75)),
+                    "window": int(self.cfg["exploiter"].get("curriculum_games", 2000)),
+                    "history": cs["history"][-10:],
+                }
             status["exploiter"] = es
         if self.league_loop is not None:
             status["league"] = self.league_status()
@@ -645,9 +723,7 @@ class Runner:
             if finished:
                 for g in finished:
                     if "exploiter_result" in g:
-                        r = int(g["exploiter_result"])
-                        self.exploiter_stats["games"] += 1
-                        self.exploiter_stats["wins" if r > 0 else "draws" if r == 0 else "losses"] += 1
+                        self.record_exploiter_result(int(g["exploiter_result"]))
                 with self.timer.phase("replay"):
                     self.replay.add_games(finished)
                 new_games += len(finished)

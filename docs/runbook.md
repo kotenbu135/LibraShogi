@@ -293,7 +293,9 @@ verify の最後のログ `v_hat - verify winrate`（scale.json の `verify.v_ha
 
 **過去の自分から始め直す**（`restart-exploiter`、2026-09-17）: lx を止めた状態で `bin/libra --run lx restart-exploiter --from ~/libra-run/lx/pool/lx-<step>.pt` を実行すると何をするかが出て、`--apply` を付けると実行する。latest.pt の重みをそのスナップショットに置き換え（step の数えと乱数は引き継ぎ、最適化の内部状態は捨てる）、今の重みをプールに `lx-<今の step>.pt` で残し、リプレイのチャンクを `replay/pre-restart-<step>/` に移して窓を空から数え直し、対本体の成績を履歴に移して布石を空にする。置き換える前の latest.pt・state.json・openings.json は `backup-<時刻>/` に写す（何も消さない）。起動後はリプレイが `min_window_games`（500 局）たまるまで学習しない。戻すときは backup の 3 つを元の場所に写し、`replay/pre-restart-<step>/` のチャンクを `replay/` に戻す。
 
-状態は `bin/libra --run lx status`（`exploiter` に勝率、`main_step`、`refreshed_at`）。管理コンソールの「対本体 勝率」行にも出る。
+**課程**（`[exploiter] curriculum_sims`、2026-09-24 から）: 凍結した本体の読みの回数を `curriculum_sims`（lx は 1・2・4・8・16・32）の段で弱くしておき、直近 `curriculum_games`（2,000）局の勝率が `curriculum_threshold`（75%）以上になったら次の段へ上げる。最後の段を越えたら本番の読み（`[search]` の 96 回・24 回）。**課程の間の局は対本体勝率にも布石にも数えない**（弱くした相手の成績なので）。段は `state.json` の `exploiter.curriculum` に残り、起動し直しても続きから。凍結相手を作り直しても段は保ち、直近の勝率だけ数え直す。空なら課程なし（2026-09-23 までの形）。docs/lx-settings.md §5。
+
+状態は `bin/libra --run lx status`（`exploiter` に勝率、`main_step`、`refreshed_at`、課程の段）。管理コンソールの「対本体 勝率」行にも出る（課程の途中は「課程 k/6 段目（本体の読み n 回）: 直近の勝率」）。
 
 ## 自己対局ワーカー（既定は無効。GPU を足すときの配管）
 

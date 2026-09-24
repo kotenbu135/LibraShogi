@@ -112,6 +112,14 @@ openings_chunks = 50
 openings_moves = 12
 pool_out = "~/libra-run/lx/pool"               # 過去の自分。本体 ls の [league] pool が読む（④）
 pool_keep = 30
+# **課程**（2026-09-24 のユーザーの決定「今すぐ作る」。docs/lx-settings.md §4、docs/exploiter-literature.md §2.3・§3 の 7）。
+# 凍結した本体の読みの回数を 1 → 2 → 4 → … → 32 回と段で上げ、直近 2,000 局の勝率が 75% 以上になったら次の段へ。
+# 最後の段を越えたら本番の読み（上の full_sims 96・fast_sims 24）。形は Tseng+ 2025（最終の相手の少ない読みから倍に、
+# 閾値 75%）。課程の間の局は対本体勝率にも本体へ渡す布石にも数えない。変えるのは本体の手番の根の読みの回数だけで、
+# lx の木の中の本体の手（opponent_prior）と lx 自身の読みはそのまま
+curriculum_sims = [1, 2, 4, 8, 16, 32]
+curriculum_threshold = 0.75
+curriculum_games = 2000
 
 [auto]
 enabled = false              # 自動計測（archive・最強比・固定の参照・対外対局）は本体の物差し。搾取者では回さない

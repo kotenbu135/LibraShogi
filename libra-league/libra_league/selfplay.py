@@ -130,7 +130,8 @@ class SelfPlayLoop:
         # 根の証明探索は round() で GPU が評価している間に解く（CPU の apply から外す。棋譜は変わらない）。設定の false で切れる。
         # 対局ごとのネットの出力のキャッシュ（eval_cache）: 直近 3 手の探索で評価した局面を評価に出さない（棋譜は変わらない）。
         # 重みを替えるたびに捨てる（set_model・set_opponent）。搾取者モードでは両方のネットの出力を持つ（set_two_nets）。[search] eval_cache = false で切れる
-        self.engine = librasearch.SelfPlay({"defer_root_proof": True, "eval_cache": True, **search_cfg}, n_games, seed, threads)
+        self.search_cfg = {"defer_root_proof": True, "eval_cache": True, **search_cfg}
+        self.engine = librasearch.SelfPlay(self.search_cfg, n_games, seed, threads)
         self.n_games = n_games
         self.device = device
         self.dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[infer_dtype]
@@ -174,6 +175,17 @@ class SelfPlayLoop:
             pin = self.device.type == "cuda"
             self.o_logits = torch.empty((self.n_games, ls.POLICY_SIZE), dtype=torch.float32, pin_memory=pin)
             self.o_wdl = torch.empty((self.n_games, 3), dtype=torch.float32, pin_memory=pin)
+
+    def set_side_sims(self, sims: int | None) -> None:
+        """搾取者の課程: 相手（B 側 = 本体。奇数枠で先手）の読みの回数だけを sims 回にする（全読みも速読みも同じ回数）。
+
+        None なら本番の読み（自分と同じ設定。set_side_config に同じ設定を渡すと棋譜は渡さないときと 1 ビット同じ）。
+        変えるのは相手の手番の根の読みだけで、搾取者の木の中の相手の手（opponent_prior）はそのまま。
+        collect/apply の外で呼ぶ。打ちかけの局は次の手から新しい回数で読む"""
+        cfg = dict(self.search_cfg)
+        if sims is not None:
+            cfg.update({"full_sims": int(sims), "fast_sims": int(sims)})
+        self.engine.set_side_config(cfg)
 
     def release(self) -> None:
         for net in (self.model, self.opponent):

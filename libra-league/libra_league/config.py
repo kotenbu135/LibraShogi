@@ -75,7 +75,14 @@ DEFAULTS: dict[str, Any] = {
                   # 自分のスナップショットの保存先（本体の run の [league] pool が読む）。起動時にプールが空なら今の自分を、
                   # 凍結相手を作り直すたびに作り直す前の自分を lx-<step>.pt で保存し、新しい pool_keep 個を残す。空なら保存しない
                   "pool_out": "",
-                  "pool_keep": 30},
+                  "pool_keep": 30,
+                  # 課程（docs/exploiter-literature.md §2.3・§3 の 7、docs/lx-settings.md）: 凍結した本体の読みの回数を
+                  # curriculum_sims の段で弱くしておき、直近 curriculum_games 局の勝率が curriculum_threshold 以上になったら
+                  # 次の段へ上げる。最後の段を越えたら本番の読み（[search] の full_sims・fast_sims）。空なら課程なし。
+                  # 課程の間の局は対本体勝率（収束の物差し）にも本体へ渡す布石にも数えない
+                  "curriculum_sims": [],
+                  "curriculum_threshold": 0.75,
+                  "curriculum_games": 2000},
     # 本体と過去の搾取者の対局（libra_league/league.py、docs/decisions.md 2026-09-14）: 自己対局とは別のエンジン（別の固定バッチ）で
     # n_games 局を pool（搾取者の [exploiter] pool_out）の新しい recent 体と打ち、本体の手だけを方策の学習に使う。本体はふだん通り自分のネットで読む。
     # 相手は PFSP（本体の勝率 x に (1 − x)²）で switch_games 局ごとに選び直す。プールが空なら pool_check_minutes ごとに見に行く。搾取者の run では無効
