@@ -1,87 +1,87 @@
 {
  "schema": 1,
  "run": "ls",
- "generated": "2026-09-25 00:17:57",
- "t": 1790263077.2,
+ "generated": "2026-09-25 03:18:06",
+ "t": 1790273886.4,
  "process": "running",
  "flags": [],
  "now": {
-  "step": 471263,
-  "generation": 903,
-  "games_total": 5411065,
-  "games_per_day_1h": 613948,
+  "step": 477192,
+  "generation": 921,
+  "games_total": 5489192,
+  "games_per_day_1h": 647814,
   "window_games": 2000000,
   "active_games": 512,
-  "elapsed_h": 146.32,
+  "elapsed_h": 149.33,
   "heldout_games": 20000,
-  "status_time": "2026-09-25 00:17:57",
+  "status_time": "2026-09-25 03:18:06",
   "train": {
-   "loss": 2.223242,
-   "policy": 1.560137,
-   "value": 0.44771,
-   "v41": 0.430789,
-   "policy_acc": 0.625776,
-   "grad_norm": 1.275148,
+   "loss": 2.215874,
+   "policy": 1.552424,
+   "value": 0.44853,
+   "v41": 0.429841,
+   "policy_acc": 0.629788,
+   "grad_norm": 1.312663,
    "lr": 0.0002,
-   "steps": 160
+   "steps": 172
   },
   "gen": {
    "window": {
     "fuseki": {
-     "n": 1945,
-     "n_policy": 520,
-     "corr_v": 0.6814,
-     "mse_v": 0.5339,
-     "policy_ce": 1.9507,
-     "policy_acc": 0.6423
+     "n": 1900,
+     "n_policy": 466,
+     "corr_v": 0.661,
+     "mse_v": 0.5628,
+     "policy_ce": 1.9351,
+     "policy_acc": 0.6609
     },
     "normal": {
-     "n": 2055,
-     "n_policy": 567,
-     "corr_v": 0.6409,
-     "mse_v": 0.578,
-     "policy_ce": 1.219,
-     "policy_acc": 0.5873
+     "n": 2100,
+     "n_policy": 566,
+     "corr_v": 0.619,
+     "mse_v": 0.6078,
+     "policy_ce": 1.117,
+     "policy_acc": 0.6166
     }
    },
    "heldout": {
     "fuseki": {
-     "n": 2110,
-     "n_policy": 532,
-     "corr_v": 0.691,
-     "mse_v": 0.5218,
-     "policy_ce": 1.9082,
-     "policy_acc": 0.6692
+     "n": 2124,
+     "n_policy": 540,
+     "corr_v": 0.7006,
+     "mse_v": 0.5076,
+     "policy_ce": 1.9095,
+     "policy_acc": 0.6648
     },
     "normal": {
-     "n": 1890,
-     "n_policy": 496,
-     "corr_v": 0.5926,
-     "mse_v": 0.6367,
-     "policy_ce": 1.28,
-     "policy_acc": 0.5585
+     "n": 1876,
+     "n_policy": 477,
+     "corr_v": 0.5547,
+     "mse_v": 0.6768,
+     "policy_ce": 1.3592,
+     "policy_acc": 0.5388
     }
    },
    "gap": {
     "fuseki": {
-     "corr_v": 0.0096,
-     "mse_v": -0.0121,
-     "policy_ce": -0.0425,
-     "policy_acc": 0.0269
+     "corr_v": 0.0396,
+     "mse_v": -0.0552,
+     "policy_ce": -0.0256,
+     "policy_acc": 0.0039
     },
     "normal": {
-     "corr_v": -0.0483,
-     "mse_v": 0.0587,
-     "policy_ce": 0.061,
-     "policy_acc": -0.0288
+     "corr_v": -0.0643,
+     "mse_v": 0.069,
+     "policy_ce": 0.2422,
+     "policy_acc": -0.0778
     }
    },
    "window_games": 2000000,
    "heldout_games": 20000,
    "positions": 4000,
-   "t": 1790261537.8,
-   "step": 470403,
-   "games": 5400087
+   "t": 1790272254.1,
+   "step": 476526,
+   "games": 5480036
   }
  },
  "exploiter": null,
@@ -7056,70 +7056,166 @@
    "gen_heldout_fuseki_corr_v": 0.691
   },
   {
-   "t": 1790263047.2,
-   "step": 471243,
-   "games_total": 5410857,
-   "gpd": 614475,
-   "gpd_5m": 632480,
+   "t": 1790266368.3,
+   "step": 473203,
+   "games_total": 5435728,
+   "gpd": 646234,
+   "gpd_5m": 645452,
    "window": 2000000,
-   "rss_mb": 22078,
+   "rss_mb": 22236,
    "swap_mb": 0,
    "gpu_mb": 8966,
-   "loss": 2.223242,
-   "policy": 1.560137,
-   "value": 0.44771,
-   "v41": 0.430789,
-   "policy_acc": 0.625776,
-   "grad_norm": 1.275148,
+   "loss": 2.211456,
+   "policy": 1.549089,
+   "value": 0.44706,
+   "v41": 0.430615,
+   "policy_acc": 0.629205,
+   "grad_norm": 1.271567,
    "lr": 0.0002,
-   "steps": 160,
+   "steps": 180,
    "train_avg": true,
    "target_minus_z": 0.0,
-   "v41_minus_z": -0.0395,
-   "draw_target": 0.0042,
-   "draw_actual": 0.0042,
-   "rootq_minus_z_fuseki": 0.0009,
-   "rootq_minus_z_normal": -0.0625,
-   "t_train_sample": 0.14,
-   "t_train_step": 9.62,
-   "t_sp_eval": 77.67,
-   "sp_games": 8686,
-   "sp_draw": 0.0035,
-   "sp_plies": 72.5,
-   "sp_sente": 0.6162,
+   "v41_minus_z": -0.0494,
+   "draw_target": 0.0028,
+   "draw_actual": 0.0028,
+   "rootq_minus_z_fuseki": -0.0036,
+   "rootq_minus_z_normal": -0.0605,
+   "t_train_sample": 0.13,
+   "t_train_step": 10.36,
+   "t_sp_eval": 76.74,
+   "sp_games": 33557,
+   "sp_draw": 0.003,
+   "sp_plies": 72.8,
+   "sp_sente": 0.6155,
+   "sp_sennichite": 0.0012,
+   "sp_perpetual_check": 0.0,
+   "sp_max_ply": 0.0018,
+   "sp_resign": 0.6575,
+   "sp_ruling41": 0.252,
+   "sp_no_legal_move": 0.0875,
+   "sp_mate_found": 0.2545,
+   "gen_window_corr_v": 0.6243,
+   "gen_window_policy_acc": 0.5847,
+   "gen_window_policy_ce": 1.1627,
+   "gen_window_fuseki_corr_v": 0.6903,
+   "gen_heldout_corr_v": 0.5875,
+   "gen_heldout_policy_acc": 0.5308,
+   "gen_heldout_policy_ce": 1.3705,
+   "gen_heldout_fuseki_corr_v": 0.7047
+  },
+  {
+   "t": 1790270920.3,
+   "step": 475766,
+   "games_total": 5470006,
+   "gpd": 651385,
+   "gpd_5m": 649650,
+   "window": 2000000,
+   "rss_mb": 22425,
+   "swap_mb": 0,
+   "gpu_mb": 8968,
+   "loss": 2.227009,
+   "policy": 1.561608,
+   "value": 0.44998,
+   "v41": 0.430842,
+   "policy_acc": 0.623226,
+   "grad_norm": 1.27576,
+   "lr": 0.0002,
+   "steps": 152,
+   "train_avg": true,
+   "target_minus_z": 0.0,
+   "v41_minus_z": -0.043,
+   "draw_target": 0.0038,
+   "draw_actual": 0.0038,
+   "rootq_minus_z_fuseki": -0.0137,
+   "rootq_minus_z_normal": -0.064,
+   "t_train_sample": 0.1,
+   "t_train_step": 8.78,
+   "t_sp_eval": 77.99,
+   "sp_games": 34278,
+   "sp_draw": 0.0032,
+   "sp_plies": 72.9,
+   "sp_sente": 0.6103,
    "sp_sennichite": 0.0014,
    "sp_perpetual_check": 0.0,
-   "sp_max_ply": 0.0021,
-   "sp_resign": 0.65,
-   "sp_ruling41": 0.2573,
-   "sp_no_legal_move": 0.0892,
-   "sp_mate_found": 0.252,
-   "gen_window_corr_v": 0.6409,
-   "gen_window_policy_acc": 0.5873,
-   "gen_window_policy_ce": 1.219,
-   "gen_window_fuseki_corr_v": 0.6814,
-   "gen_heldout_corr_v": 0.5926,
-   "gen_heldout_policy_acc": 0.5585,
-   "gen_heldout_policy_ce": 1.28,
-   "gen_heldout_fuseki_corr_v": 0.691
+   "sp_max_ply": 0.0018,
+   "sp_resign": 0.6637,
+   "sp_ruling41": 0.2476,
+   "sp_no_legal_move": 0.0855,
+   "sp_mate_found": 0.2523,
+   "gen_window_corr_v": 0.6052,
+   "gen_window_policy_acc": 0.6021,
+   "gen_window_policy_ce": 1.185,
+   "gen_window_fuseki_corr_v": 0.6781,
+   "gen_heldout_corr_v": 0.5593,
+   "gen_heldout_policy_acc": 0.5615,
+   "gen_heldout_policy_ce": 1.2554,
+   "gen_heldout_fuseki_corr_v": 0.6667
+  },
+  {
+   "t": 1790273644.2,
+   "step": 477287,
+   "games_total": 5490443,
+   "gpd": 648713,
+   "gpd_5m": 653484,
+   "window": 2000000,
+   "rss_mb": 22199,
+   "swap_mb": 0,
+   "gpu_mb": 8968,
+   "loss": 2.215874,
+   "policy": 1.552424,
+   "value": 0.44853,
+   "v41": 0.429841,
+   "policy_acc": 0.629788,
+   "grad_norm": 1.312663,
+   "lr": 0.0002,
+   "steps": 172,
+   "train_avg": true,
+   "target_minus_z": 0.0,
+   "v41_minus_z": -0.0457,
+   "draw_target": 0.0032,
+   "draw_actual": 0.0032,
+   "rootq_minus_z_fuseki": -0.0011,
+   "rootq_minus_z_normal": -0.0568,
+   "t_train_sample": 0.12,
+   "t_train_step": 9.82,
+   "t_sp_eval": 77.75,
+   "sp_games": 20437,
+   "sp_draw": 0.0037,
+   "sp_plies": 73.3,
+   "sp_sente": 0.6166,
+   "sp_sennichite": 0.0015,
+   "sp_perpetual_check": 0.0,
+   "sp_max_ply": 0.0023,
+   "sp_resign": 0.6613,
+   "sp_ruling41": 0.2486,
+   "sp_no_legal_move": 0.0864,
+   "sp_mate_found": 0.2506,
+   "gen_window_corr_v": 0.619,
+   "gen_window_policy_acc": 0.6166,
+   "gen_window_policy_ce": 1.117,
+   "gen_window_fuseki_corr_v": 0.661,
+   "gen_heldout_corr_v": 0.5547,
+   "gen_heldout_policy_acc": 0.5388,
+   "gen_heldout_policy_ce": 1.3592,
+   "gen_heldout_fuseki_corr_v": 0.7006
   }
  ],
  "review": {
-  "time": "2026-09-25 00:17:57",
+  "time": "2026-09-25 03:18:06",
   "run": "ls",
   "items": [
    {
     "name": "M1 一般化（本将棋の価値の相関）",
     "verdict": "続ける",
-    "why": "held-out の相関 0.5688 → 0.588（200,000 局。横ばいは想定どおりで、伸びは M2・M4 で見る）、窓の中との差 +0.048",
+    "why": "held-out の相関 0.5602 → 0.5593（200,000 局。横ばいは想定どおりで、伸びは M2・M4 で見る）、窓の中との差 +0.064",
     "values": {
-     "heldout_corr_first": 0.5688,
-     "heldout_corr_last": 0.588,
-     "window_corr_last": 0.6409,
-     "gap": 0.04830000000000001,
-     "fall": 0.019199999999999995,
+     "heldout_corr_first": 0.5602,
+     "heldout_corr_last": 0.5593,
+     "window_corr_last": 0.619,
+     "gap": 0.06430000000000002,
+     "fall": -0.0009000000000000119,
      "heldout_corr_best": 0.7131,
-     "n_rows": 15
+     "n_rows": 13
     }
    },
    {
@@ -7156,7 +7252,7 @@
    {
     "name": "M4 参照 ckpt_000062426.pt",
     "verdict": "まだ無い",
-    "why": "対 ckpt_000062426.pt: もう測っていない（最後は step 281893、2,181,292 局前）",
+    "why": "対 ckpt_000062426.pt: もう測っていない（最後は step 281893、2,262,469 局前）",
     "values": {
      "last": {
       "t": 1789951881.1436996,
@@ -7173,7 +7269,7 @@
       ]
      },
      "gap_games": 410926,
-     "behind_games": 2181292,
+     "behind_games": 2262469,
      "score": 0.855
     }
    },
@@ -7197,14 +7293,14 @@
       ]
      },
      "gap_games": 428190,
-     "behind_games": 126016,
+     "behind_games": 207193,
      "score": 0.65
     }
    },
    {
     "name": "M4 参照 ckpt_000646699.pt",
     "verdict": "まだ無い",
-    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、4,172,525 局前）",
+    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、4,253,702 局前）",
     "values": {
      "last": {
       "t": 1789725300.1884296,
@@ -7221,14 +7317,14 @@
       ]
      },
      "gap_games": 395416,
-     "behind_games": 4172525,
+     "behind_games": 4253702,
      "score": 0.895
     }
    },
    {
     "name": "M4 参照 win1m.pt",
     "verdict": "まだ無い",
-    "why": "対 win1m.pt: もう測っていない（最後は step 281893、2,183,805 局前）",
+    "why": "対 win1m.pt: もう測っていない（最後は step 281893、2,264,982 局前）",
     "values": {
      "last": {
       "t": 1789951515.1918266,
@@ -7245,7 +7341,7 @@
       ]
      },
      "gap_games": 411144,
-     "behind_games": 2183805,
+     "behind_games": 2264982,
      "score": 0.835
     }
    },
@@ -7318,9 +7414,9 @@
    {
     "name": "局/日（1 時間平均）",
     "verdict": "続ける",
-    "why": "613,948",
+    "why": "647,814",
     "values": {
-     "gpd": 613948
+     "gpd": 647814
     }
    }
   ],
