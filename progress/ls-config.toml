@@ -59,6 +59,9 @@ openings_chunks = 50
 openings_moves = 12
 pool_out = ""
 pool_keep = 30
+curriculum_sims = []
+curriculum_threshold = 0.75
+curriculum_games = 2000
 
 [league]
 enabled = false
