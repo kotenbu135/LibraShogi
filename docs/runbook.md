@@ -189,6 +189,16 @@ GPU を L-S と共有するので、計測中は ls・lx を停止するか、�
   --opponent-opt EvalDir=vendor/yaneuraou_eval --opponent-opt Threads=1
 ```
 
+両玉を読みで置く形（`--place search`、2026-09-25）: Libra 同士を読み 1600 回などで打たせると、読み 96 回で作った玉配置表の組は釣り合わず、選ぶ側だけが得をする。`--place search` にすると、置く側は先手玉を乱数で置き、後手玉は四段目を除く 27 マスをそれぞれ読んで先手の勝率が 0.5 にいちばん近いマスに置く（1 局に 27 手ぶんの読みが増える。`--fuseki engine` のときだけ）。
+
+```bash
+# 動画用の棋譜（Libra 同士、読み 1600 回、両玉を読みで置く）
+M=$HOME/libra-run/ls/checkpoints/latest.onnx
+~/LibraShogi/bin/libra match --games 1 --go "nodes 1600" --model $M --place search --place-seed 1 \
+  --opponent ~/LibraShogi/bin/libra-usi --opponent-cwd ~/LibraShogi --opponent-opt DNN_Model=$M --opponent-opt Declare_Win=true \
+  --out ~/tenbin-shogi-web/video/kifu-1600.jsonl
+```
+
 自動計測では `config/<run-id>.toml` の `[auto]` に書く（反映は `cd ~/LibraShogi && git pull` →
 コンソールの停止 → 起動）。
 
