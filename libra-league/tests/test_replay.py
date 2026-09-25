@@ -212,3 +212,57 @@ def test_runner_measures_gen_by_games(tmp_path: Path):
         assert len(calls) == 3
     finally:
         gp.generalization = orig
+
+
+def test_full_only_samples_only_full_search_positions(tmp_path: Path):
+    """full_only は全読みの局面だけから取る（KataGo [Wu19] §3.1）。既定は今までどおり速読みの局面も取る。"""
+    rb = _mk(tmp_path, window_games=100, chunk_games=1000)
+    games = _games(8, 11)
+    rb.add_games(games)
+    n_full = sum(int(np.count_nonzero(g["full"])) for g in games)
+    assert 0 < n_full < rb.n_positions()  # full_prob 0.5 なので両方ある
+    b = rb.sample(512, np.random.default_rng(0), 0.0, 1.0, 32, full_only=True)
+    assert b["policy_valid"].all()  # 方策の目標は全読みの局面にしか無い
+    b0 = rb.sample(512, np.random.default_rng(0), 0.0, 1.0, 32)
+    assert 0.2 < b0["policy_valid"].mean() < 0.8
+    # 既定の引き方は変わらない（同じ種なら同じバッチ）
+    b1 = rb.sample(512, np.random.default_rng(0), 0.0, 1.0, 32, full_only=False)
+    assert np.array_equal(b0["sq"], b1["sq"]) and np.array_equal(b0["policy_idx"], b1["policy_idx"])
+    # 局を足したら全読みの累積和も作り直す
+    rb.add_games(_games(4, 12))
+    assert rb.sample(256, np.random.default_rng(1), 0.0, 1.0, 32, full_only=True)["policy_valid"].all()
+
+
+def test_full_only_positions_are_uniform_over_full_positions():
+    """k 番目の全読みの局面を正しく引く: 全読みの局面ごとの出現回数がほぼ同じになる。"""
+    from libra_league.replay import sample_batch
+
+    games = _games(3, 13)
+    fl = [int(np.count_nonzero(g["full"])) for g in games]
+    cum = np.cumsum(np.array(fl, dtype=np.int64))
+    b = sample_batch(games, 0, cum, 4000, np.random.default_rng(2), 0.0, 1.0, 32, 320, True, full_only=True)
+    assert b["policy_valid"].all()
+    # 局ごとの取られた割合は全読みの局面数に比例する（手番の特徴で局は分からないので、z の符号で先手勝ちの局を数える代わりに
+    # 局ごとに結果を変えて数える）
+    for i, g in enumerate(games):
+        g["result"] = 0
+    games[0]["result"] = 1
+    b = sample_batch(games, 0, cum, 4000, np.random.default_rng(3), 0.0, 1.0, 32, 320, True, full_only=True)
+    share = float((b["z"] != 0).mean())
+    assert abs(share - fl[0] / cum[-1]) < 0.04
+
+
+def test_runner_refuses_full_only(tmp_path: Path):
+    """[train] full_only は学習量の数え方が未対応なので、ランの起動で断る（abtest の比較用だけ）。"""
+    import pytest
+
+    from libra_league.config import load_config
+    from libra_league.runner import Runner
+
+    cfg = load_config(None)
+    cfg["net"] = {"d_model": 32, "n_layers": 2, "n_heads": 4, "d_ff": 64, "dropout": 0.0}
+    cfg["train"]["full_only"] = True
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    with pytest.raises(ValueError, match="full_only"):
+        Runner(sd, cfg, device=torch.device("cpu"))

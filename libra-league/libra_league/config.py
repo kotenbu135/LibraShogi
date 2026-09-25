@@ -108,6 +108,7 @@ DEFAULTS: dict[str, Any] = {
         "lambda_z": 0.5,
         "mirror_prob": 0.5,
         "grad_clip": 1.0,
+        "full_only": False,       # True で全読みの局面だけを学習に使う（KataGo [Wu19] §3.1）。今は `libra abtest` の腕だけ。ランは起動で断る
         "compile": "max-autotune",  # 学習の forward・逆伝播の torch.compile: none | default | max-autotune（CUDA のときだけ効く。2026-09-16）
     },
     # 自己対局ワーカー（libra worker、libra_league/workers.py）: 学習側は重みを <run>/weights/latest.pt に配り（学習のたび）、

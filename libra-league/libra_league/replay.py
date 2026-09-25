@@ -91,6 +91,7 @@ class ReplayBuffer:
         self.chunk_index = 0
         self.total_games = 0
         self._cum: np.ndarray | None = None  # sample 用の局面数の累積和（窓の分だけ）。games が変わったら捨てる
+        self._fcum: np.ndarray | None = None  # full_only 用の全読みの局面数の累積和（同上）
 
     # ---- 窓の大きさ ----
     def window(self) -> int:
@@ -132,6 +133,7 @@ class ReplayBuffer:
         self._lens = [len(g["moves"]) for g in self.games]
         self.heldout = held[-self.heldout_games:] if self.heldout_games > 0 else []
         self._cum = None
+        self._fcum = None
 
     def add_games(self, games: list[dict]) -> int:
         """終局した記録を足す。chunk_games 局たまるごとにチャンクと棋譜 JSONL を書き、書いたチャンク数を返す。
@@ -147,6 +149,7 @@ class ReplayBuffer:
                 self.games.append(g)
                 self._lens.append(len(g["moves"]))
         self._cum = None
+        self._fcum = None
         self._trim()
         while len(self.pending) >= self.chunk_games:
             chunk, self.pending = self.pending[: self.chunk_games], self.pending[self.chunk_games :]
@@ -197,8 +200,16 @@ class ReplayBuffer:
         return self.heldout[-self.heldout_games:] if self.heldout_games > 0 else []
 
     # ---- サンプリング ----
-    def sample(self, batch: int, rng: np.random.Generator, mirror_prob: float, lambda_z: float, topk: int = 32) -> dict:
+    def sample(self, batch: int, rng: np.random.Generator, mirror_prob: float, lambda_z: float, topk: int = 32,
+               full_only: bool = False) -> dict:
+        """窓の全局面から一様に取る。full_only なら全読みの局面だけから一様に取る（KataGo [Wu19] §3.1 は全読みの手だけを
+        学習に記録する。既定 False は今までどおりで、乱数の引き方も変わらない）。"""
         start = self._start()
+        if full_only:
+            if self._fcum is None or len(self._fcum) != len(self.games) - start:
+                self._fcum = np.cumsum(np.array([int(np.count_nonzero(g["full"])) for g in self.games[start:]], dtype=np.int64))
+            return sample_batch(self.games, start, self._fcum, batch, rng, mirror_prob, lambda_z, topk, self.max_ply,
+                                self.count_from_41, full_only=True)
         if self._cum is None or len(self._cum) != len(self.games) - start:
             self._cum = np.cumsum(np.array(self._lens[start:], dtype=np.int64))
         return sample_batch(self.games, start, self._cum, batch, rng, mirror_prob, lambda_z, topk, self.max_ply, self.count_from_41)
@@ -210,8 +221,9 @@ class ReplayBuffer:
 
 
 def sample_batch(games: list[dict], start: int, cum: np.ndarray, batch: int, rng: np.random.Generator, mirror_prob: float, lambda_z: float,
-                 topk: int, max_ply: int, count_from_41: bool) -> dict:
-    """games[start:] の全局面から一様に batch 局面を取り、学習バッチを作る。cum は games[start:] の局面数の累積和。"""
+                 topk: int, max_ply: int, count_from_41: bool, full_only: bool = False) -> dict:
+    """games[start:] の全局面から一様に batch 局面を取り、学習バッチを作る。cum は games[start:] の局面数の累積和。
+    full_only なら cum は全読みの局面数の累積和で、k 番目の全読みの局面を取る。"""
     if len(cum) == 0 or cum[-1] <= 0:
         raise ValueError("sample_batch: no positions")
     pick = rng.integers(0, cum[-1], size=batch)
@@ -219,6 +231,8 @@ def sample_batch(games: list[dict], start: int, cum: np.ndarray, batch: int, rng
     lens = np.diff(np.concatenate([[0], cum]))
     mi = pick - (cum[gi] - lens[gi])
     gi = gi + start
+    if full_only:
+        mi = np.array([np.flatnonzero(games[i]["full"])[k] for i, k in zip(gi, mi)], np.int64)
     kb = np.array([games[i]["kb"] for i in gi], np.int32)
     kw = np.array([games[i]["kw"] for i in gi], np.int32)
     plies = (mi + 2).astype(np.int32)

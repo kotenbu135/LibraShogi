@@ -77,6 +77,24 @@ docs/restart-plan.md §2 の C1（全項目に出所・理由・確かめる計�
 | 見直し | review が「見直し」を出したとき、または 200 万局ごと | M1〜M4 の値を docs/weekly/ に写し、続ける／変える／止めるを決める |
 | 外部の計測を戻す | 本番に移ったとき | match_games 10（archive の重みの ONNX で） |
 
+### 5.3 残った「記録なし」の検証（2026-09-25、ユーザーの決定「まとめて検証」）
+
+**経緯**: restart-plan.md §2 の C1 は「記録なしが 1 つでも残っていたら起動しない」だった。同じ日に作ったこの表の冒頭で
+Claude が「記録なしは煙テスト（C3）で値を決めるまで仮」に緩め、緩めたことをユーザーに伝えないまま「了承、進めて」を得た。
+煙テストは「伸びなければ学習率を比べる」形で、伸びたので比べず、§5.2 の「仮」の比較も λ と σ の 2 つだけだった。
+このため **学習率・バッチ・cpuct・価値を学ぶ局面**が一度も比べられずに残った（2026-09-25 にユーザーの問いで分かった）。
+
+**やり方**: 600 万局の節目の archive から、稼働中の run を変えずにオフラインで比べる（runbook §7.1）。GPU を専有するので
+ls・lx を止めてもらう（合わせて約 3 時間の見込み。未計測）。腕が対照に 95% 区間の下限 > 0 で勝ったものだけを
+本番の候補にし、入れるかはユーザーが決め、入れるときは 1 日 1 つ（CLAUDE.md 11）。結果はこの表の行に日付と根拠を足す。
+
+| 設定 | 比べる腕 | 命令（`<ckpt>` は 600 万局の archive） | 注 |
+|---|---|---|---|
+| 学習率 | 2e-4（今）／ 6.7e-5（1/3）／ 2e-5（1/10） | `bin/libra abtest --ckpt <ckpt> --arm lr2e4 --arm lr67:train.lr=0.0000667 --arm lr20:train.lr=0.00002 --steps 5000 --games 1000 --no-vs-base --publish` | 原典は AlphaZero（0.2 から 3 回 1/10、[Silver18] 補足資料 Configuration）、KataGo（19 日のうち 17.5 日目から 1/10、"for final tuning"、[Wu19] §3・付録 C）。どちらも SGD で、Libra は AdamW（数値の大きさは比べられない）。下げると一度だけ強くなる仕上げで、傾きは直さない |
+| 価値を学ぶ局面 | 全局面（今）／ 全読みの局面だけ（`[train] full_only`） | `bin/libra abtest --ckpt <ckpt> --arm all --arm full:train.full_only=true --steps 5000 --games 1000 --no-vs-base --publish` | KataGo は全読みの手だけを学習に記録する（[Wu19] §3.1 "Only turns with a full search are recorded for training"）。Libra は方策は全読みだけ、価値は速読みも学ぶ。`full_only` はランでは起動で断る（学習量の数え方が未対応） |
+| バッチ | 1,024（今）／ 4,096 | `bin/libra abtest --ckpt <ckpt> --arm b4096:train.batch_size=4096 --steps 1250 --games 0 --publish` の後、学習率の腕 `lr2e4.pt` と `bin/libra eval --a lr2e4.pt --b b4096.pt --games 1000 --sims 96` | 局面数をそろえる（5,000 × 1,024 ＝ 1,250 × 4,096）。学習率は 2e-4 のまま（バッチに合わせて変える規則は AdamW では出典未確認）。AlphaZero は 4,096、KataGo は 256（SGD） |
+| cpuct | 1.5（今）／ 1.0 ／ 2.5 | `bin/libra eval --a <ckpt> --b <ckpt> --games 1000 --sims 96 --b-set cpuct=1.0`（2.5 も同じ） | 読む手の選び方だけの比較で、学習データの形を変える分は測れない（σ と同じ限界） |
+
 ## 6. 読めなかった資料・未確認
 
 - Gumbel 論文 [Danihelka22] 本文の c_scale・正規化の記述（PDF を文字にできなかった）。mctx のコードで代えた。

@@ -127,7 +127,7 @@ def train_arm(base_sd: dict, cfg: dict, rb: ReplayBuffer, steps: int, seed: int,
     t0 = time.time()
     curve, acc = [], []
     for i in range(steps):
-        batch = rb.sample(tr["batch_size"], rng, tr["mirror_prob"], tr["lambda_z"], cfg["search"]["policy_topk"])
+        batch = rb.sample(tr["batch_size"], rng, tr["mirror_prob"], tr["lambda_z"], cfg["search"]["policy_topk"], bool(tr.get("full_only", False)))
         acc.append(trainer.step(batch))
         if len(acc) >= every or i + 1 == steps:
             row = {"step": trainer.step_count, **mean_rows(acc, LOSS_KEYS)}
