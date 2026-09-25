@@ -1,88 +1,22 @@
 {
  "schema": 1,
  "run": "lx",
- "generated": "2026-09-25 08:50:32",
- "t": 1790293832.6,
+ "generated": "2026-09-25 09:51:53",
+ "t": 1790297513.3,
  "process": "running",
  "flags": [],
  "now": {
-  "step": 135177,
-  "generation": 252,
-  "games_total": 459331,
-  "games_per_day_1h": 60992,
-  "window_games": 229669,
+  "step": 135637,
+  "generation": 254,
+  "games_total": 459928,
+  "games_per_day_1h": null,
+  "window_games": 229964,
   "active_games": 64,
-  "elapsed_h": 41.17,
+  "elapsed_h": 41.46,
   "heldout_games": 20000,
-  "status_time": "2026-09-25 08:50:32",
-  "train": {
-   "loss": 3.210556,
-   "policy": 2.282566,
-   "value": 0.538547,
-   "v41": 0.778885,
-   "policy_acc": 0.374799,
-   "grad_norm": 2.42286,
-   "lr": 0.0003,
-   "steps": 92
-  },
-  "gen": {
-   "window": {
-    "fuseki": {
-     "n": 1716,
-     "n_policy": 215,
-     "corr_v": 0.2595,
-     "mse_v": 0.9339,
-     "policy_ce": 2.5251,
-     "policy_acc": 0.2558
-    },
-    "normal": {
-     "n": 2284,
-     "n_policy": 272,
-     "corr_v": 0.6576,
-     "mse_v": 0.5682,
-     "policy_ce": 2.0623,
-     "policy_acc": 0.4669
-    }
-   },
-   "heldout": {
-    "fuseki": {
-     "n": 1899,
-     "n_policy": 241,
-     "corr_v": 0.3264,
-     "mse_v": 0.8955,
-     "policy_ce": 2.81,
-     "policy_acc": 0.2158
-    },
-    "normal": {
-     "n": 2101,
-     "n_policy": 245,
-     "corr_v": 0.7442,
-     "mse_v": 0.4484,
-     "policy_ce": 2.1412,
-     "policy_acc": 0.4327
-    }
-   },
-   "gap": {
-    "fuseki": {
-     "corr_v": 0.0669,
-     "mse_v": -0.0384,
-     "policy_ce": 0.2849,
-     "policy_acc": -0.04
-    },
-    "normal": {
-     "corr_v": 0.0866,
-     "mse_v": -0.1198,
-     "policy_ce": 0.0789,
-     "policy_acc": -0.0342
-    }
-   },
-   "window_games": 220022,
-   "heldout_games": 20000,
-   "positions": 4000,
-   "t": 1790283201.2,
-   "step": 121598,
-   "games": 440044
-  }
+  "status_time": "2026-09-25 09:51:52",
+  "train": null,
+  "gen": null
  },
  "exploiter": {
   "games": 0,
@@ -91,7 +25,7 @@
   "losses": 0,
   "winrate": 0.0,
   "main_step": 481885,
-  "source_step": 485989,
+  "source_step": 486217,
   "refreshed_at": 1790281978.5328026,
   "history": [
    {
@@ -113,9 +47,9 @@
    "done": false,
    "sims": 1,
    "recent_games": 2000,
-   "recent_winrate": 0.4675,
-   "games": 23521,
-   "wins": 10328,
+   "recent_winrate": 0.4775,
+   "games": 24111,
+   "wins": 10610,
    "threshold": 0.75,
    "window": 2000,
    "history": []
@@ -4959,10 +4893,58 @@
    "gen_heldout_policy_acc": 0.4327,
    "gen_heldout_policy_ce": 2.1412,
    "gen_heldout_fuseki_corr_v": 0.3264
+  },
+  {
+   "t": 1790297512.6,
+   "step": 135637,
+   "games_total": 459928,
+   "gpd": null,
+   "gpd_5m": null,
+   "window": 229964,
+   "rss_mb": 3658,
+   "swap_mb": 0,
+   "gpu_mb": 150,
+   "loss": null,
+   "policy": null,
+   "value": null,
+   "v41": null,
+   "policy_acc": null,
+   "grad_norm": null,
+   "lr": null,
+   "steps": null,
+   "train_avg": null,
+   "target_minus_z": null,
+   "v41_minus_z": null,
+   "draw_target": null,
+   "draw_actual": null,
+   "rootq_minus_z_fuseki": null,
+   "rootq_minus_z_normal": null,
+   "t_train_sample": 0.0,
+   "t_train_step": 0.0,
+   "t_sp_eval": 99.27,
+   "sp_games": null,
+   "sp_draw": null,
+   "sp_plies": null,
+   "sp_sente": null,
+   "sp_sennichite": null,
+   "sp_perpetual_check": null,
+   "sp_max_ply": null,
+   "sp_resign": null,
+   "sp_ruling41": null,
+   "sp_no_legal_move": null,
+   "sp_mate_found": null,
+   "gen_window_corr_v": null,
+   "gen_window_policy_acc": null,
+   "gen_window_policy_ce": null,
+   "gen_window_fuseki_corr_v": null,
+   "gen_heldout_corr_v": null,
+   "gen_heldout_policy_acc": null,
+   "gen_heldout_policy_ce": null,
+   "gen_heldout_fuseki_corr_v": null
   }
  ],
  "review": {
-  "time": "2026-09-25 08:50:32",
+  "time": "2026-09-25 09:51:53",
   "run": "lx",
   "items": [
    {
@@ -4996,14 +4978,6 @@
     "verdict": "まだ無い",
     "why": "evalreference.jsonl がまだ無い",
     "values": {}
-   },
-   {
-    "name": "局/日（1 時間平均）",
-    "verdict": "続ける",
-    "why": "60,992",
-    "values": {
-     "gpd": 60992
-    }
    }
   ],
   "verdict": "注意",
