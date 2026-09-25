@@ -42,6 +42,9 @@ class Runner:
         self.model = LibraNet(NetConfig.from_dict(cfg["net"])).to(self.device)
         self.trainer = Trainer(self.model, cfg["train"], self.device)
         tr, sr, rr = cfg["train"], cfg["search"], cfg["run"]
+        if tr.get("full_only"):
+            # 学習量（局面数 × replay_ratio / batch）を全読みの局面で数え直す形はまだ無い。今は `libra abtest` の腕の比較用だけ
+            raise ValueError("[train] full_only はランではまだ使えない（libra abtest の比較用）")
         self.replay = ReplayBuffer(sd.replay, sd.games, tr["window_games"], rr["chunk_games"], sr["max_ply"], sr["count_from_41"],
                                    window_frac=float(tr.get("window_frac", 0.0)), window_games_max=int(tr.get("window_games_max", 0)),
                                    heldout_every_chunks=int(rr.get("heldout_every_chunks", 0)), heldout_games=int(rr.get("heldout_games", 20000)))

@@ -58,6 +58,7 @@ def test_parse_set_types_and_unknown_keys():
     assert parse_set("train.batch_size=256") == ("train", "batch_size", 256)
     assert parse_set("search.gumbel_rescale=true") == ("search", "gumbel_rescale", True)
     assert parse_set("train.compile=none") == ("train", "compile", "none")
+    assert parse_set("train.full_only=true") == ("train", "full_only", True)
     for bad in ("train.lambda_zz=1.0", "nosuch.key=1", "train.lambda_z", "lambda_z=1.0", "search.gumbel_rescale=yes"):
         with pytest.raises(ValueError):
             parse_set(bad)
@@ -82,12 +83,14 @@ def test_arms_see_the_same_positions_and_only_the_setting_differs(tmp_path: Path
     sd, _ = _run(tmp_path)
     logs: list[str] = []
     res = run_abtest(sd, load_config(None), sd.checkpoints / "latest.pt",
-                     ["a", "b", "lam10:train.lambda_z=1.0"], [], steps=6, games=0, sims=8, concurrent=4, threads=2, seed=5,
+                     ["a", "b", "lam10:train.lambda_z=1.0", "full:train.full_only=true"], [], steps=6, games=0, sims=8, concurrent=4, threads=2, seed=5,
                      positions=64, every=3, vs_base=False, out_dir=tmp_path / "out", device=torch.device("cpu"),
                      chunk_index=None, games_total=None, log=logs.append)
-    a, b, lam = (torch.load(tmp_path / "out" / f"{n}.pt", map_location="cpu", weights_only=False) for n in ("a", "b", "lam10"))
+    a, b, lam, full = (torch.load(tmp_path / "out" / f"{n}.pt", map_location="cpu", weights_only=False) for n in ("a", "b", "lam10", "full"))
     assert a["step"] == 13 and all(torch.equal(a["model"][k], b["model"][k]) for k in a["model"])
     assert any(not torch.equal(a["model"][k], lam["model"][k]) for k in a["model"])
+    # 全読みの局面だけで学ぶ腕（[train] full_only）も腕として回り、違う重みになる
+    assert any(not torch.equal(a["model"][k], full["model"][k]) for k in a["model"])
     assert res["arms"]["lam10"]["diff"] == {"train.lambda_z": 1.0} and res["arms"]["a"]["diff"] == {}
     # 物差しは 2 通り（腕の間で同じ λ=1.0 の物差しと、腕自身の λ）。布石と本将棋で分かれている
     for which in ("gen_z", "gen_own"):
