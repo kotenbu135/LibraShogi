@@ -100,6 +100,11 @@ def main(argv: list[str] | None = None) -> int:
                      help="布石（1〜40 手目）をどうするか。engine=両エンジンに打たせる（既定）／self=Libra が両陣とも作る"
                           "（相手が布石を指せないふつうの将棋エンジンでも測れる）／selfplay=run の自己対局の 41 手目の局面を使う／"
                           "<ファイル>=41 手目の SFEN の一覧。self 以外はどれも同じ局面を先後入れ替えて 2 局ずつ打つ")
+    p_m.add_argument("--place", default="engine", choices=["engine", "search"],
+                     help="両玉の置き方。engine=置く側のエンジンに任せる（玉配置表があれば表から、既定）／search=先手玉は乱数、"
+                          "後手玉は候補を置く側のエンジンで読み、先手の勝率が 0.5 にいちばん近いマス（表と対局の読みの量が違うときに"
+                          "選ぶ側だけが得をしない。1 局に後手玉の候補 27 マスぶんの読みが増える）。--fuseki engine のときだけ")
+    p_m.add_argument("--place-seed", type=int, default=0, help="--place search で先手玉を選ぶ乱数の種")
     p_m.add_argument("--fuseki-seed", type=int, default=0, help="--fuseki selfplay で局面を選ぶ乱数の種（同じ種なら同じ局面。段ごとの比較を対にできる）")
     p_m.add_argument("--libra-standard", action="store_true",
                      help="Libra 側が run の標準の読み（[auto] eval_sims と同じ）で打っていることを記録する。Elo の目盛りで自己評価と同じ点として扱われる")
@@ -453,6 +458,9 @@ def main(argv: list[str] | None = None) -> int:
         for kv in a.opponent_opt:
             k, v = kv.split("=", 1)
             oopts[k] = v
+        if a.place != "engine" and a.fuseki != "engine":
+            log("match: --place search は --fuseki engine（両玉から打つ形）のときだけ使える")
+            return 1
         openings = None
         self_fuseki = a.fuseki == "self"
         if a.fuseki not in ("engine", "self"):
@@ -489,7 +497,7 @@ def main(argv: list[str] | None = None) -> int:
         log(f"libra: {libra.id_name}  opp: {opp.id_name}")
         try:
             summary = run_match(libra, opp, a.games, a.go, out, log=log, first_placer=a.first_placer, go_args_b=a.go_opp,
-                                openings=openings, self_fuseki=self_fuseki)
+                                openings=openings, self_fuseki=self_fuseki, place=a.place, place_seed=a.place_seed)
         finally:
             libra.quit()
             opp.quit()

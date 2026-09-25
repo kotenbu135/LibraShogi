@@ -10,10 +10,16 @@ docs/protocol.md §2 のとおり、両玉は置く側のエンジンに打た�
 相手が布石を指せないふつうの将棋エンジンでも計測できる（docs/runbook.md §7.0、2026-09-20 のユーザーの
 決定「40 手目までは Elo 測定で測った最強 Libra 同士で行い、41 手目から 最強 Libra vs やねうら王/水匠5」）。
 `openings`（41 手目の局面の一覧）を渡せば、作る代わりにそれを使う。
+
+**両玉を読みで置く形**もある（`place="search"`）。置く側は先手玉を乱数で 1 マスに置き、後手玉の候補をそれぞれ置く側の
+エンジンに `go` して、先手の勝率がいちばん 0.5 に近いマスに後手玉を置く。選ぶ側も同じ読みで先後を決めるので、
+玉配置表（読み 96 回で作る）と対局の読みの量が違うときに、選ぶ側だけが得をする片寄りが出ない（2026-09-25 のユーザーの決定
+「matchにいれる」。動画用の棋譜を読み 1600 回などで作るため）。
 """
 from __future__ import annotations
 
 import json
+import random
 import time
 from pathlib import Path
 
@@ -30,7 +36,7 @@ def cp_to_winrate(cp: int) -> float:
 
 class Match:
     def __init__(self, a: UsiEngine, b: UsiEngine, go_args: str, max_ply: int, count_from_41: bool, log=None,
-                 go_args_b: str | None = None):
+                 go_args_b: str | None = None, place: str = "engine", place_seed: int = 0):
         self.a, self.b = a, b
         self.go_args = go_args
         # b 側だけ別の `go`。読む量に差を付けて測る（ハンデ）ために使う。既定は a と同じ
@@ -38,6 +44,11 @@ class Match:
         self.max_ply = max_ply
         self.count_from_41 = count_from_41
         self.log = log or (lambda s: None)
+        # 両玉の置き方: engine＝置く側のエンジンに任せる（玉配置表か探索）／search＝後手玉を読みで釣り合わせる
+        if place not in ("engine", "search"):
+            raise ValueError(f"place は engine か search: {place}")
+        self.place = place
+        self.place_rng = random.Random(place_seed)
 
     def go(self, E: UsiEngine, line: str):
         """その側の `go` の引数で読ませる。"""
@@ -88,6 +99,35 @@ class Match:
                 tokens.append(bm)
             moves_info.append(rec)
         return None
+
+    def place_by_search(self, P, pos, tokens: list[str], moves_info: list[dict], placer: str) -> None:
+        """両玉を置く（`place="search"`）。先手玉は乱数、後手玉は候補を置く側のエンジンで読み、先手の勝率が 0.5 に
+        いちばん近いマス。後手玉の四段目は除く（3 手目の桂打ちで遮断不能になり先手の勝ちがほぼ決まる。rules.md §3.4、
+        measurements.md 2026-09-21）。"""
+        kb = self.place_rng.choice(sorted(pos.legal_moves()))
+        pos.do_move(kb)
+        tokens.append(kb)
+        moves_info.append({"by": placer, "move": kb, "place": "random"})
+        cands: dict[str, float] = {}
+        for kw in sorted(m for m in pos.legal_moves() if not m.endswith("d")):
+            _, info = self.go(P, f"position fuseki moves {kb} {kw}")
+            w = info.get("winrate")
+            if w is None and "cp" in info:
+                w = cp_to_winrate(info["cp"])
+            if w is None:
+                continue
+            p2 = ls.Position()
+            p2.set_position(f"position fuseki moves {kb} {kw}")
+            cands[kw] = round(w if p2.turn == "sente" else 1.0 - w, 4)  # 先手の勝率に直す
+        if not cands:
+            raise RuntimeError(f"両玉を読みで置けない: 置く側のエンジンが後手玉の候補に winrate を返さない（先手玉 {kb}）")
+        kw = min(cands, key=lambda m: (abs(cands[m] - 0.5), m))
+        pos.do_move(kw)
+        tokens.append(kw)
+        # winrate は他の手と同じく指した側（後手）から見た値。candidates は先手の勝率
+        moves_info.append({"by": placer, "move": kw, "winrate": round(1.0 - cands[kw], 4), "place": "search",
+                           "candidates": cands})
+        self.log(f"両玉を読みで置いた: {kb} {kw}（先手の勝率 {cands[kw]:.3f}、候補 {len(cands)} マス）")
 
     def make_opening(self, tries: int = 5) -> tuple[str, list[str]] | None:
         """a 側のエンジンだけで布石 40 手を打ち、(41 手目の局面, 打った手順) を返す。
@@ -159,7 +199,9 @@ class Match:
         result = reason = None
         illegal_by = None
         # 両玉
-        for ply in range(2):
+        if self.place == "search":
+            self.place_by_search(P, pos, tokens, moves_info, placer)
+        for ply in range(2 if self.place == "engine" else 0):
             line = "position fuseki" + (" moves " + " ".join(tokens) if tokens else "")
             bm, info = self.go(P, line)
             if not (bm.startswith("K*") and pos.is_legal(bm)):
@@ -208,14 +250,15 @@ class Match:
 
 def run_match(a: UsiEngine, b: UsiEngine, n_games: int, go_args: str, out_jsonl: Path, max_ply: int = 320,
               count_from_41: bool = True, log=None, first_placer: str = "a", go_args_b: str | None = None,
-              openings: list[str] | None = None, self_fuseki: bool = False) -> dict:
+              openings: list[str] | None = None, self_fuseki: bool = False, place: str = "engine",
+              place_seed: int = 0) -> dict:
     """self_fuseki なら布石を a 側だけで打ち（両陣とも同じ Libra）、41 手目から本将棋を a 対 b で指す。
     openings（41 手目の局面の一覧）を渡せば布石を作らずそれを使う。どちらも**同じ局面を先後入れ替えて
     2 局ずつ**打つので、布石の有利不利が打ち消し合う。"""
-    m = Match(a, b, go_args, max_ply, count_from_41, log, go_args_b=go_args_b)
+    m = Match(a, b, go_args, max_ply, count_from_41, log, go_args_b=go_args_b, place=place, place_seed=place_seed)
     summary = {"a": a.id_name, "b": b.id_name, "n": 0, "a_points": 0.0, "by_engine_side": {}, "reasons": {}, "games": [],
                "go_a": go_args, "go_b": m.go_args_b, "openings": len(openings) if openings else 0,
-               "self_fuseki": bool(self_fuseki)}
+               "self_fuseki": bool(self_fuseki), "place": place}
     out_jsonl.parent.mkdir(parents=True, exist_ok=True)
     opening: tuple[str, list[str]] | None = None
     with open(out_jsonl, "a", encoding="utf-8") as f:

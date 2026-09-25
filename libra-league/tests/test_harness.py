@@ -160,3 +160,68 @@ def test_libra_builds_both_camps_and_then_plays_from_move_41(tmp_path: Path):
         p.set_max_ply(320, True)
         p.set_position("position fuseki moves " + g["fuseki"])
         assert p.sfen() == g["sfen41"] and p.phase == "normal"
+
+
+class _PlaceFake:
+    """後手玉の段で先手の勝率を返す偽のエンジン（a 段 0.30・b 段 0.52・c 段 0.65・d 段 0.99）。本将棋に入ったら投了する。"""
+
+    RATE = {"a": 0.30, "b": 0.52, "c": 0.65, "d": 0.99}
+    id_name = "PlaceFake"
+
+    def __init__(self):
+        self.lines: list[str] = []
+
+    def new_game(self):
+        pass
+
+    def go(self, line, go_args):
+        self.lines.append(line)
+        t = line.split()
+        moves = t[t.index("moves") + 1:] if "moves" in t else []
+        if len(moves) == 2:
+            return "5g5f", {"winrate": self.RATE[moves[1][-1]]}  # 手番は先手
+        if len(moves) < 2:
+            return "K*5i" if not moves else "K*5a", {"winrate": 0.5}
+        return "resign", {}
+
+
+def test_place_search_puts_gote_king_where_sente_is_closest_to_half(tmp_path: Path):
+    """--place search: 後手玉は置く側の読みで先手の勝率が 0.5 にいちばん近いマス、四段目は読まない。選ぶ側は従来どおり。"""
+    a, b = _PlaceFake(), _PlaceFake()
+    out = tmp_path / "m.jsonl"
+    s = run_match(a, b, 2, "nodes 1", out, place="search", place_seed=3)
+    assert s["place"] == "search"
+    games = [json.loads(x) for x in out.read_text(encoding="utf-8").splitlines()]
+    for g, placer in zip(games, ("a", "b")):
+        kb, kw = g["tokens"].split()[:2]
+        assert kw.endswith("b")  # 0.52 が 0.5 にいちばん近い
+        k0, k1 = g["moves"][0], g["moves"][1]
+        assert k0["move"] == kb and k0["place"] == "random" and "winrate" not in k0
+        assert k1["move"] == kw and k1["place"] == "search" and k1["by"] == placer
+        assert k1["winrate"] == 0.48  # 指した側（後手）から見た値
+        assert len(k1["candidates"]) == 27 and not any(m.endswith("d") for m in k1["candidates"])
+        assert g["moves"][2]["choose"] == "sente" and g["chosen"] == "sente"
+    # 候補を読むのは置く側だけ（1 局目は a、2 局目は b）。両玉の後の局面は、ほかに選ぶ側の選択と先手の 3 手目で 1 回ずつ読む
+    assert sum(1 for x in a.lines if len(x.split()) == 5) == 27 + 2
+    assert sum(1 for x in b.lines if len(x.split()) == 5) == 2 + 27
+
+
+def test_place_search_first_king_follows_seed(tmp_path: Path):
+    """先手玉は --place-seed で決まる（同じ種なら同じ玉）。"""
+    firsts = []
+    for seed in (5, 5, 6):
+        out = tmp_path / f"m{len(firsts)}.jsonl"
+        run_match(_PlaceFake(), _PlaceFake(), 1, "nodes 1", out, place="search", place_seed=seed)
+        firsts.append(json.loads(out.read_text(encoding="utf-8"))["tokens"].split()[0])
+    assert firsts[0] == firsts[1]
+
+
+def test_place_engine_is_default(tmp_path: Path):
+    """既定は置く側のエンジンに任せる（自動計測・外部計測の形は変わらない）。"""
+    a, b = _PlaceFake(), _PlaceFake()
+    out = tmp_path / "m.jsonl"
+    s = run_match(a, b, 1, "nodes 1", out)
+    g = json.loads(out.read_text(encoding="utf-8"))
+    assert s["place"] == "engine"
+    assert g["tokens"].split()[:2] == ["K*5i", "K*5a"]
+    assert "place" not in g["moves"][0] and "place" not in g["moves"][1]
