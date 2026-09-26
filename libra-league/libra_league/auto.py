@@ -314,6 +314,8 @@ def collect_matches(sd: StateDir) -> list[dict]:
             "libra_step": ckpt_step(str((r.get("libra_options") or {}).get("DNN_Model", ""))),
             "fuseki": r.get("fuseki") or "engine", "libra_standard": bool(r.get("libra_standard")),
             "auto": p.name.startswith("auto-"),
+            # 41 手目から席を別のエンジンが指した対局（--engine41）。Libra 対 相手の強さではないので目盛りに乗せない
+            "engine41": bool(r.get("engine41")),
         })
     out.sort(key=lambda m: m["time"])
     return out

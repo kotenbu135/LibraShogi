@@ -105,6 +105,20 @@ def main(argv: list[str] | None = None) -> int:
                           "後手玉は候補を置く側のエンジンで読み、先手の勝率が 0.5 にいちばん近いマス（表と対局の読みの量が違うときに"
                           "選ぶ側だけが得をしない。1 局に後手玉の候補 27 マスぶんの読みが増える）。--fuseki engine のときだけ")
     p_m.add_argument("--place-seed", type=int, default=0, help="--place search で先手玉を選ぶ乱数の種")
+    p_m.add_argument("--kings", default=None,
+                     help="両玉を決め打ちする（先手玉,後手玉。例 5i,5a か K*5i,K*5a）。置く側は読まずにここへ置く。--fuseki engine のときだけ")
+    p_m.add_argument("--choose", default=None, choices=["sente", "gote"],
+                     help="選ぶ側がいつも取る側を決め打ちする（sente=先手を取る／gote=後手を取る）。置く側は --first-placer から交互。"
+                          "--fuseki engine のときだけ")
+    p_m.add_argument("--engine41", default=None,
+                     help="41 手目から指すエンジンの起動コマンド（手元のやねうら王＋水匠5 など、本将棋だけのエンジン）。"
+                          "リポジトリには入れず、実行ファイルのパスをここで渡す")
+    p_m.add_argument("--engine41-cwd", default=None, help="--engine41 の作業フォルダ（既定: 実行ファイルのあるフォルダ）")
+    p_m.add_argument("--engine41-opt", action="append", default=[], help="--engine41 の setoption（name=value。例 EvalDir=eval）")
+    p_m.add_argument("--engine41-side", default="both", choices=["both", "a", "b"],
+                     help="41 手目からどちらの席を --engine41 に替えるか（both=両陣とも＝そのエンジン同士、b=相手の席だけ＝Libra 対そのエンジン、"
+                          "a=Libra の席だけ）。既定 both")
+    p_m.add_argument("--go41", default=None, help="--engine41 の go の引数（既定: --go-opp、無ければ --go）")
     p_m.add_argument("--fuseki-seed", type=int, default=0, help="--fuseki selfplay で局面を選ぶ乱数の種（同じ種なら同じ局面。段ごとの比較を対にできる）")
     p_m.add_argument("--libra-standard", action="store_true",
                      help="Libra 側が run の標準の読み（[auto] eval_sims と同じ）で打っていることを記録する。Elo の目盛りで自己評価と同じ点として扱われる")
@@ -461,6 +475,24 @@ def main(argv: list[str] | None = None) -> int:
         if a.place != "engine" and a.fuseki != "engine":
             log("match: --place search は --fuseki engine（両玉から打つ形）のときだけ使える")
             return 1
+        kings = None
+        if a.kings:
+            import librashogi as _ls
+
+            kings = tuple(t.strip() if t.strip().startswith("K*") else "K*" + t.strip() for t in a.kings.split(","))
+            kp = _ls.Position()
+            ok = len(kings) == 2
+            for k in kings if ok else ():
+                ok = kp.is_legal(k)
+                if not ok:
+                    break
+                kp.do_move(k)
+            if not ok:
+                log(f"match: --kings {a.kings} は置けない（先手玉,後手玉 の順に 2 つ。例 5i,5a）")
+                return 1
+        if (kings or a.choose) and (a.fuseki != "engine" or a.place != "engine"):
+            log("match: --kings・--choose は --fuseki engine（両玉から打つ形）で --place engine のときだけ使える")
+            return 1
         openings = None
         self_fuseki = a.fuseki == "self"
         if a.fuseki not in ("engine", "self"):
@@ -483,24 +515,39 @@ def main(argv: list[str] | None = None) -> int:
             ocmd = [str(Path(opp_cwd) / ".venv" / "bin" / "python"), "scripts/fuseki_usi_server.py"]
         libra = UsiEngine("libra", [str(root / "bin" / "libra-usi")], cwd=str(root), options=lopts, log=lambda s: logf and logf.write(s + "\n"))
         opp = UsiEngine("opp", ocmd, cwd=opp_cwd, options=oopts, log=lambda s: logf and logf.write(s + "\n"))
+        # 41 手目から席を替えるエンジン。両陣とも替えるときは席ごとに別のプロセスにする（置換表を両陣で共有しない）
+        e41: dict = {}
+        e41opts: dict = {}
+        e41cmd: list[str] = []
+        if a.engine41:
+            e41cmd = [str(Path(t).expanduser()) if t.startswith("~") else t for t in a.engine41.split()]
+            e41cwd = str(Path(a.engine41_cwd).expanduser()) if a.engine41_cwd else str(Path(e41cmd[0]).parent)
+            for kv in a.engine41_opt:
+                k, v = kv.split("=", 1)
+                e41opts[k] = v
+            for seat in (("a", "b") if a.engine41_side == "both" else (a.engine41_side,)):
+                e41[seat] = UsiEngine(f"e41{seat}", e41cmd, cwd=e41cwd, options=e41opts, log=lambda s: logf and logf.write(s + "\n"))
+            log(f"match: 41 手目から {'両陣' if len(e41) == 2 else ('相手の席' if 'b' in e41 else 'Libra の席')} を {e41cmd[0]} が指す")
         log(f"starting engines: libra={libra.cmd} opp={ocmd}")
         # 起動できないときは理由を 1 行で残して終わる。素の traceback だと、相手が何で落ちたのかが
         # どこにも出なかった（2026-09-21。外部計測が 3 回続けて 1 局も記録せず rc=1 で終わっていた）
-        for eng in (libra, opp):
+        engines = [libra, opp, *e41.values()]
+        for eng in engines:
             try:
                 eng.start()
             except (TimeoutError, RuntimeError, OSError) as e:
                 log(f"match: {eng.name} を起動できない（{' '.join(str(t) for t in eng.cmd)}、cwd={eng.cwd}）: {type(e).__name__}: {e}")
-                libra.quit()
-                opp.quit()
+                for x in engines:
+                    x.quit()
                 return 1
-        log(f"libra: {libra.id_name}  opp: {opp.id_name}")
+        log(f"libra: {libra.id_name}  opp: {opp.id_name}" + (f"  41 手目から: {next(iter(e41.values())).id_name}" if e41 else ""))
         try:
             summary = run_match(libra, opp, a.games, a.go, out, log=log, first_placer=a.first_placer, go_args_b=a.go_opp,
-                                openings=openings, self_fuseki=self_fuseki, place=a.place, place_seed=a.place_seed)
+                                openings=openings, self_fuseki=self_fuseki, place=a.place, place_seed=a.place_seed,
+                                kings=kings, choose=a.choose, e41=e41, go_args_41=a.go41)
         finally:
-            libra.quit()
-            opp.quit()
+            for x in engines:
+                x.quit()
         summary["go"] = a.go
         summary["go_opp"] = a.go_opp or a.go
         summary["fuseki"] = a.fuseki
@@ -508,6 +555,9 @@ def main(argv: list[str] | None = None) -> int:
         summary["libra_options"] = lopts
         summary["opponent_options"] = oopts
         summary["opponent_cmd"] = ocmd
+        if e41:
+            summary["engine41_cmd"] = e41cmd
+            summary["engine41_options"] = e41opts
         out.with_suffix(".summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
         print(json.dumps({k: v for k, v in summary.items() if k != "games"}, ensure_ascii=False))
         print("written:", out)

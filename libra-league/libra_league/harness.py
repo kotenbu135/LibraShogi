@@ -15,6 +15,15 @@ docs/protocol.md §2 のとおり、両玉は置く側のエンジンに打た�
 エンジンに `go` して、先手の勝率がいちばん 0.5 に近いマスに後手玉を置く。選ぶ側も同じ読みで先後を決めるので、
 玉配置表（読み 96 回で作る）と対局の読みの量が違うときに、選ぶ側だけが得をする片寄りが出ない（2026-09-25 のユーザーの決定
 「matchにいれる」。動画用の棋譜を読み 1600 回などで作るため）。
+
+**両玉と先後を決め打ちする形**もある（`kings`・`choose`）。両玉は渡したマスに置き、選ぶ側はいつも渡した側を取る
+（選ぶ側の読みの勝率は形勢の表示のために残す）。同じ始まりから何局も打てる（2026-09-26 のユーザーの依頼
+「任意の玉配置・先後選択から対局を始められるように」）。
+
+**41 手目から別のエンジンに替える形**もある（`e41`）。布石（両玉・選択・40 手）は a・b が打ち、41 手目からは渡した
+側の席を別のエンジン（手元のやねうら王＋水匠5 など、本将棋だけのエンジン）が指す。両陣とも替えればそのエンジン同士、
+片方だけなら Libra 対そのエンジンになる（2026-09-26 のユーザーの依頼「41手目はやねうら王・水匠５で対局できる
+オプション（Libra vs 水匠５も）」）。エンジンはリポジトリに入れず、起動のたびに手元のパスを渡す。勝ち負けは席（a・b）で数える。
 """
 from __future__ import annotations
 
@@ -36,7 +45,9 @@ def cp_to_winrate(cp: int) -> float:
 
 class Match:
     def __init__(self, a: UsiEngine, b: UsiEngine, go_args: str, max_ply: int, count_from_41: bool, log=None,
-                 go_args_b: str | None = None, place: str = "engine", place_seed: int = 0):
+                 go_args_b: str | None = None, place: str = "engine", place_seed: int = 0,
+                 kings: tuple[str, str] | None = None, choose: str | None = None,
+                 e41: dict | None = None, go_args_41: str | None = None):
         self.a, self.b = a, b
         self.go_args = go_args
         # b 側だけ別の `go`。読む量に差を付けて測る（ハンデ）ために使う。既定は a と同じ
@@ -49,9 +60,27 @@ class Match:
             raise ValueError(f"place は engine か search: {place}")
         self.place = place
         self.place_rng = random.Random(place_seed)
+        # 決め打ちの両玉（先手玉, 後手玉。K*5i の形）と、選ぶ側がいつも取る側（sente | gote）
+        if kings is not None and (len(kings) != 2 or place != "engine"):
+            raise ValueError("kings は (先手玉, 後手玉) の 2 つで、place は engine のときだけ")
+        if choose not in (None, "sente", "gote"):
+            raise ValueError(f"choose は sente か gote: {choose}")
+        self.kings = tuple(kings) if kings else None
+        self.choose = choose
+        # 41 手目から席を替えるエンジン（{'a': E, 'b': E} の一部）と、その `go`（既定は b 側と同じ）
+        self.e41 = {k: v for k, v in (e41 or {}).items() if v is not None}
+        if not set(self.e41) <= {"a", "b"}:
+            raise ValueError(f"e41 の席は a か b: {sorted(self.e41)}")
+        self.go_args_41 = go_args_41 or self.go_args_b
+
+    def engines(self) -> list:
+        """この対局で使うエンジンすべて（41 手目からのエンジンを含む）。"""
+        return [self.a, self.b, *self.e41.values()]
 
     def go(self, E: UsiEngine, line: str):
         """その側の `go` の引数で読ませる。"""
+        if any(E is x for x in self.e41.values()):
+            return E.go(line, self.go_args_41)
         return E.go(line, self.go_args_b if E is self.b else self.go_args)
 
     def play_moves(self, pos, side: dict, tokens: list[str], moves_info: list[dict]) -> str | None:
@@ -61,6 +90,8 @@ class Match:
             turn = pos.turn
             who = side[turn]
             E = eng[who]
+            if pos.phase == "normal" and who in self.e41:
+                E = self.e41[who]
             if pos.phase == "fuseki":
                 line = "position fuseki moves " + " ".join(t for t in tokens if not t.startswith("choose:"))
             else:
@@ -68,6 +99,8 @@ class Match:
                 line = f"position sfen {self.sfen41} moves {' '.join(m[2:] for m in normal)}".rstrip()
             bm, info = self.go(E, line)
             rec = {"by": who, "move": bm, "ply": pos.ply + 1, **info}
+            if E is not eng[who]:
+                rec["engine41"] = True
             if bm == "resign":
                 pos.resign(turn)
                 moves_info.append(rec)
@@ -156,7 +189,7 @@ class Match:
 
     def play_from_sfen(self, sfen41: str, sente: str, game_no: int, fuseki: list[str] | None = None) -> dict:
         """41 手目の局面から本将棋だけを対局する（布石は持ち込み）。sente: 'a' | 'b'。"""
-        for e in (self.a, self.b):
+        for e in self.engines():
             e.new_game()
         pos = ls.Position()
         pos.set_sfen(sfen41, "normal")
@@ -190,7 +223,7 @@ class Match:
         eng = {"a": self.a, "b": self.b}
         P = eng[placer]
         C = eng["b" if placer == "a" else "a"]
-        for e in (self.a, self.b):
+        for e in self.engines():
             e.new_game()
         pos = ls.Position()
         pos.set_max_ply(self.max_ply, self.count_from_41)
@@ -201,7 +234,14 @@ class Match:
         # 両玉
         if self.place == "search":
             self.place_by_search(P, pos, tokens, moves_info, placer)
-        for ply in range(2 if self.place == "engine" else 0):
+        elif self.kings:
+            for k in self.kings:
+                if not pos.is_legal(k):
+                    raise ValueError(f"決め打ちの玉 {k} は置けない（{' '.join(tokens) or '1 手目'}）")
+                pos.do_move(k)
+                tokens.append(k)
+                moves_info.append({"by": placer, "move": k, "place": "fixed"})
+        for ply in range(2 if self.place == "engine" and not self.kings else 0):
             line = "position fuseki" + (" moves " + " ".join(tokens) if tokens else "")
             bm, info = self.go(P, line)
             if not (bm.startswith("K*") and pos.is_legal(bm)):
@@ -218,9 +258,10 @@ class Match:
                 w = cp_to_winrate(info["cp"])
             if w is None:
                 w = 0.5
-            chosen = "sente" if w >= 0.5 else "gote"
+            chosen = self.choose or ("sente" if w >= 0.5 else "gote")
             tokens.append(f"choose:{chosen}")
-            moves_info.append({"by": "b" if placer == "a" else "a", "choose": chosen, "winrate": w})
+            moves_info.append({"by": "b" if placer == "a" else "a", "choose": chosen, "winrate": w,
+                               **({"fixed": True} if self.choose else {})})
         # 席
         chooser = "b" if placer == "a" else "a"
         side = {chosen: chooser, ("gote" if chosen == "sente" else "sente"): placer} if chosen else {}
@@ -251,14 +292,22 @@ class Match:
 def run_match(a: UsiEngine, b: UsiEngine, n_games: int, go_args: str, out_jsonl: Path, max_ply: int = 320,
               count_from_41: bool = True, log=None, first_placer: str = "a", go_args_b: str | None = None,
               openings: list[str] | None = None, self_fuseki: bool = False, place: str = "engine",
-              place_seed: int = 0) -> dict:
+              place_seed: int = 0, kings: tuple[str, str] | None = None, choose: str | None = None,
+              e41: dict | None = None, go_args_41: str | None = None) -> dict:
     """self_fuseki なら布石を a 側だけで打ち（両陣とも同じ Libra）、41 手目から本将棋を a 対 b で指す。
     openings（41 手目の局面の一覧）を渡せば布石を作らずそれを使う。どちらも**同じ局面を先後入れ替えて
-    2 局ずつ**打つので、布石の有利不利が打ち消し合う。"""
-    m = Match(a, b, go_args, max_ply, count_from_41, log, go_args_b=go_args_b, place=place, place_seed=place_seed)
+    2 局ずつ**打つので、布石の有利不利が打ち消し合う。kings・choose は両玉と先後の決め打ち（布石を作る形のときだけ）、
+    e41 は 41 手目から席（'a' | 'b'）を替えるエンジン。"""
+    if (kings or choose) and (openings or self_fuseki):
+        raise ValueError("kings・choose は両玉から打つ形（openings も self_fuseki も無し）のときだけ")
+    m = Match(a, b, go_args, max_ply, count_from_41, log, go_args_b=go_args_b, place=place, place_seed=place_seed,
+              kings=kings, choose=choose, e41=e41, go_args_41=go_args_41)
     summary = {"a": a.id_name, "b": b.id_name, "n": 0, "a_points": 0.0, "by_engine_side": {}, "reasons": {}, "games": [],
                "go_a": go_args, "go_b": m.go_args_b, "openings": len(openings) if openings else 0,
-               "self_fuseki": bool(self_fuseki), "place": place}
+               "self_fuseki": bool(self_fuseki), "place": place,
+               "kings": list(kings) if kings else None, "choose": choose,
+               "engine41": {k: getattr(v, "id_name", None) for k, v in m.e41.items()} or None,
+               "go_41": m.go_args_41 if m.e41 else None}
     out_jsonl.parent.mkdir(parents=True, exist_ok=True)
     opening: tuple[str, list[str]] | None = None
     with open(out_jsonl, "a", encoding="utf-8") as f:

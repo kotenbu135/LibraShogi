@@ -116,6 +116,8 @@ def pairs_of(sd: StateDir) -> list[dict]:
             add(step_node(r.get("step")), _ref_node(sd, ref, r.get("ref_step")), r.get("n"), r.get("score_new"),
                 r.get("t"), "reference")
     for m in collect_matches(sd):
+        if m.get("engine41"):  # 41 手目から席を別のエンジンが指した対局は、Libra 対 相手の強さではない
+            continue
         n = m.get("n")
         pts = m.get("a_points")
         score = (float(pts) / float(n)) if (n and pts is not None) else m.get("winrate")

@@ -225,3 +225,103 @@ def test_place_engine_is_default(tmp_path: Path):
     assert s["place"] == "engine"
     assert g["tokens"].split()[:2] == ["K*5i", "K*5a"]
     assert "place" not in g["moves"][0] and "place" not in g["moves"][1]
+
+
+class _RandFake:
+    """合法手から乱数で指す偽のエンジン。受けた局面の段（布石・本将棋）と go の引数を残す。"""
+
+    def __init__(self, seed: int, name: str, winrate: float = 0.5):
+        import random
+
+        self.rng = random.Random(seed)
+        self.id_name = name
+        self.winrate = winrate
+        self.calls: list[tuple[str, str, str]] = []  # (段, 局面の行, go の引数)
+        self.new_games = 0
+
+    def new_game(self):
+        self.new_games += 1
+
+    def go(self, line, go_args):
+        p = ls.Position()
+        p.set_max_ply(320, True)
+        p.set_position(line)
+        self.calls.append((p.phase, line, go_args))
+        res, reason = p.outcome()
+        if res != "ongoing":
+            return ("win" if reason == "ruling41" else "resign"), {}
+        return self.rng.choice(sorted(p.legal_moves())), {"winrate": self.winrate}
+
+
+def test_kings_and_choose_can_be_fixed(tmp_path: Path):
+    """--kings・--choose: 両玉は渡したマスに置き（置く側は読まない）、選ぶ側は読みの勝率によらず渡した側を取る。
+    置く側は今までどおり交互なので、先後は局ごとに入れ替わる。"""
+    a, b = _RandFake(1, "A", winrate=0.9), _RandFake(2, "B", winrate=0.9)  # 読みでは先手を取りたがる
+    out = tmp_path / "m.jsonl"
+    s = run_match(a, b, 2, "nodes 1", out, kings=("K*3h", "K*7b"), choose="gote")
+    assert s["kings"] == ["K*3h", "K*7b"] and s["choose"] == "gote"
+    games = [json.loads(x) for x in out.read_text(encoding="utf-8").splitlines()]
+    for g, placer in zip(games, ("a", "b")):
+        assert g["tokens"].split()[:3] == ["K*3h", "K*7b", "choose:gote"]
+        assert g["placer"] == placer and g["chosen"] == "gote"
+        assert g["gote"] == ("b" if placer == "a" else "a") and g["sente"] == placer
+        k0, k1, c = g["moves"][:3]
+        assert (k0["place"], k1["place"]) == ("fixed", "fixed") and k0["by"] == k1["by"] == placer
+        assert c["choose"] == "gote" and c["fixed"] is True and c["winrate"] == 0.9  # 表示用に読みの値は残す
+    # 置く側は両玉を読まない（1 局目の a、2 局目の b が受けた最初の go は 3 手目以降の局面）
+    assert not any(line.endswith("position fuseki") for _, line, _ in a.calls + b.calls)
+
+
+def test_kings_must_be_legal_and_only_with_engine_fuseki(tmp_path: Path):
+    import pytest
+
+    with pytest.raises(ValueError):
+        run_match(_RandFake(1, "A"), _RandFake(2, "B"), 1, "nodes 1", tmp_path / "x.jsonl", kings=("K*5a", "K*5i"))  # 先手玉は敵陣に置けない
+    with pytest.raises(ValueError):
+        run_match(_RandFake(1, "A"), _RandFake(2, "B"), 1, "nodes 1", tmp_path / "y.jsonl", choose="sente",
+                  self_fuseki=True)
+
+
+def test_engine41_plays_both_seats_from_move_41(tmp_path: Path):
+    """--engine41（両陣）: 両玉・選択・布石 40 手は a・b が打ち、41 手目からは両席とも別のエンジンが指す。
+    そのエンジンは本将棋の局面（position sfen）しか受けず、go は --go41。勝ち負けは席で数える。"""
+    a, b = _RandFake(1, "A"), _RandFake(2, "B")
+    ya, yb = _RandFake(3, "Y"), _RandFake(4, "Y")
+    out = tmp_path / "m.jsonl"
+    s = run_match(a, b, 2, "nodes 1", out, go_args_b="nodes 2", e41={"a": ya, "b": yb}, go_args_41="nodes 1000")
+    assert s["engine41"] == {"a": "Y", "b": "Y"} and s["go_41"] == "nodes 1000"
+    games = [json.loads(x) for x in out.read_text(encoding="utf-8").splitlines()]
+    for g in games:
+        assert "choose:" in g["tokens"]
+        normal = [m for m in g["moves"] if m.get("ply", 0) > 40]
+        early = [m for m in g["moves"] if 0 < m.get("ply", 0) <= 40]
+        if g["plies"] > 40:
+            assert normal and all(m.get("engine41") for m in normal)
+        assert not any(m.get("engine41") for m in early)
+        # 棋譜を再生して同じ裁定になる
+        if g["reason"] not in ("resign", "declaration", "illegal_declaration", "illegal_move"):
+            p = ls.Position()
+            p.set_max_ply(320, True)
+            p.set_position("position fuseki moves " + g["tokens"])
+            assert p.outcome() == (g["result"], g["reason"])
+    assert all(ph == "normal" and line.startswith("position sfen ") and ga == "nodes 1000"
+               for e in (ya, yb) for ph, line, ga in e.calls)
+    assert ya.calls and yb.calls
+    # a・b は本将棋を指さない（41 手目の裁定の確かめだけは布石の局面を知るエンジンに聞く）
+    assert all(ph == "fuseki" or " moves" not in line for e in (a, b) for ph, line, _ in e.calls)
+    assert all(e.new_games == 2 for e in (a, b, ya, yb))
+
+
+def test_engine41_can_take_only_the_opponents_seat(tmp_path: Path):
+    """--engine41-side b: 41 手目から相手の席だけが別のエンジン（Libra 対 そのエンジン）。"""
+    a, b, yb = _RandFake(1, "A"), _RandFake(2, "B"), _RandFake(4, "Y")
+    out = tmp_path / "m.jsonl"
+    s = run_match(a, b, 2, "nodes 1", out, e41={"b": yb}, go_args_41="nodes 1000")
+    assert s["engine41"] == {"b": "Y"}
+    for line in out.read_text(encoding="utf-8").splitlines():
+        g = json.loads(line)
+        for m in g["moves"]:
+            if m.get("ply", 0) > 40:
+                assert bool(m.get("engine41")) == (m["by"] == "b")
+    assert any(ph == "normal" for ph, _, _ in a.calls)
+    assert all(ph == "normal" for ph, _, _ in yb.calls)
