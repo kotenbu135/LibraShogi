@@ -113,7 +113,9 @@ match_games = 40
 match_fuseki = "self"
 match_opponent = "~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc"
 match_opponent_cwd = "~/fuseki-shogi-ai"
-match_opponent_opt = "EvalDir=vendor/yaneuraou_eval,Threads=1,USI_Hash=256,USI_OwnBook=false,BookFile=no_book,EnteringKingRule=CSARule27"
+# EvalDir はやねうら王の実行ファイルのある場所（vendor/YaneuraOu/source）から見た相対。match_opponent_cwd からではない
+# （vendor/yaneuraou_eval と書くと nn.bin が見つからず、起動の 30 秒で落ちる。2026-09-26）
+match_opponent_opt = "EvalDir=../../yaneuraou_eval,Threads=1,USI_Hash=256,USI_OwnBook=false,BookFile=no_book,EnteringKingRule=CSARule27"
 # Libra 側は自己評価と同じ読み（[auto] eval_sims = 96、[search] mate_nodes_root = 200）にする。こうすると
 # 外部計測の点が `libra rating` の目盛りに乗る。違う読みにすると「ハンデ付きの自分と相手」だけで閉じた塊に
 # なり、強連結の条件で目盛りから丸ごと落ちる（2026-09-19〜20 のハンデ付きの計測が実際にそうだった）
