@@ -173,7 +173,7 @@
  "search_b": {
   "full_sims": 192
  },
- "seconds": 804.8,
+ "seconds": 781.3,
  "concurrent": 128,
  "resumed_games": 0,
  "a": "ckpt_000515078.pt",
