@@ -73,6 +73,9 @@ def test_apply_sets_does_not_touch_base_and_rejects_net():
     assert diff_of(cfg, out) == {"train.lambda_z": 1.0}
     with pytest.raises(ValueError):
         apply_sets(cfg, ["net.d_model=64"])
+    # 頭を足すだけの鍵は重みを引き継ぐ腕でも変えられる。ゼロから学習する腕（scratch）はネットの形も変えられる
+    assert apply_sets(cfg, ["net.opp_head=true", "train.opp_weight=0.15"])["net"]["opp_head"] is True
+    assert apply_sets(cfg, ["net.d_model=64", "net.n_layers=3"], scratch=True)["net"]["d_model"] == 64
     # 窓の作り方が同じ腕は同じ鍵になり、窓の大きさを変えた腕は別の鍵になる（窓を 1 つだけ持つためのグループ分け）
     assert window_key(cfg) == window_key(apply_sets(cfg, ["train.lambda_z=1.0"]))
     assert window_key(cfg) != window_key(apply_sets(cfg, ["train.window_games=1000"]))
@@ -186,3 +189,27 @@ def test_play_match_places_kings_uniformly_whatever_the_selfplay_bias(monkeypatc
     with pytest.raises(Stop):
         evaluate.play_match(None, None, {"full_sims": 8, "gote_rank4_prob": 0.05}, 1, 2, 1, 0, torch.device("cpu"), torch.float32)
     assert seen["gote_rank4_prob"] < 0
+
+
+def test_opp_arm_and_scratch_arms(tmp_path: Path):
+    """補助方策の腕は元の重みから引き継いで回り、scratch の腕は形の違うネットをゼロから同じ局面で学習する。"""
+    sd, _ = _run(tmp_path)
+    logs: list[str] = []
+    res = run_abtest(sd, load_config(None), sd.checkpoints / "latest.pt", ["a", "opp:net.opp_head=true,train.opp_weight=0.15"], [],
+                     steps=4, games=2, sims=8, concurrent=2, threads=2, seed=5, positions=64, every=2, vs_base=True, out_dir=tmp_path / "o1",
+                     device=torch.device("cpu"), chunk_index=None, games_total=None, log=logs.append)
+    assert "opp" in res["arms"]["opp"]["curve"][-1] and "opp" not in res["arms"]["a"]["curve"][-1]
+    assert res["arms"]["opp"]["n_params"] > res["arms"]["a"]["n_params"]
+    assert {(m["a"], m["b"]) for m in res["matches"]} == {("a", "opp"), ("a", "base"), ("opp", "base")}
+    opp = torch.load(tmp_path / "o1" / "opp.pt", map_location="cpu", weights_only=False)
+    assert opp["step"] == 11 and any(k.startswith("opp_head.") for k in opp["model"])
+    res = run_abtest(sd, load_config(None), sd.checkpoints / "latest.pt", ["small", "big:net.d_model=48,net.n_layers=3,train.accum_steps=2"],
+                     [], steps=4, games=0, sims=8, concurrent=2, threads=2, seed=5, positions=64, every=2, vs_base=False,
+                     out_dir=tmp_path / "o2", device=torch.device("cpu"), chunk_index=None, games_total=None, log=logs.append, scratch=True)
+    assert res["scratch"] and res["arms"]["big"]["n_params"] > res["arms"]["small"]["n_params"]
+    small = torch.load(tmp_path / "o2" / "small.pt", map_location="cpu", weights_only=False)
+    assert small["step"] == 4  # ゼロから（元の重みの step 7 を引き継がない）
+    with pytest.raises(ValueError):  # scratch でなければネットの形は変えられない
+        run_abtest(sd, load_config(None), sd.checkpoints / "latest.pt", ["big:net.d_model=48"], [], steps=1, games=0, sims=8,
+                   concurrent=2, threads=2, seed=5, positions=64, every=1, vs_base=False, out_dir=tmp_path / "o3",
+                   device=torch.device("cpu"), chunk_index=None, games_total=None, log=logs.append)

@@ -266,3 +266,38 @@ def test_runner_refuses_full_only(tmp_path: Path):
     sd.create()
     with pytest.raises(ValueError, match="full_only"):
         Runner(sd, cfg, device=torch.device("cpu"))
+
+
+def test_opp_targets_are_the_next_positions_policy_target(tmp_path: Path):
+    """補助方策「相手の次の手」の目標は、次の局面（手番は相手）の方策の目標そのもの。次が全読みでないときと最後の局面は無し。
+    opp を付けても乱数の引き方と他の目標は変わらない。"""
+    from libra_league.replay import MIRROR_TABLE, policy_targets, sample_batch
+
+    games = _games(6, 11)
+    cum = np.cumsum(np.array([len(g["moves"]) for g in games], dtype=np.int64))
+    a = sample_batch(games, 0, cum, 512, np.random.default_rng(3), 0.5, 1.0, 32, 320, True)
+    b = sample_batch(games, 0, cum, 512, np.random.default_rng(3), 0.5, 1.0, 32, 320, True, opp=True)
+    assert "opp_idx" not in a
+    for k in ("sq", "glob", "wdl", "policy_idx", "policy_p", "policy_valid"):
+        assert np.array_equal(a[k], b[k])
+    # 同じ乱数で局面の位置を引き直して、1 行ずつ確かめる
+    rng = np.random.default_rng(3)
+    pick = rng.integers(0, cum[-1], size=512)
+    mirror = rng.random(512) < 0.5
+    gi = np.searchsorted(cum, pick, side="right")
+    lens = np.diff(np.concatenate([[0], cum]))
+    mi = pick - (cum[gi] - lens[gi])
+    n_valid = 0
+    for r in range(512):
+        g, j = games[gi[r]], mi[r]
+        if j + 1 >= len(g["moves"]) or not g["full"][j + 1]:
+            assert not b["opp_valid"][r] and (b["opp_idx"][r] == -1).all()
+            continue
+        idx, p, v = policy_targets(games, gi[r:r + 1], np.array([j + 1]), mirror[r:r + 1], 32)
+        assert b["opp_valid"][r] == v[0] and np.array_equal(b["opp_idx"][r], idx[0]) and np.array_equal(b["opp_p"][r], p[0])
+        n_valid += int(v[0])
+        if mirror[r] and v[0]:
+            k = int((idx[0] >= 0).sum())
+            o0 = g["policy_off"][j + 1]
+            assert np.array_equal(b["opp_idx"][r][:k], MIRROR_TABLE[g["policy_idx"][o0:o0 + k].astype(np.int64)])
+    assert n_valid > 0

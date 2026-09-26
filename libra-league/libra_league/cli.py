@@ -199,6 +199,7 @@ def main(argv: list[str] | None = None) -> int:
     p_ab.add_argument("--no-vs-base", dest="vs_base", action="store_false", help="元の重みとの対局を省く")
     p_ab.add_argument("--chunk-index", type=int, default=None, help="窓の右端（既定: チェックポイントに保存された値）")
     p_ab.add_argument("--games-total", type=int, default=None, help="窓の大きさの計算に使う総局数（既定: 同上）")
+    p_ab.add_argument("--scratch", action="store_true", help="元の重みを引き継がず、腕ごとにネットの形（net.d_model など）を変えてゼロから学習する（大きいネットの確かめ）")
     p_ab.add_argument("--config-from", default="ckpt", choices=["ckpt", "run"], help="元にする設定（既定: チェックポイントに保存された設定）")
     p_ab.add_argument("--device", default=None)
     p_ab.add_argument("--out", default=None, help="出力先（既定: <root>/experiments/<時刻>-abtest）。稼働中の run には書かない")
@@ -391,7 +392,7 @@ def main(argv: list[str] | None = None) -> int:
         device = torch.device(a.device or ("cuda" if torch.cuda.is_available() else "cpu"))
         res = run_abtest(sd, cfg, ckpt, a.arm, a.set, a.steps, a.games, a.sims, a.concurrent, a.threads, a.seed, a.positions,
                          a.log_every, a.vs_base, out, device, a.chunk_index, a.games_total, lambda s: print(s, flush=True),
-                         config_from=a.config_from)
+                         config_from=a.config_from, scratch=a.scratch)
         print(format_abtest(res))
         print("written:", out / "abtest.json")
         if a.publish:
