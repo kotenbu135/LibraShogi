@@ -5,6 +5,7 @@
 幹: エンコーダ層 × L、d、2D 相対位置バイアス（筋差・段差ごとの学習パラメータ、ヘッド別）。
 ヘッド: 方策（81 × 28 = 2268、マスごとのトークンから）、価値 WDL（グローバルトークンから）、
        補助 V̂41（布石局面から 41 手目の探索値を予測、WDL と同じ 3 値）。
+       opp_head なら補助の相手の次の手（KataGo [Wu19] §3.4。学習だけで使い、forward と ONNX には出さない）。
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ class NetConfig:
     n_heads: int = 8
     d_ff: int = 1024
     dropout: float = 0.0
+    opp_head: bool = False  # 補助方策「相手の次の手」の頭を持つか。幹の形は変わらないので、無い重みから引き継げる
 
     @classmethod
     def from_dict(cls, d: dict) -> "NetConfig":
@@ -94,6 +96,8 @@ class LibraNet(nn.Module):
         self.policy_head = nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Linear(d, POLICY_CLASSES))
         self.value_head = nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Linear(d, 3))
         self.v41_head = nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Linear(d, 3))
+        if cfg.opp_head:  # 最後に作る（パラメータの並びの末尾に来るので、頭の無い AdamW の状態を引き継げる。Trainer.load_state_dict）
+            self.opp_head = nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Linear(d, POLICY_CLASSES))
         self.apply(self._init)
 
     @staticmethod
@@ -105,13 +109,24 @@ class LibraNet(nn.Module):
 
     def forward(self, sq: torch.Tensor, glob: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """sq: [B, 81, SQ_FEATS]、glob: [B, GLOB_FEATS] → (policy logits [B, 2268], wdl logits [B, 3], v41 logits [B, 3])"""
+        return self._heads(self._trunk(sq, glob))
+
+    def forward_aux(self, sq: torch.Tensor, glob: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """学習用: forward に相手の次の手の logits [B, 2268] を足す（opp_head のときだけ）。"""
+        x = self._trunk(sq, glob)
+        policy, wdl, v41 = self._heads(x)
+        return policy, wdl, v41, self.opp_head(x[:, :SQ_NB]).reshape(x.shape[0], POLICY_SIZE)
+
+    def _trunk(self, sq: torch.Tensor, glob: torch.Tensor) -> torch.Tensor:
         x_sq = self.sq_embed(sq) + self.pos_embed
         x_g = (self.glob_embed(glob) + self.glob_pos).unsqueeze(1)
         x = torch.cat([x_sq, x_g], dim=1)
         bias = self.rel().to(x.dtype)
         for blk in self.blocks:
             x = blk(x, bias)
-        x = self.ln_f(x)
+        return self.ln_f(x)
+
+    def _heads(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         policy = self.policy_head(x[:, :SQ_NB]).reshape(x.shape[0], POLICY_SIZE)
         g = x[:, SQ_NB]
         return policy, self.value_head(g), self.v41_head(g)

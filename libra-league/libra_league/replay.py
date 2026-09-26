@@ -201,18 +201,19 @@ class ReplayBuffer:
 
     # ---- サンプリング ----
     def sample(self, batch: int, rng: np.random.Generator, mirror_prob: float, lambda_z: float, topk: int = 32,
-               full_only: bool = False) -> dict:
+               full_only: bool = False, opp: bool = False) -> dict:
         """窓の全局面から一様に取る。full_only なら全読みの局面だけから一様に取る（KataGo [Wu19] §3.1 は全読みの手だけを
-        学習に記録する。既定 False は今までどおりで、乱数の引き方も変わらない）。"""
+        学習に記録する。既定 False は今までどおりで、乱数の引き方も変わらない）。opp なら相手の次の手の目標も付ける（sample_batch）。"""
         start = self._start()
         if full_only:
             if self._fcum is None or len(self._fcum) != len(self.games) - start:
                 self._fcum = np.cumsum(np.array([int(np.count_nonzero(g["full"])) for g in self.games[start:]], dtype=np.int64))
             return sample_batch(self.games, start, self._fcum, batch, rng, mirror_prob, lambda_z, topk, self.max_ply,
-                                self.count_from_41, full_only=True)
+                                self.count_from_41, full_only=True, opp=opp)
         if self._cum is None or len(self._cum) != len(self.games) - start:
             self._cum = np.cumsum(np.array(self._lens[start:], dtype=np.int64))
-        return sample_batch(self.games, start, self._cum, batch, rng, mirror_prob, lambda_z, topk, self.max_ply, self.count_from_41)
+        return sample_batch(self.games, start, self._cum, batch, rng, mirror_prob, lambda_z, topk, self.max_ply, self.count_from_41,
+                            opp=opp)
 
     def sample_heldout(self, batch: int, rng: np.random.Generator, mirror_prob: float, lambda_z: float, topk: int = 32) -> dict:
         held = self.heldout_games_list()
@@ -221,9 +222,12 @@ class ReplayBuffer:
 
 
 def sample_batch(games: list[dict], start: int, cum: np.ndarray, batch: int, rng: np.random.Generator, mirror_prob: float, lambda_z: float,
-                 topk: int, max_ply: int, count_from_41: bool, full_only: bool = False) -> dict:
+                 topk: int, max_ply: int, count_from_41: bool, full_only: bool = False, opp: bool = False) -> dict:
     """games[start:] の全局面から一様に batch 局面を取り、学習バッチを作る。cum は games[start:] の局面数の累積和。
-    full_only なら cum は全読みの局面数の累積和で、k 番目の全読みの局面を取る。"""
+    full_only なら cum は全読みの局面数の累積和で、k 番目の全読みの局面を取る。
+    opp なら補助方策「相手の次の手」の目標 opp_idx・opp_p・opp_valid も付ける（KataGo [Wu19] §3.4 の、次の手番で記録する方策の目標）。
+    次の局面が全読みのときだけ目標があり（方策の目標は全読みの局面にしか無い）、それ以外と終局の局面は opp_valid = False。
+    鏡映は今の局面と同じものを当てる。乱数の引き方は opp に関わらず同じ。"""
     if len(cum) == 0 or cum[-1] <= 0:
         raise ValueError("sample_batch: no positions")
     pick = rng.integers(0, cum[-1], size=batch)
@@ -257,6 +261,34 @@ def sample_batch(games: list[dict], start: int, cum: np.ndarray, batch: int, rng
         "fuseki_draw_target": float(wdl_t[fu, 1].sum()), "fuseki_draw_actual": float((z[fu] == 0).sum()),
         "fuseki_rootq_minus_z": float((rq - z)[fu].sum()), "normal_rootq_minus_z": float((rq - z)[nu].sum()),
     }
+    pidx, pp, valid = policy_targets(games, gi, mi, mirror, topk)
+    extra = {}
+    if opp:
+        nxt = mi + 1
+        ok = np.array([n < len(games[i]["moves"]) for i, n in zip(gi, nxt)], bool)
+        oidx, op, ovalid = policy_targets(games, gi, np.where(ok, nxt, mi), mirror, topk)
+        ovalid &= ok
+        oidx[~ok] = -1
+        op[~ok] = 0.0
+        extra = {"opp_idx": oidx, "opp_p": op, "opp_valid": ovalid}
+    return {
+        "sq": sq,
+        "glob": glob,
+        "wdl": wdl_t,
+        "v41": soft_wdl(v41),
+        "z": z,
+        "target_stats": target_stats,
+        "fuseki": fu,
+        "policy_idx": pidx,
+        "policy_p": pp,
+        "policy_valid": valid,
+        **extra,
+    }
+
+
+def policy_targets(games: list[dict], gi: np.ndarray, mi: np.ndarray, mirror: np.ndarray, topk: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """局面 (games[gi[b]], 手 mi[b]) の方策の目標（上位 topk 手の添字と確率）。全読みでない局面は valid = False。"""
+    batch = len(gi)
     pidx = np.full((batch, topk), -1, np.int64)
     pp = np.zeros((batch, topk), np.float32)
     valid = np.zeros(batch, bool)
@@ -275,15 +307,4 @@ def sample_batch(games: list[dict], start: int, cum: np.ndarray, batch: int, rng
         pidx[b, :k] = idx
         pp[b, :k] = g["policy_p"][o0 : o0 + k]
         valid[b] = True
-    return {
-        "sq": sq,
-        "glob": glob,
-        "wdl": wdl_t,
-        "v41": soft_wdl(v41),
-        "z": z,
-        "target_stats": target_stats,
-        "fuseki": fu,
-        "policy_idx": pidx,
-        "policy_p": pp,
-        "policy_valid": valid,
-    }
+    return pidx, pp, valid

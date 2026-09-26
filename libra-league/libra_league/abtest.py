@@ -12,7 +12,10 @@
 - `gen_z`: 目標を λ = 1.0（実際の勝敗 z）にして測る。**腕の間で同じ物差し**になるので比較に使う。
 - `gen_own`: 腕自身の λ で測る。学習の損失と同じ物差し（自分の目標にどれだけ当たっているか）。
 
-扱うのは学習側の設定（[train] の値、例 `lambda_z`）。探索の設定（[search]）は窓の中の棋譜と方策の目標を
+扱うのは学習側の設定（[train] の値、例 `lambda_z`）と、幹を変えない補助の頭（`net.opp_head`。頭だけ初期値から始める）。
+`scratch` なら元の重みを引き継がず、腕ごとにネットの形（[net]）を変えてゼロから学習する（大きいネットの確かめ。KataGo [Wu19] §2 は
+次の大きさのネットを同じデータで並行して学習し、損失が追いついたら切り替える）。窓・held-out・学習する局面の並びは同じ。
+探索の設定（[search]）は窓の中の棋譜と方策の目標を
 作り直さないと比べられないので、この命令では変えても意味がない（σ の形の比較は `libra eval --b-set`）。
 """
 from __future__ import annotations
@@ -36,6 +39,8 @@ from .trainer import Trainer
 
 # 腕ごとに変えてはいけない鍵（窓と held-out の作り方はグループ分けで扱う。ネットの形を変えると重みを引き継げない）
 FIXED_SECTIONS = ("net",)
+# 重みを引き継ぐときでも変えてよい [net] の鍵（幹の形を変えず、頭を足すだけ）
+NET_HEAD_KEYS = ("opp_head",)
 WINDOW_KEYS = ("window_games", "window_frac", "window_games_max")
 
 
@@ -46,6 +51,13 @@ def parse_set(spec: str) -> tuple[str, str, Any]:
         raise ValueError(f"--set/--arm の上書きは <節>.<鍵>=<値> の形で書く: {spec!r}")
     path, value = spec.split("=", 1)
     section, key = path.split(".", 1)
+    if section == "net" and key in NetConfig.__dataclass_fields__ and key not in DEFAULTS["net"]:
+        cur = NetConfig.__dataclass_fields__[key].default
+        if isinstance(cur, bool):
+            if value.lower() not in ("true", "false"):
+                raise ValueError(f"{section}.{key} は true / false: {value!r}")
+            return section, key, value.lower() == "true"
+        return section, key, type(cur)(value)
     if section not in DEFAULTS or not isinstance(DEFAULTS[section], dict) or key not in DEFAULTS[section]:
         raise ValueError(f"設定に無い鍵: {section}.{key}")
     cur = DEFAULTS[section][key]
@@ -70,11 +82,12 @@ def parse_arm(spec: str) -> tuple[str, list[str]]:
     return name, sets
 
 
-def apply_sets(cfg: dict, sets: list[str]) -> dict:
+def apply_sets(cfg: dict, sets: list[str], scratch: bool = False) -> dict:
+    """上書きを当てた写し。[net] は scratch（ゼロから学習）なら何でも、そうでなければ頭を足す鍵（NET_HEAD_KEYS）だけ変えられる。"""
     out = copy.deepcopy(cfg)
     for spec in sets:
         section, key, value = parse_set(spec)
-        if section in FIXED_SECTIONS:
+        if section in FIXED_SECTIONS and not (scratch or key in NET_HEAD_KEYS):
             raise ValueError(f"[{section}] は腕ごとに変えられない（重みを引き継げない）: {spec}")
         out.setdefault(section, {})[key] = value
     return out
@@ -114,23 +127,28 @@ def mean_rows(rows: list[dict], keys: tuple[str, ...]) -> dict:
 
 
 LOSS_KEYS = ("loss", "policy", "value", "v41", "policy_acc")
+AUX_KEYS = ("opp",)
 
 
-def train_arm(base_sd: dict, cfg: dict, rb: ReplayBuffer, steps: int, seed: int, device: torch.device, positions: int,
+def train_arm(base_sd: dict | None, cfg: dict, rb: ReplayBuffer, steps: int, seed: int, device: torch.device, positions: int,
               out_ckpt: Path, every: int, log) -> dict:
-    """base_sd（重み＋AdamW の状態）から steps だけ学習し、腕の重みを out_ckpt に保存して物差しを返す。"""
+    """base_sd（重み＋AdamW の状態）から steps だけ学習し、腕の重みを out_ckpt に保存して物差しを返す。base_sd が None ならゼロから。"""
     tr = cfg["train"]
     model = LibraNet(NetConfig.from_dict(cfg["net"])).to(device)
     trainer = Trainer(model, tr, device)
-    trainer.load_state_dict(base_sd)
+    if base_sd is not None:
+        trainer.load_state_dict(base_sd)
+    n_params = model.n_params()
+    log(f"  net {cfg['net']} ({n_params:,} params){'' if base_sd is not None else ' from scratch'}")
     rng = np.random.default_rng(seed)  # 腕の間で同じ局面・同じ鏡映になる（対になった比較）
     t0 = time.time()
     curve, acc = [], []
     for i in range(steps):
-        batch = rb.sample(tr["batch_size"], rng, tr["mirror_prob"], tr["lambda_z"], cfg["search"]["policy_topk"], bool(tr.get("full_only", False)))
+        batch = rb.sample(tr["batch_size"], rng, tr["mirror_prob"], tr["lambda_z"], cfg["search"]["policy_topk"], bool(tr.get("full_only", False)),
+                          opp=trainer.aux)
         acc.append(trainer.step(batch))
         if len(acc) >= every or i + 1 == steps:
-            row = {"step": trainer.step_count, **mean_rows(acc, LOSS_KEYS)}
+            row = {"step": trainer.step_count, **mean_rows(acc, LOSS_KEYS + tuple(k for k in AUX_KEYS if k in acc[0]))}
             curve.append(row)
             log(f"  {i + 1}/{steps} steps ({time.time() - t0:.0f}s): loss {row['loss']} policy {row['policy']} value {row['value']} v41 {row['v41']}")
             acc = []
@@ -142,7 +160,7 @@ def train_arm(base_sd: dict, cfg: dict, rb: ReplayBuffer, steps: int, seed: int,
     del model, trainer
     if device.type == "cuda":
         torch.cuda.empty_cache()
-    return {"steps": steps, "seconds": round(time.time() - t0, 1), "curve": curve, "gen_z": gen_z, "gen_own": gen_own, "ckpt": str(out_ckpt)}
+    return {"steps": steps, "seconds": round(time.time() - t0, 1), "n_params": n_params, "curve": curve, "gen_z": gen_z, "gen_own": gen_own, "ckpt": str(out_ckpt)}
 
 
 def play_pairs(ckpts: dict[str, Path], pairs: list[tuple[str, str]], scfg: dict, games: int, concurrent: int, threads: int,
@@ -166,14 +184,15 @@ def play_pairs(ckpts: dict[str, Path], pairs: list[tuple[str, str]], scfg: dict,
 
 def run_abtest(sd: StateDir, base_cfg: dict, ckpt: Path, arms: list[str], base_sets: list[str], steps: int, games: int, sims: int,
                concurrent: int, threads: int, seed: int, positions: int, every: int, vs_base: bool, out_dir: Path,
-               device: torch.device, chunk_index: int | None, games_total: int | None, log, config_from: str = "ckpt") -> dict:
+               device: torch.device, chunk_index: int | None, games_total: int | None, log, config_from: str = "ckpt",
+               scratch: bool = False) -> dict:
     base_sd = torch.load(ckpt, map_location="cpu", weights_only=False)
     ck_state = base_sd.get("state", {}) or {}
     ck_cfg = base_sd.get("config") or {}
     if config_from == "ckpt" and ck_cfg.get("train") and ck_cfg.get("search"):
         log("config: チェックポイントに保存された設定を使う（--config-from run で config.toml に切り替え）")
         base_cfg = ck_cfg
-    cfg0 = apply_sets(base_cfg, base_sets)
+    cfg0 = apply_sets(base_cfg, base_sets, scratch)
     ci = chunk_index if chunk_index is not None else int(ck_state.get("chunk_index", 0))
     gt = games_total if games_total is not None else int(ck_state.get("games_total", 0))
     if ci <= 0:
@@ -181,11 +200,11 @@ def run_abtest(sd: StateDir, base_cfg: dict, ckpt: Path, arms: list[str], base_s
     parsed = [parse_arm(a) for a in arms]
     if len({n for n, _ in parsed}) != len(parsed):
         raise ValueError("腕の名前が重なっている")
-    cfgs = {name: apply_sets(cfg0, sets) for name, sets in parsed}
+    cfgs = {name: apply_sets(cfg0, sets, scratch) for name, sets in parsed}
     out_dir.mkdir(parents=True, exist_ok=True)
     res: dict[str, Any] = {
         "schema": 1, "run": sd.root.name, "ckpt": str(ckpt), "ckpt_step": int(base_sd.get("step", 0)),
-        "chunk_index": ci, "games_total": gt, "steps": steps, "seed": seed, "device": str(device),
+        "chunk_index": ci, "games_total": gt, "steps": steps, "seed": seed, "device": str(device), "scratch": scratch,
         "started": time.strftime("%Y-%m-%d %H:%M:%S"),
         "base_sets": base_sets, "arms": {name: {"diff": diff_of(cfg0, cfgs[name])} for name, _ in parsed},
     }
@@ -202,7 +221,8 @@ def run_abtest(sd: StateDir, base_cfg: dict, ckpt: Path, arms: list[str], base_s
         for name in names:
             log(f"train arm {name} ({steps} steps)")
             out_ckpt = out_dir / f"{name}.pt"
-            res["arms"][name].update(train_arm(base_sd, cfgs[name], rb, steps, seed, device, positions, out_ckpt, every, log))
+            res["arms"][name].update(train_arm(None if scratch else base_sd, cfgs[name], rb, steps, seed, device, positions, out_ckpt,
+                                               every, log))
             res["arms"][name]["window_games"] = rb.n_games()
             ckpts[name] = out_ckpt
             write_json_atomic(out_dir / "abtest.json", res)
@@ -251,14 +271,16 @@ def _scrub_text(text: str) -> str:
 
 def format_abtest(res: dict) -> str:
     lines = [f"ckpt {res['ckpt']} step {res['ckpt_step']} / window at chunk {res['chunk_index']} ({res['games_total']} games)"
-             f" / {res['steps']} steps / seed {res['seed']}"]
+             f" / {res['steps']} steps / seed {res['seed']}" + (" / from scratch" if res.get("scratch") else "")]
     for name, arm in res["arms"].items():
-        lines.append(f"[{name}] {arm.get('diff') or '(base)'}")
+        size = f" {arm['n_params']:,} params, {arm['seconds']}s" if "n_params" in arm else ""
+        lines.append(f"[{name}] {arm.get('diff') or '(base)'}{size}")
         curve = arm.get("curve") or []
         if curve:
             f, l = curve[0], curve[-1]
             lines.append(f"  loss {f['loss']}→{l['loss']} (policy {f['policy']}→{l['policy']}, value {f['value']}→{l['value']},"
-                         f" v41 {f['v41']}→{l['v41']}, acc {f['policy_acc']}→{l['policy_acc']})")
+                         f" v41 {f['v41']}→{l['v41']}, acc {f['policy_acc']}→{l['policy_acc']}"
+                         + (f", opp {f['opp']}→{l['opp']}" if "opp" in l else "") + ")")
         for which in ("gen_z", "gen_own"):
             g = arm.get(which)
             if not g:

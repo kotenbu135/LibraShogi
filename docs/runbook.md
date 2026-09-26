@@ -281,6 +281,22 @@ Y=~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc   # 手元のやね
 - 目安の時間（RTX 5070 Ti を専有、窓 47 万局、5,000 step、1,000 局 × 3）: 窓の読み込み 1〜2 分、腕 1 つの学習 約 11 分、対局 1 本 約 8 分で**合わせて 1 時間前後**。GPU を使うので、回す間は ls・lx を停止する（CLAUDE.md「稼働中のランの扱い」）。
 - 扱うのは学習側（`[train]`）の設定。探索（`[search]`）の設定は窓の中の棋譜と方策の目標を作り直さないと比べられないので、この命令では変えても意味がない。
 
+**補助方策「相手の次の手」（`net.opp_head`・`train.opp_weight`）を比べるとき**は、頭を足した腕を作る。頭は幹の形を変えないので元の重みと AdamW の状態を引き継ぎ、頭だけ初期値から学ぶ（ONNX には出ない）。ランでは使えない（起動で断る）。
+
+```bash
+~/LibraShogi/bin/libra abtest --ckpt ~/libra-run/ls/checkpoints/archive/ckpt_000515078.pt \
+  --arm base --arm opp:net.opp_head=true,train.opp_weight=0.15 --steps 5000 --games 1000 --no-vs-base \
+  --out ~/libra-run/experiments/2026-09-26-opp --publish
+```
+
+**大きいネットを確かめるとき**は `--scratch` を付ける。元の重みを引き継がず、腕ごとにネットの形（`net.d_model` など）を変えて**同じ窓・同じ局面の並びでゼロから**学習し、held-out の当たり具合と腕どうしの対局で比べる（KataGo [Wu19] §2 が次の大きさを同じデータで並行して学習したのに倣う）。窓の位置は `--ckpt` の節目のもの。大きいネットがメモリに載らなければ `--set train.accum_steps=2`（バッチを半分ずつ流して勾配を足す。全部の腕に当てて条件をそろえる）。
+
+```bash
+~/LibraShogi/bin/libra abtest --scratch --ckpt ~/libra-run/ls/checkpoints/archive/ckpt_000515078.pt \
+  --arm s10m --arm m30m:net.d_model=512,net.n_layers=10,net.d_ff=2048 --set train.accum_steps=2 \
+  --steps 30000 --games 1000 --no-vs-base --out ~/libra-run/experiments/2026-09-26-scratch --publish
+```
+
 **探索の σ の形（`gumbel_rescale`）を比べるとき**は、同じ重みで側ごとに σ を変えて打つ（`libra eval --b-set`。B 側＝奇数枠の先手だけ別の設定で読む）。
 
 ```bash
