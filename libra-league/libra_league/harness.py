@@ -293,11 +293,15 @@ def run_match(a: UsiEngine, b: UsiEngine, n_games: int, go_args: str, out_jsonl:
               count_from_41: bool = True, log=None, first_placer: str = "a", go_args_b: str | None = None,
               openings: list[str] | None = None, self_fuseki: bool = False, place: str = "engine",
               place_seed: int = 0, kings: tuple[str, str] | None = None, choose: str | None = None,
-              e41: dict | None = None, go_args_41: str | None = None) -> dict:
+              e41: dict | None = None, go_args_41: str | None = None, opening_file: Path | None = None) -> dict:
     """self_fuseki なら布石を a 側だけで打ち（両陣とも同じ Libra）、41 手目から本将棋を a 対 b で指す。
     openings（41 手目の局面の一覧）を渡せば布石を作らずそれを使う。どちらも**同じ局面を先後入れ替えて
     2 局ずつ**打つので、布石の有利不利が打ち消し合う。kings・choose は両玉と先後の決め打ち（布石を作る形のときだけ）、
-    e41 は 41 手目から席（'a' | 'b'）を替えるエンジン。"""
+    e41 は 41 手目から席（'a' | 'b'）を替えるエンジン。
+
+    opening_file は self_fuseki の布石の控え（1 行 1 布石の JSONL、`sfen41` と `fuseki`）。j 番目の布石が控えにあれば
+    作らずにそれを使い、無ければ作って書き足す。相手の読む量の段ごとに同じ控えを渡すと、段をまたいで同じ布石になる
+    （エンジンは根の乱数の種を時刻から取り、読みも複数スレッドなので、同じ種を渡しても布石はそろわない。2026-09-26）。"""
     if (kings or choose) and (openings or self_fuseki):
         raise ValueError("kings・choose は両玉から打つ形（openings も self_fuseki も無し）のときだけ")
     m = Match(a, b, go_args, max_ply, count_from_41, log, go_args_b=go_args_b, place=place, place_seed=place_seed,
@@ -310,6 +314,17 @@ def run_match(a: UsiEngine, b: UsiEngine, n_games: int, go_args: str, out_jsonl:
                "go_41": m.go_args_41 if m.e41 else None}
     out_jsonl.parent.mkdir(parents=True, exist_ok=True)
     opening: tuple[str, list[str]] | None = None
+    saved: list[tuple[str, list[str]]] = []
+    if self_fuseki and opening_file is not None and Path(opening_file).exists():
+        for line in Path(opening_file).read_text(encoding="utf-8").splitlines():
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # 書きかけで落ちた最後の行
+            if r.get("sfen41"):
+                saved.append((r["sfen41"], str(r.get("fuseki") or "").split()))
+    if self_fuseki and opening_file is not None:
+        summary["openings_reused"] = 0
     with open(out_jsonl, "a", encoding="utf-8") as f:
         for i in range(n_games):
             placer = first_placer if i % 2 == 0 else ("b" if first_placer == "a" else "a")
@@ -319,9 +334,20 @@ def run_match(a: UsiEngine, b: UsiEngine, n_games: int, go_args: str, out_jsonl:
                 if openings:
                     opening = (openings[(i // 2) % len(openings)], [])
                 elif i % 2 == 0 or opening is None:
-                    opening = m.make_opening()
-                    if opening is None:
-                        raise RuntimeError("布石を作れなかった（41 手目まで進む布石が取れない）")
+                    j = i // 2
+                    if j < len(saved):
+                        opening = saved[j]
+                        summary["openings_reused"] += 1
+                    else:
+                        opening = m.make_opening()
+                        if opening is None:
+                            raise RuntimeError("布石を作れなかった（41 手目まで進む布石が取れない）")
+                        if opening_file is not None:
+                            Path(opening_file).parent.mkdir(parents=True, exist_ok=True)
+                            with open(opening_file, "a", encoding="utf-8") as fo:
+                                fo.write(json.dumps({"sfen41": opening[0], "fuseki": " ".join(opening[1])},
+                                                    ensure_ascii=False) + "\n")
+                            saved.append(opening)
                 g = m.play_from_sfen(opening[0], "a" if i % 2 == 0 else "b", i, fuseki=opening[1] or None)
             else:
                 g = m.play(placer, i)

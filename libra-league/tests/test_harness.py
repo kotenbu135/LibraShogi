@@ -325,3 +325,26 @@ def test_engine41_can_take_only_the_opponents_seat(tmp_path: Path):
                 assert bool(m.get("engine41")) == (m["by"] == "b")
     assert any(ph == "normal" for ph, _, _ in a.calls)
     assert all(ph == "normal" for ph, _, _ in yb.calls)
+
+
+def test_self_fuseki_reuses_the_saved_openings_across_levels(tmp_path: Path):
+    """--fuseki self と --opening-file: 最初の段が作った布石を控えに残し、次の段は作らずに同じ布石で打つ。
+    エンジンの乱数は種を渡してもそろわないので、段どうしの比較を対にするにはこれが要る（2026-09-26）。"""
+    ofile = tmp_path / "auto.openings.jsonl"
+    first = run_match(_RandFake(1, "A"), _RandFake(2, "B"), 4, "nodes 1", tmp_path / "1.jsonl",
+                      self_fuseki=True, opening_file=ofile)
+    saved = [json.loads(x) for x in ofile.read_text(encoding="utf-8").splitlines()]
+    assert len(saved) == 2 and first["openings_reused"] == 0
+    # 乱数の違う a で打っても、布石は控えのまま（a に布石を作らせない）
+    a2 = _RandFake(99, "A")
+    second = run_match(a2, _RandFake(98, "B"), 4, "nodes 1", tmp_path / "2.jsonl", self_fuseki=True, opening_file=ofile)
+    assert second["openings_reused"] == 2
+    assert not any(ph == "fuseki" for ph, _, _ in a2.calls)
+    g1 = [json.loads(x) for x in (tmp_path / "1.jsonl").read_text(encoding="utf-8").splitlines()]
+    g2 = [json.loads(x) for x in (tmp_path / "2.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [g["sfen41"] for g in g1] == [g["sfen41"] for g in g2]
+    assert [g["fuseki"] for g in g1] == [g["fuseki"] for g in g2]
+    # 局数が多い段は、足りない分だけ作って書き足す
+    third = run_match(_RandFake(5, "A"), _RandFake(6, "B"), 6, "nodes 1", tmp_path / "3.jsonl", self_fuseki=True,
+                      opening_file=ofile)
+    assert third["openings_reused"] == 2 and len(ofile.read_text(encoding="utf-8").splitlines()) == 3
