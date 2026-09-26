@@ -186,8 +186,10 @@ GPU を L-S と共有するので、計測中は ls・lx を停止するか、�
   --go "nodes 96" --go-opp "nodes 10000" --libra-opt Mate_Nodes=200 --libra-standard \
   --ckpt ~/libra-run/ls/checkpoints/archive/ckpt_000246009.pt \
   --opponent ~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc --opponent-cwd ~/fuseki-shogi-ai \
-  --opponent-opt EvalDir=vendor/yaneuraou_eval --opponent-opt Threads=1
+  --opponent-opt EvalDir=../../yaneuraou_eval --opponent-opt Threads=1
 ```
+
+**やねうら王の `EvalDir` は、実行ファイルのある場所（`vendor/YaneuraOu/source`）から見た相対で書く**（`../../yaneuraou_eval`）。`--opponent-cwd`・`--engine41-cwd`（作業フォルダ）からではない。`vendor/yaneuraou_eval` と書くと `vendor/YaneuraOu/source/vendor/yaneuraou_eval/nn.bin` を探して `failed to read nn.bin : FileNotFound` で起動に失敗する（2026-09-26 に確かめた。絶対パスでもよいが、リポジトリの設定には書かない）。
 
 両玉を読みで置く形（`--place search`、2026-09-25）: Libra 同士を読み 1600 回などで打たせると、読み 96 回で作った玉配置表の組は釣り合わず、選ぶ側だけが得をする。`--place search` にすると、置く側は先手玉を乱数で置き、後手玉は四段目を除く 27 マスをそれぞれ読んで先手の勝率が 0.5 にいちばん近いマスに置く（1 局に 27 手ぶんの読みが増える。`--fuseki engine` のときだけ）。
 
@@ -210,7 +212,7 @@ Y=~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc   # 手元のやね
 ~/LibraShogi/bin/libra match --games 2 --go "nodes 1600" --model $M --kings 5i,5a --choose sente \
   --opponent ~/LibraShogi/bin/libra-usi --opponent-cwd ~/LibraShogi --opponent-opt DNN_Model=$M --opponent-opt Declare_Win=true \
   --engine41 $Y --engine41-cwd ~/fuseki-shogi-ai --go41 "nodes 1000000" \
-  --engine41-opt EvalDir=vendor/yaneuraou_eval --engine41-opt Threads=1 --engine41-opt USI_Hash=256 \
+  --engine41-opt EvalDir=../../yaneuraou_eval --engine41-opt Threads=1 --engine41-opt USI_Hash=256 \
   --engine41-opt USI_OwnBook=false --engine41-opt BookFile=no_book --engine41-opt EnteringKingRule=CSARule27 \
   --out ~/tenbin-shogi-web/video/kifu-yane.jsonl
 # Libra 対 水匠5（41 手目から相手の席だけを替える）: 上に --engine41-side b を足す
