@@ -95,7 +95,7 @@ def test_opp_head_starts_from_weights_without_it():
     sq = torch.zeros(2, 81, ls.SQ_FEATS)
     glob = torch.zeros(2, ls.GLOB_FEATS)
     three, four = new.model(sq, glob), new.model.forward_aux(sq, glob)
-    assert len(three) == 3 and len(four) == 4 and four[3].shape == (2, ls.POLICY_SIZE)
+    assert len(three) == 3 and len(four) == 4 and four[3]["opp"].shape == (2, ls.POLICY_SIZE) and "own" not in four[3]
     for a, b in zip(three, four):
         assert torch.equal(a, b)
     # 頭の無い重みに頭のある重みを戻そうとしたら誤り（黙って捨てない）
@@ -117,3 +117,29 @@ def test_accum_steps_splits_the_batch():
         torch.testing.assert_close(p, q, rtol=0, atol=5e-4)
     with pytest.raises(ValueError):
         Trainer(copy.deepcopy(base), {**_cfg("none"), "accum_steps": 3}, torch.device("cpu")).step(batch)
+
+
+def test_own_head_learns_survival_targets_only_on_pieces():
+    """補助「駒が最後まで残るか」: 目標 -1（空きか玉）のマスは損失に入らない。頭は opp_head と一緒にも、単独でも足せる。"""
+    torch.manual_seed(0)
+    old = Trainer(LibraNet(SMALL), _cfg("none"), torch.device("cpu"))
+    old.step(_batch(8, 0))
+    with pytest.raises(ValueError):
+        Trainer(LibraNet(SMALL), {**_cfg("none"), "own_weight": 1.5}, torch.device("cpu"))
+    net = NetConfig(**{**SMALL.__dict__, "opp_head": True, "own_head": True})
+    tr = Trainer(LibraNet(net), {**_cfg("none"), "opp_weight": 0.15, "own_weight": 1.5}, torch.device("cpu"))
+    tr.load_state_dict(copy.deepcopy(old.state_dict()))
+    r = np.random.default_rng(3)
+    b = _opp(_batch(8, 3), 3)
+    own = np.where(r.random((8, 81)) < 0.3, r.integers(0, 2, (8, 81)), -1).astype(np.float32)
+    out = tr.step({**b, "own": own})
+    assert out["own"] > 0 and out["opp"] > 0
+    # 目標の無いマスの値を変えても損失は変わらない
+    m = LibraNet(net)
+    t1 = Trainer(copy.deepcopy(m), {**_cfg("none"), "opp_weight": 0.15, "own_weight": 1.5, "lr": 0.0}, torch.device("cpu"))
+    t2 = Trainer(copy.deepcopy(m), {**_cfg("none"), "opp_weight": 0.15, "own_weight": 1.5, "lr": 0.0}, torch.device("cpu"))
+    own2 = own.copy()
+    own2[own < 0] = -1.0
+    assert t1.step({**b, "own": own})["own"] == t2.step({**b, "own": own2})["own"]
+    sq, glob = torch.zeros(2, 81, ls.SQ_FEATS), torch.zeros(2, ls.GLOB_FEATS)
+    assert tr.model.forward_aux(sq, glob)[3]["own"].shape == (2, 81) and len(tr.model(sq, glob)) == 3

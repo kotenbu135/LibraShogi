@@ -164,6 +164,64 @@ PYBIND11_MODULE(_sim, m) {
             fu_(i) = pos.phase() == PHASE_FUSEKI ? 1 : 0;
           }
         });
+  // 学習用（補助の「駒が最後まで残るか」、KataGo [Wu19] §4.1 の陣地の予測の将棋版）: ply 手目の局面の盤上の駒（玉を除く）が、
+  // 記録の最後の手まで取られずに盤に残るか。surv_out [N,81] を特徴と同じマスの並び（手番側から見た向き・鏡映）で書く:
+  // 1 = 残る、0 = 途中で取られる、-1 = 空きか玉（学習に使わない）。成っても同じ駒として数える。
+  m.def("replay_survival",
+        [](py::array_t<std::int32_t> kb, py::array_t<std::int32_t> kw, py::list moves_list, py::array_t<std::int32_t> plies,
+           py::array_t<std::uint8_t> mirror, py::array_t<float, py::array::c_style> surv_out, int max_ply, bool count_from_41) {
+          int n = int(plies.shape(0));
+          std::vector<py::array_t<std::uint32_t, py::array::c_style | py::array::forcecast>> mv;
+          mv.reserve(n);
+          for (int i = 0; i < n; ++i) mv.push_back(moves_list[i].cast<py::array_t<std::uint32_t, py::array::c_style | py::array::forcecast>>());
+          auto kb_ = kb.unchecked<1>();
+          auto kw_ = kw.unchecked<1>();
+          auto pl_ = plies.unchecked<1>();
+          auto mi_ = mirror.unchecked<1>();
+          float* out = surv_out.mutable_data();
+          std::vector<const std::uint32_t*> ptrs(n);
+          std::vector<int> lens(n);
+          for (int i = 0; i < n; ++i) {
+            ptrs[i] = mv[i].data();
+            lens[i] = int(mv[i].shape(0));
+          }
+          py::gil_scoped_release nogil;
+          Position pos;
+          for (int i = 0; i < n; ++i) {
+            pos.reset(MODE_TENBIN);
+            pos.set_max_ply(max_ply, count_from_41);
+            pos.do_move(make_drop(KING, kb_(i)));
+            pos.do_move(make_drop(KING, kw_(i)));
+            int target = pl_(i);
+            int k = 0;
+            for (; k + 2 < target && k < lens[i]; ++k) pos.do_move(Move(ptrs[i][k]));
+            float* row = out + size_t(i) * SQ_NB;
+            Color us = pos.turn();
+            bool mirror = mi_(i) != 0;
+            int tag[SQ_NB];  // マス → いま置いてある、追いかけている駒の元のマス（無ければ -1）
+            for (int sq = 0; sq < SQ_NB; ++sq) {
+              Piece p = pos.piece_on(sq);
+              bool track = p != NO_PIECE && type_of(p) != KING;
+              tag[sq] = track ? sq : -1;
+              int t = to_mover_frame(us, sq);
+              row[mirror ? mirror_sq(t) : t] = track ? 1.0f : -1.0f;
+            }
+            for (; k < lens[i]; ++k) {  // 手を盤の上だけで追う（取る手・動かす手・打つ手）。局面は進めなくてよい
+              Move m = Move(ptrs[i][k]);
+              int to = to_sq(m);
+              if (tag[to] >= 0) {
+                int t = to_mover_frame(us, tag[to]);
+                row[mirror ? mirror_sq(t) : t] = 0.0f;
+              }
+              if (is_drop(m)) {
+                tag[to] = -1;
+              } else {
+                tag[to] = tag[from_sq(m)];
+                tag[from_sq(m)] = -1;
+              }
+            }
+          }
+        });
   m.def("mirror_index", &mirror_index);
   m.attr("POLICY_SIZE") = POLICY_SIZE;
   m.attr("POLICY_CLASSES") = POLICY_CLASSES;

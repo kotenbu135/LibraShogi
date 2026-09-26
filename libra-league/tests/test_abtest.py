@@ -213,3 +213,17 @@ def test_opp_arm_and_scratch_arms(tmp_path: Path):
         run_abtest(sd, load_config(None), sd.checkpoints / "latest.pt", ["big:net.d_model=48"], [], steps=1, games=0, sims=8,
                    concurrent=2, threads=2, seed=5, positions=64, every=1, vs_base=False, out_dir=tmp_path / "o3",
                    device=torch.device("cpu"), chunk_index=None, games_total=None, log=logs.append)
+
+
+def test_scratch_arms_with_aux_heads(tmp_path: Path):
+    """ゼロからの比べに補助の頭（相手の次の手・駒が残るか）の腕を並べられる。頭の無い腕とは同じ局面を学ぶ。"""
+    sd, _ = _run(tmp_path)
+    res = run_abtest(sd, load_config(None), sd.checkpoints / "latest.pt",
+                     ["s", "opp:net.opp_head=true,train.opp_weight=0.15", "own:net.own_head=true,train.own_weight=1.5"], [],
+                     steps=3, games=0, sims=8, concurrent=2, threads=2, seed=5, positions=64, every=3, vs_base=False,
+                     out_dir=tmp_path / "o", device=torch.device("cpu"), chunk_index=None, games_total=None, log=lambda s: None,
+                     scratch=True)
+    last = {n: res["arms"][n]["curve"][-1] for n in ("s", "opp", "own")}
+    assert "own" in last["own"] and "opp" not in last["own"] and "opp" in last["opp"] and "own" not in last["s"]
+    own = torch.load(tmp_path / "o" / "own.pt", map_location="cpu", weights_only=False)
+    assert own["step"] == 3 and any(k.startswith("own_head.") for k in own["model"])
