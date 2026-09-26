@@ -253,3 +253,15 @@ def test_libra_standard_stays_on_the_main_scale(tmp_path):
            opp_opt={"Threads": "1"}, libra_opt={"Mate_Nodes": "200"}, standard=True)
     got = sorted((p["a"], p["b"]) for p in pairs_of(sd))
     assert got == [("step 1,600", "外部エンジン [Threads=1, nodes 10000]")]
+
+
+def test_matches_handed_to_another_engine_at_move_41_stay_off_the_scale(tmp_path):
+    """41 手目から席を別のエンジンが指した対局（`--engine41`）は Libra 対 相手の強さではないので、目盛りに乗せない。"""
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    _match(sd, "a.summary.json", 1600, 40, 36.0)
+    _match(sd, "b.summary.json", 1600, 40, 2.0)
+    r = json.loads((sd.root / "matches" / "b.summary.json").read_text(encoding="utf-8"))
+    r["engine41"] = {"a": "YaneuraOu", "b": "YaneuraOu"}
+    (sd.root / "matches" / "b.summary.json").write_text(json.dumps(r), encoding="utf-8")
+    assert [(p["n"], p["score_a"]) for p in pairs_of(sd)] == [(40, 0.9)]

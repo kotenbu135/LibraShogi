@@ -199,6 +199,23 @@ M=$HOME/libra-run/ls/checkpoints/latest.onnx
   --out ~/tenbin-shogi-web/video/kifu-1600.jsonl
 ```
 
+両玉と先後を決め打ちする形（`--kings`・`--choose`、2026-09-26）: `--kings 5i,5a` で両玉を渡したマス（先手玉,後手玉）に置き、置く側は読まない。`--choose sente|gote` で選ぶ側はいつもその側を取る（選ぶ側の読みの勝率は形勢の表示のために棋譜に残す）。置く側は `--first-placer` から局ごとに交互なので、`--games 2` なら同じ始まりを Libra が先手・後手で 1 局ずつ打つ。1 局だけなら、Libra を先手にするには「`--first-placer a --choose gote`」（相手が選んで後手）か「`--first-placer b --choose sente`」。`--fuseki engine` で `--place engine` のときだけ。
+
+41 手目から別のエンジンに替える形（`--engine41`、2026-09-26）: 両玉・選択・布石 40 手は Libra（と `--opponent`）が打ち、41 手目からは席を手元の本将棋のエンジン（やねうら王＋水匠5 の評価など）が指す。`--engine41-side both`（既定）なら両陣とも替えてそのエンジン同士、`b` なら相手の席だけで Libra 対そのエンジン。棋譜は両玉と選択から残るので、サイトの動画（`npm run video -- --kifu`）で再生できる。**やねうら王・水匠5 の実行ファイルと評価関数はリポジトリに入れず、サイトにも出さない**（ライセンスの汚染を避けるため。ユーザーの依頼）。パスは起動のたびに手元のものを渡す。勝ち負けは席（a・b）で数え、この形の結果は `libra rating` の目盛りに乗せない（Libra 対 相手の強さではないため）。替えたエンジンの手には `"engine41": true` が付き、評価値は `cp`（`mate`）で残る（`winrate` は無いので、動画の形勢の棒はその手では動かない）。
+
+```bash
+# 布石は Libra 同士（読み 1600 回、両玉と先後は決め打ち）、41 手目から やねうら王＋水匠5 同士
+M=$HOME/libra-run/ls/checkpoints/latest.onnx
+Y=~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc   # 手元のやねうら王（リポジトリには入れない）
+~/LibraShogi/bin/libra match --games 2 --go "nodes 1600" --model $M --kings 5i,5a --choose sente \
+  --opponent ~/LibraShogi/bin/libra-usi --opponent-cwd ~/LibraShogi --opponent-opt DNN_Model=$M --opponent-opt Declare_Win=true \
+  --engine41 $Y --engine41-cwd ~/fuseki-shogi-ai --go41 "nodes 1000000" \
+  --engine41-opt EvalDir=vendor/yaneuraou_eval --engine41-opt Threads=1 --engine41-opt USI_Hash=256 \
+  --engine41-opt USI_OwnBook=false --engine41-opt BookFile=no_book --engine41-opt EnteringKingRule=CSARule27 \
+  --out ~/tenbin-shogi-web/video/kifu-yane.jsonl
+# Libra 対 水匠5（41 手目から相手の席だけを替える）: 上に --engine41-side b を足す
+```
+
 自動計測では `config/<run-id>.toml` の `[auto]` に書く（反映は `cd ~/LibraShogi && git pull` →
 コンソールの停止 → 起動）。
 
