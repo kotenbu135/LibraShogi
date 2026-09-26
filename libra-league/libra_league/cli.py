@@ -119,7 +119,11 @@ def main(argv: list[str] | None = None) -> int:
                      help="41 手目からどちらの席を --engine41 に替えるか（both=両陣とも＝そのエンジン同士、b=相手の席だけ＝Libra 対そのエンジン、"
                           "a=Libra の席だけ）。既定 both")
     p_m.add_argument("--go41", default=None, help="--engine41 の go の引数（既定: --go-opp、無ければ --go）")
-    p_m.add_argument("--fuseki-seed", type=int, default=0, help="--fuseki selfplay で局面を選ぶ乱数の種（同じ種なら同じ局面。段ごとの比較を対にできる）")
+    p_m.add_argument("--fuseki-seed", type=int, default=0, help="--fuseki selfplay で局面を選ぶ乱数の種（同じ種なら同じ局面。段ごとの比較を対にできる。"
+                                                               "--fuseki self には効かない。そちらは --opening-file）")
+    p_m.add_argument("--opening-file", default=None,
+                     help="--fuseki self の布石の控え（JSONL）。控えにある布石はそれを使い、足りなければ作って書き足す。"
+                          "段ごとに同じ控えを渡すと段をまたいで同じ布石になる")
     p_m.add_argument("--libra-standard", action="store_true",
                      help="Libra 側が run の標準の読み（[auto] eval_sims と同じ）で打っていることを記録する。Elo の目盛りで自己評価と同じ点として扱われる")
     p_ex = sub.add_parser("export", help="チェックポイント（.pt）を推論用 ONNX に書き出す（libra / libra.exe 用）")
@@ -544,7 +548,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             summary = run_match(libra, opp, a.games, a.go, out, log=log, first_placer=a.first_placer, go_args_b=a.go_opp,
                                 openings=openings, self_fuseki=self_fuseki, place=a.place, place_seed=a.place_seed,
-                                kings=kings, choose=a.choose, e41=e41, go_args_41=a.go41)
+                                kings=kings, choose=a.choose, e41=e41, go_args_41=a.go41,
+                                opening_file=Path(a.opening_file).expanduser() if (a.opening_file and self_fuseki) else None)
         finally:
             for x in engines:
                 x.quit()

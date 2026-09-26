@@ -748,8 +748,12 @@ class AutoJobs:
                 args += ["--go-opp", go_opp]
             fuseki = str(self.acfg.get("match_fuseki", "engine")).strip() or "engine"
             if fuseki != "engine":
-                # 段をまたいで同じ布石を使う（同じ種）。段どうしの比較が対になる
+                # 段をまたいで同じ布石を使う。段どうしの比較が対になる。selfplay・ファイルは同じ種で同じ局面を選ぶ。
+                # self は種が効かない（エンジンの乱数は時刻から取り、読みも複数スレッド）ので、最初の段が作った布石を
+                # 控えに残し、残りの段はそれを使う（待ち行列は先入れ先出しなので、最初の段が先に打つ。2026-09-26）
                 args += ["--fuseki", fuseki, "--fuseki-seed", str(seed)]
+                if fuseki == "self":
+                    args += ["--opening-file", str(self.sd.root / "matches" / f"auto-{ts}.openings.jsonl")]
             if str(self.acfg.get("match_opponent", "")).strip():
                 args += ["--opponent", str(self.acfg["match_opponent"]).strip()]
             if str(self.acfg.get("match_opponent_cwd", "")).strip():

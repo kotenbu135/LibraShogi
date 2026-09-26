@@ -674,6 +674,8 @@ def test_enqueue_match_splits_the_levels_and_shares_the_openings(tmp_path):
         assert a[:5] == ["match", "--games", "10", "--go", "nodes 96"]          # 40 局を 4 段で等分
         assert a[a.index("--fuseki") + 1] == "self"
         assert a[a.index("--fuseki-seed") + 1] == "3200000"                     # 段をまたいで同じ布石
+        # self は種が効かないので、布石の控えを段で共有する
+        assert a[a.index("--opening-file") + 1] == q[0]["args"][q[0]["args"].index("--opening-file") + 1]
         assert a[a.index("--opponent") + 1] == "/opt/yaneuraou/YaneuraOu-by-gcc"
         assert a[a.index("--opponent-cwd") + 1] == "/opt/yaneuraou"
         assert "--libra-standard" in a
