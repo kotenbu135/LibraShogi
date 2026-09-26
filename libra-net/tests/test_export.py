@@ -24,12 +24,12 @@ def test_onnx_matches_torch(tmp_path):
 
 
 def test_onnx_drops_the_opp_head(tmp_path):
-    """補助方策の頭（opp_head）は学習だけで使う。ONNX は頭の無いネットと同じ 3 出力・同じ大きさの重みになる。"""
+    """補助の頭（opp_head・own_head）は学習だけで使う。ONNX は頭の無いネットと同じ 3 出力・同じ大きさの重みになる。"""
     import onnx
 
     sizes = {}
     for opp in (False, True):
-        cfg = NetConfig(d_model=32, n_layers=2, n_heads=4, d_ff=64, opp_head=opp)
+        cfg = NetConfig(d_model=32, n_layers=2, n_heads=4, d_ff=64, opp_head=opp, own_head=opp)
         m = LibraNet(cfg)
         ckpt = tmp_path / f"m{opp}.pt"
         torch.save({"model": m.state_dict(), "config": {"net": cfg.__dict__}, "step": 7}, ckpt)

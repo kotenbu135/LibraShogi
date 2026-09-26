@@ -10,11 +10,12 @@ from ._sim import (  # noqa: F401
     mirror_index,
     mirror_sq,
     replay_features,
+    replay_survival,
     move_from_usi,
     move_to_usi,
     sq_from_usi,
     sq_to_usi,
 )
 
-__all__ = ["Position", "move_to_usi", "move_from_usi", "sq_to_usi", "sq_from_usi", "mirror_sq", "mirror_index", "replay_features",
+__all__ = ["Position", "move_to_usi", "move_from_usi", "sq_to_usi", "sq_from_usi", "mirror_sq", "mirror_index", "replay_features", "replay_survival",
            "POLICY_SIZE", "POLICY_CLASSES", "SQ_FEATS", "GLOB_FEATS", "__version__"]

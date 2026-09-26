@@ -297,6 +297,14 @@ Y=~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc   # 手元のやね
   --steps 30000 --games 1000 --no-vs-base --out ~/libra-run/experiments/2026-09-26-scratch --publish
 ```
 
+補助の頭は、KataGo と同じく**最初から付けて**比べるほうが公平（途中から足すと初期値の頭がしばらく幹を揺らす。2026-09-26 の比べ）。ゼロからの形で、頭なし・相手の次の手・駒が最後まで残るか（`net.own_head`・`train.own_weight`）を並べる:
+
+```bash
+~/LibraShogi/bin/libra abtest --scratch --ckpt ~/libra-run/ls/checkpoints/archive/ckpt_000515078.pt \
+  --arm base --arm opp:net.opp_head=true,train.opp_weight=0.15 --arm own:net.own_head=true,train.own_weight=1.5 \
+  --steps 30000 --games 1000 --no-vs-base --out ~/libra-run/experiments/2026-09-27-aux --publish
+```
+
 **探索の σ の形（`gumbel_rescale`）を比べるとき**は、同じ重みで側ごとに σ を変えて打つ（`libra eval --b-set`。B 側＝奇数枠の先手だけ別の設定で読む）。
 
 ```bash

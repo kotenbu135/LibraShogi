@@ -34,10 +34,14 @@ class Trainer:
         mode = cfg.get("compile", "none")
         if mode not in COMPILE_MODES:
             raise ValueError(f"train.compile must be one of {COMPILE_MODES}: {mode!r}")
-        # 補助方策「相手の次の手」（KataGo [Wu19] §3.4）。頭があって opp_weight > 0 のときだけ forward_aux で学習する
-        self.aux = float(cfg.get("opp_weight", 0.0)) > 0
-        if self.aux and not getattr(model, "opp_head", None):
+        # 補助の頭（KataGo [Wu19] §3.4 の相手の次の手、§4.1 の陣地の将棋版「駒が最後まで残るか」）。重み > 0 のときだけ forward_aux で学習する
+        self.opp = float(cfg.get("opp_weight", 0.0)) > 0
+        self.own = float(cfg.get("own_weight", 0.0)) > 0
+        self.aux = self.opp or self.own
+        if self.opp and not getattr(model, "opp_head", None):
             raise ValueError("train.opp_weight > 0 には net.opp_head = true が要る")
+        if self.own and not getattr(model, "own_head", None):
+            raise ValueError("train.own_weight > 0 には net.own_head = true が要る")
         self._eager = model.forward_aux if self.aux else model
         self.forward = self._eager
         self.mode_used = "eager"
@@ -112,13 +116,21 @@ class Trainer:
         l_v41 = soft_ce(v41, v41_t, fuseki.float())
         loss = self.cfg["policy_weight"] * l_policy + self.cfg["value_weight"] * l_value + self.cfg["v41_weight"] * l_v41
         st = {"loss": loss, "policy": l_policy, "value": l_value, "v41": l_v41}
-        if self.aux:
+        if self.opp:
             oidx = torch.from_numpy(batch["opp_idx"]).to(dev)
             op = torch.from_numpy(batch["opp_p"]).to(dev)
             ovalid = torch.from_numpy(batch["opp_valid"]).to(dev)
-            l_opp, _ = masked_ce(outs[3], oidx, op, ovalid)
+            l_opp, _ = masked_ce(outs[3]["opp"], oidx, op, ovalid)
             loss = loss + float(self.cfg["opp_weight"]) * l_opp
             st.update({"loss": loss, "opp": l_opp})
+        if self.own:
+            # 盤上の駒（玉を除く）ごとの 2 値の交差エントロピーの、駒のあるマスの平均（目標 -1 のマスは数えない）
+            own_t = torch.from_numpy(batch["own"]).to(dev)
+            w = (own_t >= 0).float()
+            bce = F.binary_cross_entropy_with_logits(outs[3]["own"].float(), own_t.clamp(min=0), reduction="none")
+            l_own = (bce * w).sum() / w.sum().clamp(min=1.0)
+            loss = loss + float(self.cfg["own_weight"]) * l_own
+            st.update({"loss": loss, "own": l_own})
         with torch.no_grad():
             acc = (policy.float().argmax(1) == pidx[:, 0]).float()
             st.update({"acc_n": (acc * pw).sum(), "acc_d": pw.sum()})
@@ -128,10 +140,10 @@ class Trainer:
         return {"model": self.model.state_dict(), "opt": self.opt.state_dict(), "step": self.step_count}
 
     def load_state_dict(self, sd: dict) -> None:
-        """重み・AdamW の状態・step を戻す。保存した側に opp_head が無ければ、その頭だけ初期値のまま・AdamW の状態も空で始める
+        """重み・AdamW の状態・step を戻す。保存した側に補助の頭（opp_head・own_head）が無ければ、その頭だけ初期値のまま・AdamW の状態も空で始める
         （頭は最後に作るので、パラメータの並びの末尾に足されるだけ。幹と他の頭の状態はそのまま引き継ぐ）。"""
         missing, unexpected = self.model.load_state_dict(sd["model"], strict=False)
-        if unexpected or any(not k.startswith("opp_head.") for k in missing):
+        if unexpected or any(not k.startswith(("opp_head.", "own_head.")) for k in missing):
             raise RuntimeError(f"重みが合わない: missing {missing[:5]} unexpected {unexpected[:5]}")
         if "opt" in sd:
             self.opt.load_state_dict(extend_opt_state(sd["opt"], self.opt) if missing else sd["opt"])

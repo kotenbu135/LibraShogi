@@ -301,3 +301,58 @@ def test_opp_targets_are_the_next_positions_policy_target(tmp_path: Path):
             o0 = g["policy_off"][j + 1]
             assert np.array_equal(b["opp_idx"][r][:k], MIRROR_TABLE[g["policy_idx"][o0:o0 + k].astype(np.int64)])
     assert n_valid > 0
+
+
+def test_survival_targets_follow_each_piece_to_the_end():
+    """補助「駒が最後まで残るか」の目標（ls.replay_survival）を、Python で 1 手ずつ駒を追った答えと比べる。
+    マスの並びは特徴（replay_features）と同じ手番側の向き・鏡映。"""
+    games = _games(4, 21)
+    n = 0
+    for g in games:
+        moves = [int(m) for m in g["moves"]]
+        for ply in range(2, len(moves) + 2, 7):
+            for mirror in (0, 1):
+                out = np.empty((1, 81), np.float32)
+                ls.replay_survival(np.array([g["kb"]], np.int32), np.array([g["kw"]], np.int32), [g["moves"]],
+                                   np.array([ply], np.int32), np.array([mirror], np.uint8), out, 320, True)
+                p = ls.Position()
+                p.reset("tenbin")
+                p.do_move("K*" + ls.sq_to_usi(int(g["kb"])))
+                p.do_move("K*" + ls.sq_to_usi(int(g["kw"])))
+                for m in moves[: ply - 2]:
+                    p.do_move_code(m)
+                us_black = p.sfen().split()[1] == "b"
+                alive = {sq: sq for sq in range(81) if p.piece_on(sq) and (p.piece_on(sq) & 15) != 8}
+                where = dict(alive)  # 元のマス → 今のマス
+                dead = set()
+                for m in moves[ply - 2:]:
+                    to, frm = m & 0x7F, (m >> 7) & 0x7F
+                    for o, w in list(where.items()):
+                        if w == to:
+                            dead.add(o)
+                            del where[o]
+                    if frm != 0x7F:
+                        for o, w in where.items():
+                            if w == frm:
+                                where[o] = to
+                exp = np.full(81, -1.0, np.float32)
+                for o in alive:
+                    t = o if us_black else 80 - o
+                    t = ls.mirror_sq(t) if mirror else t
+                    exp[t] = 0.0 if o in dead else 1.0
+                assert np.array_equal(out[0], exp), (ply, mirror)
+                n += int((exp == 0).sum())
+    assert n > 0  # 取られる駒が少なくとも 1 つは出る
+
+
+def test_sample_batch_own_targets_match_replay_survival():
+    from libra_league.replay import sample_batch
+
+    games = _games(6, 11)
+    cum = np.cumsum(np.array([len(g["moves"]) for g in games], dtype=np.int64))
+    a = sample_batch(games, 0, cum, 64, np.random.default_rng(3), 0.5, 1.0, 32, 320, True)
+    b = sample_batch(games, 0, cum, 64, np.random.default_rng(3), 0.5, 1.0, 32, 320, True, own=True)
+    assert "own" not in a and b["own"].shape == (64, 81) and np.array_equal(a["sq"], b["sq"])
+    # 目標のあるマスは、特徴で駒のあるマス（玉を除く）と一致する
+    occupied = (b["sq"][:, :, :28].sum(axis=2) > 0) & (b["sq"][:, :, 7] == 0) & (b["sq"][:, :, 21] == 0)
+    assert np.array_equal(b["own"] >= 0, occupied)

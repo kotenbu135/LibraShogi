@@ -12,7 +12,7 @@
 - `gen_z`: 目標を λ = 1.0（実際の勝敗 z）にして測る。**腕の間で同じ物差し**になるので比較に使う。
 - `gen_own`: 腕自身の λ で測る。学習の損失と同じ物差し（自分の目標にどれだけ当たっているか）。
 
-扱うのは学習側の設定（[train] の値、例 `lambda_z`）と、幹を変えない補助の頭（`net.opp_head`。頭だけ初期値から始める）。
+扱うのは学習側の設定（[train] の値、例 `lambda_z`）と、幹を変えない補助の頭（`net.opp_head`・`net.own_head`。頭だけ初期値から始める）。
 `scratch` なら元の重みを引き継がず、腕ごとにネットの形（[net]）を変えてゼロから学習する（大きいネットの確かめ。KataGo [Wu19] §2 は
 次の大きさのネットを同じデータで並行して学習し、損失が追いついたら切り替える）。窓・held-out・学習する局面の並びは同じ。
 探索の設定（[search]）は窓の中の棋譜と方策の目標を
@@ -40,7 +40,7 @@ from .trainer import Trainer
 # 腕ごとに変えてはいけない鍵（窓と held-out の作り方はグループ分けで扱う。ネットの形を変えると重みを引き継げない）
 FIXED_SECTIONS = ("net",)
 # 重みを引き継ぐときでも変えてよい [net] の鍵（幹の形を変えず、頭を足すだけ）
-NET_HEAD_KEYS = ("opp_head",)
+NET_HEAD_KEYS = ("opp_head", "own_head")
 WINDOW_KEYS = ("window_games", "window_frac", "window_games_max")
 
 
@@ -127,7 +127,7 @@ def mean_rows(rows: list[dict], keys: tuple[str, ...]) -> dict:
 
 
 LOSS_KEYS = ("loss", "policy", "value", "v41", "policy_acc")
-AUX_KEYS = ("opp",)
+AUX_KEYS = ("opp", "own")
 
 
 def train_arm(base_sd: dict | None, cfg: dict, rb: ReplayBuffer, steps: int, seed: int, device: torch.device, positions: int,
@@ -145,7 +145,7 @@ def train_arm(base_sd: dict | None, cfg: dict, rb: ReplayBuffer, steps: int, see
     curve, acc = [], []
     for i in range(steps):
         batch = rb.sample(tr["batch_size"], rng, tr["mirror_prob"], tr["lambda_z"], cfg["search"]["policy_topk"], bool(tr.get("full_only", False)),
-                          opp=trainer.aux)
+                          opp=trainer.opp, own=trainer.own)
         acc.append(trainer.step(batch))
         if len(acc) >= every or i + 1 == steps:
             row = {"step": trainer.step_count, **mean_rows(acc, LOSS_KEYS + tuple(k for k in AUX_KEYS if k in acc[0]))}
@@ -280,7 +280,7 @@ def format_abtest(res: dict) -> str:
             f, l = curve[0], curve[-1]
             lines.append(f"  loss {f['loss']}→{l['loss']} (policy {f['policy']}→{l['policy']}, value {f['value']}→{l['value']},"
                          f" v41 {f['v41']}→{l['v41']}, acc {f['policy_acc']}→{l['policy_acc']}"
-                         + (f", opp {f['opp']}→{l['opp']}" if "opp" in l else "") + ")")
+                         + "".join(f", {k} {f[k]}→{l[k]}" for k in AUX_KEYS if k in l) + ")")
         for which in ("gen_z", "gen_own"):
             g = arm.get(which)
             if not g:

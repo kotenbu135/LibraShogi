@@ -5,7 +5,8 @@
 幹: エンコーダ層 × L、d、2D 相対位置バイアス（筋差・段差ごとの学習パラメータ、ヘッド別）。
 ヘッド: 方策（81 × 28 = 2268、マスごとのトークンから）、価値 WDL（グローバルトークンから）、
        補助 V̂41（布石局面から 41 手目の探索値を予測、WDL と同じ 3 値）。
-       opp_head なら補助の相手の次の手（KataGo [Wu19] §3.4。学習だけで使い、forward と ONNX には出さない）。
+       opp_head なら補助の相手の次の手（KataGo [Wu19] §3.4）、own_head なら補助の「盤上の駒が最後まで残るか」（同 §4.1 の
+       陣地の予測の将棋版）。どちらも学習だけで使い、forward と ONNX には出さない。
 """
 from __future__ import annotations
 
@@ -31,6 +32,7 @@ class NetConfig:
     d_ff: int = 1024
     dropout: float = 0.0
     opp_head: bool = False  # 補助方策「相手の次の手」の頭を持つか。幹の形は変わらないので、無い重みから引き継げる
+    own_head: bool = False  # 補助「盤上の駒が最後まで残るか」（マスごとに 1 値）の頭を持つか。同上
 
     @classmethod
     def from_dict(cls, d: dict) -> "NetConfig":
@@ -98,6 +100,8 @@ class LibraNet(nn.Module):
         self.v41_head = nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Linear(d, 3))
         if cfg.opp_head:  # 最後に作る（パラメータの並びの末尾に来るので、頭の無い AdamW の状態を引き継げる。Trainer.load_state_dict）
             self.opp_head = nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Linear(d, POLICY_CLASSES))
+        if cfg.own_head:  # 同上（opp_head の後ろ）
+            self.own_head = nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Linear(d, 1))
         self.apply(self._init)
 
     @staticmethod
@@ -111,11 +115,17 @@ class LibraNet(nn.Module):
         """sq: [B, 81, SQ_FEATS]、glob: [B, GLOB_FEATS] → (policy logits [B, 2268], wdl logits [B, 3], v41 logits [B, 3])"""
         return self._heads(self._trunk(sq, glob))
 
-    def forward_aux(self, sq: torch.Tensor, glob: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """学習用: forward に相手の次の手の logits [B, 2268] を足す（opp_head のときだけ）。"""
+    def forward_aux(self, sq: torch.Tensor, glob: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+        """学習用: forward に補助の頭の出力を足す。"opp" は相手の次の手の logits [B, 2268]、"own" は駒が残るかの logits [B, 81]
+        （持っている頭だけ）。"""
         x = self._trunk(sq, glob)
         policy, wdl, v41 = self._heads(x)
-        return policy, wdl, v41, self.opp_head(x[:, :SQ_NB]).reshape(x.shape[0], POLICY_SIZE)
+        aux = {}
+        if self.cfg.opp_head:
+            aux["opp"] = self.opp_head(x[:, :SQ_NB]).reshape(x.shape[0], POLICY_SIZE)
+        if self.cfg.own_head:
+            aux["own"] = self.own_head(x[:, :SQ_NB]).squeeze(-1)
+        return policy, wdl, v41, aux
 
     def _trunk(self, sq: torch.Tensor, glob: torch.Tensor) -> torch.Tensor:
         x_sq = self.sq_embed(sq) + self.pos_embed
