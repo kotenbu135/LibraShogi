@@ -305,6 +305,14 @@ Y=~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc   # 手元のやね
   --steps 30000 --games 1000 --no-vs-base --out ~/libra-run/experiments/2026-09-27-aux --publish
 ```
 
+**重みの平均（EMA、`train.ema_scale`）を比べるとき**は、平均を持たせた腕を 1 つ作る。学習は平均を持たない腕と同じで、終わると**そのままの重み `<腕>.pt` と平均の重み `<腕>-ema.pt` の 2 つ**が残り、両方が腕として対局に入る（KataGo の `python/train.py` の swa_scale 8・50 万局面ごと。docs/acceleration-2026-09-27.md §3 A）。平均の更新は約 488 step ごとなので、**10,000 step 以上**回す（5,000 step では出発点の重みが平均に多く残る）。ランでは使えない（起動で断る）。
+
+```bash
+~/LibraShogi/bin/libra abtest --ckpt ~/libra-run/ls/checkpoints/archive/ckpt_000515078.pt \
+  --arm ema:train.ema_scale=8 --arm lr67:train.lr=0.0000667 --steps 10000 --games 1000 --no-vs-base \
+  --out ~/libra-run/experiments/2026-09-28-ema --publish
+```
+
 **探索の σ の形（`gumbel_rescale`）を比べるとき**は、同じ重みで側ごとに σ を変えて打つ（`libra eval --b-set`。B 側＝奇数枠の先手だけ別の設定で読む）。
 
 ```bash
@@ -315,7 +323,7 @@ Y=~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc   # 手元のやね
 
 `--b-set` を付けた対局の結果は `~/libra-run/experiments/<時刻>-sigma.json`（`--out` で変えられる）。run の `eval/` には置かない（コンソールの Elo の一覧に世代間の計測として並んでしまうため）。
 
-側ごとに変えられるのは読む手の選び方だけ（`full_sims`・`fast_sims`・`gumbel_m_full`・`gumbel_m_fast`・`c_visit`・`c_scale`・`gumbel_rescale`・`gumbel_noise`・`cpuct`）。ほかの鍵を渡すと例外になる（枠ごとに棋譜や記録の形が変わってしまうため）。
+側ごとに変えられるのは読む手の選び方だけ（`full_sims`・`full_sims_41`・`fast_sims`・`gumbel_m_full`・`gumbel_m_fast`・`c_visit`・`c_scale`・`gumbel_rescale`・`gumbel_noise`・`cpuct`）。ほかの鍵を渡すと例外になる（枠ごとに棋譜や記録の形が変わってしまうため）。
 **これは「読む手の選び方」の比較で、σ が学習データ（方策の目標）の形を変える分は測れない**（窓の中の目標は今の σ で作った棋譜のもの）。そこまで見るなら σ を変えた自己対局を別に回すことになる。
 
 ## 7.2 布石と本将棋のどちらで強くなったかを分ける（`libra eval --a41`）
@@ -335,6 +343,15 @@ bin/libra eval --a $N --b $O --games 2000 --publish            # 全部新しい
 - 出力は `~/libra-run/experiments/<時刻>-split41.json`（`--a41`・`--b41` を付けた対局は run の `eval/` に置かない。コンソールの Elo の一覧に混ざるため）。`--publish` で `progress` ブランチの `experiments/` にも出る。
 - 読み方: 前 2 つの Elo の和が 3 つ目と区間の中で合えば、全体の伸びを布石と本将棋に分けられる。合わなければ、布石と本将棋の強さが噛み合って効いている（docs/method-evidence.md §2.14）。
 - 替えるのは指し手を決める側の段階で決める。40 手目の読みの中で本将棋の局面を評価するのは布石のネット。
+
+**読みを布石と本将棋のどちらに足すと効くかを分ける**（`full_sims_41`、docs/acceleration-2026-09-27.md §3 B）。同じ重みどうしで、B 側だけ片方の段階の全読みを 192 回にする。`full_sims_41` は本将棋（41 手目から）の根の全読みの回数で、0（既定）なら `full_sims` と同じ。全体を 192 回にした比べ（2026-09-26、+94.3）と並べて読む。ランでは使えない（起動で断る）。
+
+```bash
+N=~/libra-run/ls/checkpoints/archive/ckpt_000515078.pt
+cd ~/LibraShogi
+bin/libra eval --a $N --b $N --games 1000 --sims 96 --b-set full_sims=192 --b-set full_sims_41=96 --publish   # 布石だけ 192 回
+bin/libra eval --a $N --b $N --games 1000 --sims 96 --b-set full_sims_41=192 --publish                         # 本将棋だけ 192 回
+```
 
 ## 8. desktop で Libra と指す（自分で体感する）
 

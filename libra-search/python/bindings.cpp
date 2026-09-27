@@ -16,6 +16,7 @@ SearchConfig config_from_dict(const py::dict& d) {
   auto getf = [&](const char* k, float& v) { if (d.contains(k)) v = d[k].cast<float>(); };
   auto getb = [&](const char* k, bool& v) { if (d.contains(k)) v = d[k].cast<bool>(); };
   geti("full_sims", c.full_sims);
+  geti("full_sims_41", c.full_sims_41);
   geti("fast_sims", c.fast_sims);
   getf("full_prob", c.full_prob);
   geti("gumbel_m_full", c.gumbel_m_full);

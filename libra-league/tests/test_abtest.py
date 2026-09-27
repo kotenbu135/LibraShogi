@@ -227,3 +227,44 @@ def test_scratch_arms_with_aux_heads(tmp_path: Path):
     assert "own" in last["own"] and "opp" not in last["own"] and "opp" in last["opp"] and "own" not in last["s"]
     own = torch.load(tmp_path / "o" / "own.pt", map_location="cpu", weights_only=False)
     assert own["step"] == 3 and any(k.startswith("own_head.") for k in own["model"])
+
+
+def test_ema_arm_adds_an_averaged_checkpoint_and_plays_it(tmp_path: Path):
+    """train.ema_scale の腕は、そのままの重み <腕>.pt と平均の重み <腕>-ema.pt を残し、平均も腕として対局に入る。"""
+    sd, _ = _run(tmp_path)
+    logs: list[str] = []
+    res = run_abtest(sd, load_config(None), sd.checkpoints / "latest.pt", ["a", "ema:train.ema_scale=2,train.ema_period_samples=16"], [],
+                     steps=4, games=2, sims=8, concurrent=2, threads=2, seed=5, positions=64, every=2, vs_base=False, out_dir=tmp_path / "o",
+                     device=torch.device("cpu"), chunk_index=None, games_total=None, log=logs.append)
+    a, raw, avg = (torch.load(tmp_path / "o" / f"{n}.pt", map_location="cpu", weights_only=False) for n in ("a", "ema", "ema-ema"))
+    assert all(torch.equal(a["model"][k], raw["model"][k]) for k in a["model"])  # 平均は学習を変えない
+    assert any(not torch.equal(raw["model"][k], avg["model"][k]) for k in raw["model"])
+    assert res["arms"]["ema"]["ema"]["updates"] == 2 and "heldout" in res["arms"]["ema"]["ema"]["gen_z"]
+    assert {(m["a"], m["b"]) for m in res["matches"]} == {("a", "ema"), ("a", "ema-ema"), ("ema", "ema-ema")}
+
+
+def _selfplay_stats(cfg: dict, seed: int = 4) -> dict:
+    """一様でない乱数の方策で 8 局を打ち終えるまで回し、統計を返す（同じ seed なら同じ出力の並び）。"""
+    sp = librasearch.SelfPlay(cfg, 8, seed=seed, threads=1)
+    sq = np.zeros((8, 81, ls.SQ_FEATS), np.float32)
+    glob = np.zeros((8, ls.GLOB_FEATS), np.float32)
+    rng = np.random.default_rng(seed)
+    done = 0
+    while done < 8:
+        sp.collect(sq, glob)
+        sp.apply(rng.standard_normal((8, ls.POLICY_SIZE), dtype=np.float32), np.tile(np.array([0.4, 0.2, 0.4], np.float32), (8, 1)))
+        done += len(sp.take_finished())
+    return sp.stats()
+
+
+def test_full_sims_41_changes_only_the_main_game_budget():
+    """[search] full_sims_41: 0（既定）と full_sims と同じ値では同じ対局、大きくすると本将棋の根だけ読みが増える。"""
+    cfg = {"full_sims": 4, "fast_sims": 4, "full_prob": 1.0, "gumbel_m_full": 4, "max_ply": 60, "count_from_41": False,
+           "proof_nodes": 0, "mate_nodes_root": 0}
+    base = _selfplay_stats(cfg)
+    same = _selfplay_stats({**cfg, "full_sims_41": 4})
+    assert same["sims"] == base["sims"] and same["moves"] == base["moves"]
+    more = _selfplay_stats({**cfg, "full_sims_41": 16})
+    assert more["sims"] / more["moves"] > base["sims"] / base["moves"] * 1.5
+    fuseki_only = _selfplay_stats({**cfg, "max_ply": 40})  # 40 手で終わる対局（本将棋が無い）では読みは変わらない
+    assert _selfplay_stats({**cfg, "max_ply": 40, "full_sims_41": 16})["sims"] == fuseki_only["sims"]

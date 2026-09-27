@@ -268,6 +268,23 @@ def test_runner_refuses_full_only(tmp_path: Path):
         Runner(sd, cfg, device=torch.device("cpu"))
 
 
+def test_runner_refuses_ema_and_full_sims_41(tmp_path: Path):
+    """重みの平均（[train] ema_scale）と本将棋の読みの回数（[search] full_sims_41）は比べ用なので、ランの起動で断る。"""
+    import pytest
+
+    from libra_league.config import load_config
+    from libra_league.runner import Runner
+
+    for section, key, value in (("train", "ema_scale", 8.0), ("search", "full_sims_41", 192)):
+        cfg = load_config(None)
+        cfg["net"] = {"d_model": 32, "n_layers": 2, "n_heads": 4, "d_ff": 64, "dropout": 0.0}
+        cfg[section][key] = value
+        sd = StateDir(tmp_path / key)
+        sd.create()
+        with pytest.raises(ValueError, match=key):
+            Runner(sd, cfg, device=torch.device("cpu"))
+
+
 def test_runner_adds_own_head_to_a_headless_checkpoint(tmp_path: Path):
     """本番のランに補助「駒が最後まで残るか」を入れる形: 頭の無いチェックポイントから続けて、初期値の頭を足して学習し、
     metrics に own の損失が出て、次のチェックポイントに頭が入る。幹の重みは引き継ぐ。"""

@@ -60,6 +60,35 @@ class Trainer:
             lr=cfg["lr"], betas=(0.9, 0.98), eps=1e-8, fused=device.type == "cuda",
         )
         self.step_count = 0
+        # 重みの指数移動平均（KataGo の swa_model: torch.optim.swa_utils.AveragedModel に avg + (cur - avg) / swa_scale を渡す形。
+        # AveragedModel は最初の update_parameters で今の重みを写す）。学習そのものは変えない
+        self.ema_scale = float(cfg.get("ema_scale", 0.0))
+        self.ema_period = max(1, round(float(cfg.get("ema_period_samples", 500000)) / cfg["batch_size"])) if self.ema_scale > 0 else 0
+        self.ema: dict[str, torch.Tensor] | None = None
+        self.ema_updates = 0
+        self._ema_steps = 0
+
+    def update_ema(self) -> None:
+        """平均を 1 回更新する（最初は写すだけ）。浮動小数でない値（あれば）は今の値を写す。"""
+        with torch.no_grad():
+            cur = self.model.state_dict()
+            if self.ema is None:
+                self.ema = {k: v.detach().clone().float() if v.is_floating_point() else v.detach().clone() for k, v in cur.items()}
+            else:
+                f = 1.0 / self.ema_scale
+                for k, v in cur.items():
+                    if v.is_floating_point():
+                        self.ema[k].add_(v.detach().float() - self.ema[k], alpha=f)
+                    else:
+                        self.ema[k].copy_(v)
+        self.ema_updates += 1
+
+    def ema_state_dict(self) -> dict[str, torch.Tensor] | None:
+        """平均の重み（model.state_dict と同じ鍵と型）。まだ 1 回も更新していなければ None。"""
+        if self.ema is None:
+            return None
+        cur = self.model.state_dict()
+        return {k: v.to(cur[k].dtype) for k, v in self.ema.items()}
 
     def lr_at(self, step: int) -> float:
         w = max(1, self.cfg["warmup_steps"])
@@ -94,6 +123,10 @@ class Trainer:
         gn = torch.nn.utils.clip_grad_norm_(m.parameters(), self.cfg["grad_clip"])
         self.opt.step()
         self.step_count += 1
+        if self.ema_period:
+            self._ema_steps += 1
+            if self._ema_steps % self.ema_period == 0:
+                self.update_ema()
         out = {key: sum(float(p[key]) for p in parts) / len(parts) for key in parts[0] if key not in ("acc_n", "acc_d")}
         out["policy_acc"] = sum(float(p["acc_n"]) for p in parts) / max(1.0, sum(float(p["acc_d"]) for p in parts))
         return {**out, "grad_norm": float(gn), "lr": self.lr_at(self.step_count - 1)}

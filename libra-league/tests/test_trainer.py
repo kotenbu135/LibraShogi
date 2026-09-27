@@ -143,3 +143,34 @@ def test_own_head_learns_survival_targets_only_on_pieces():
     assert t1.step({**b, "own": own})["own"] == t2.step({**b, "own": own2})["own"]
     sq, glob = torch.zeros(2, 81, ls.SQ_FEATS), torch.zeros(2, ls.GLOB_FEATS)
     assert tr.model.forward_aux(sq, glob)[3]["own"].shape == (2, 81) and len(tr.model(sq, glob)) == 3
+
+
+def test_ema_copies_first_then_moves_by_one_over_scale():
+    """重みの平均（KataGo の swa_scale・swa_period_samples）: period の step ごとに更新し、最初は写すだけ、以後は avg + (cur - avg) / scale。
+    学習そのもの（重み）は平均を持たない Trainer と同じ。"""
+    torch.manual_seed(0)
+    base = LibraNet(SMALL)
+    plain = Trainer(copy.deepcopy(base), _cfg("none"), torch.device("cpu"))
+    cfg = {**_cfg("none"), "batch_size": 8, "ema_scale": 4.0, "ema_period_samples": 16}  # 2 step ごと
+    tr = Trainer(copy.deepcopy(base), cfg, torch.device("cpu"))
+    assert tr.ema_period == 2 and tr.ema_state_dict() is None
+    snaps = []
+    for i in range(6):
+        plain.step(_batch(8, i))
+        tr.step(_batch(8, i))
+        snaps.append({k: v.detach().clone() for k, v in tr.model.state_dict().items()})
+    for a, b in zip(plain.model.parameters(), tr.model.parameters()):
+        assert torch.equal(a, b)
+    assert tr.ema_updates == 3
+    k = next(k for k, v in snaps[0].items() if v.is_floating_point() and v.ndim == 2)
+    want = snaps[1][k].clone()                   # step 2: 写す
+    want = want + (snaps[3][k] - want) / 4.0     # step 4
+    want = want + (snaps[5][k] - want) / 4.0     # step 6
+    torch.testing.assert_close(tr.ema_state_dict()[k], want, rtol=0, atol=1e-6)
+    assert set(tr.ema_state_dict()) == set(tr.model.state_dict())
+
+
+def test_ema_off_by_default():
+    tr = Trainer(LibraNet(SMALL), _cfg("none"), torch.device("cpu"))
+    tr.step(_batch(8, 0))
+    assert tr.ema_period == 0 and tr.ema_state_dict() is None

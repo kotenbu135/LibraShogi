@@ -18,6 +18,9 @@ namespace libra {
 struct SearchConfig {
   int full_sims = 96;       // 全読み（方策ターゲットを取る）のシミュレーション数
   int fast_sims = 24;       // 速読み（価値ターゲットのみ）
+  // 本将棋（41 手目から）の根の全読みの回数。0 なら full_sims と同じ（既定）。布石と本将棋で読みの配分を変える比べ用
+  // （docs/acceleration-2026-09-27.md §3 B、出典なし）。速読みは変えない
+  int full_sims_41 = 0;
   float full_prob = 0.25f;  // 全読みの割合（playout cap randomization）
   int gumbel_m_full = 16;   // Gumbel-Top-k の候補数
   int gumbel_m_fast = 8;

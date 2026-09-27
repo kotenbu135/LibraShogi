@@ -157,10 +157,21 @@ def train_arm(base_sd: dict | None, cfg: dict, rb: ReplayBuffer, steps: int, see
     gen_own = generalization(model, rb, positions, np.random.default_rng(seed + 1), device, tr["lambda_z"], topk)
     out_ckpt.parent.mkdir(parents=True, exist_ok=True)
     torch.save({"model": model.state_dict(), "opt": trainer.opt.state_dict(), "step": trainer.step_count, "config": cfg}, out_ckpt)
+    out = {"steps": steps, "seconds": round(time.time() - t0, 1), "n_params": n_params, "curve": curve, "gen_z": gen_z, "gen_own": gen_own, "ckpt": str(out_ckpt)}
+    ema = trainer.ema_state_dict()
+    if ema is not None:
+        # 重みの平均（train.ema_scale）を別の腕 <腕>-ema として保存する。学習は同じなので、そのままの重みとの差が平均の効き目
+        ema_ckpt = out_ckpt.with_name(out_ckpt.stem + "-ema.pt")
+        model.load_state_dict(ema)
+        out["ema"] = {"updates": trainer.ema_updates, "period_steps": trainer.ema_period, "scale": trainer.ema_scale, "ckpt": str(ema_ckpt),
+                      "gen_z": generalization(model, rb, positions, np.random.default_rng(seed + 1), device, 1.0, topk),
+                      "gen_own": generalization(model, rb, positions, np.random.default_rng(seed + 1), device, tr["lambda_z"], topk)}
+        torch.save({"model": ema, "step": trainer.step_count, "config": cfg}, ema_ckpt)
+        log(f"  ema: {trainer.ema_updates} updates (every {trainer.ema_period} steps, scale {trainer.ema_scale}) → {ema_ckpt.name}")
     del model, trainer
     if device.type == "cuda":
         torch.cuda.empty_cache()
-    return {"steps": steps, "seconds": round(time.time() - t0, 1), "n_params": n_params, "curve": curve, "gen_z": gen_z, "gen_own": gen_own, "ckpt": str(out_ckpt)}
+    return out
 
 
 def play_pairs(ckpts: dict[str, Path], pairs: list[tuple[str, str]], scfg: dict, games: int, concurrent: int, threads: int,
@@ -225,12 +236,14 @@ def run_abtest(sd: StateDir, base_cfg: dict, ckpt: Path, arms: list[str], base_s
                                                every, log))
             res["arms"][name]["window_games"] = rb.n_games()
             ckpts[name] = out_ckpt
+            if "ema" in res["arms"][name]:
+                ckpts[f"{name}-ema"] = Path(res["arms"][name]["ema"]["ckpt"])
             write_json_atomic(out_dir / "abtest.json", res)
         del rb
     if games > 0:
         scfg = dict(cfg0["search"])
         scfg["full_sims"] = sims
-        names = [n for n, _ in parsed]
+        names = list(ckpts)  # 腕の順（平均を持つ腕は <腕>-ema がその直後に並ぶ）
         pairs = [(names[i], names[j]) for i in range(len(names)) for j in range(i + 1, len(names))]
         if vs_base:
             ckpts["base"] = ckpt

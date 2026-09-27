@@ -319,7 +319,7 @@ static void init_root_search(SelfPlay::Game& g, const SearchConfig& cfg) {
   Node& root = g.nodes[0];
   std::uniform_real_distribution<float> u(0.0f, 1.0f);
   g.full = u(g.rng) < cfg.full_prob;
-  g.budget = g.full ? cfg.full_sims : cfg.fast_sims;
+  g.budget = !g.full ? cfg.fast_sims : (cfg.full_sims_41 > 0 && g.pos.phase() == PHASE_NORMAL) ? cfg.full_sims_41 : cfg.full_sims;
   if (g.forced_budget >= 0) {
     g.full = g.forced_full;
     g.budget = g.forced_budget;
@@ -1129,10 +1129,11 @@ void SelfPlay::set_side_config(const SearchConfig& cfg) {
                     cfg.resign_threshold == cfg_.resign_threshold && cfg.resign_runs == cfg_.resign_runs &&
                     cfg.resign_disable_prob == cfg_.resign_disable_prob && cfg.resign_min_ply == cfg_.resign_min_ply;
   if (!same)
-    throw std::invalid_argument("SelfPlay::set_side_config: 側ごとに変えられるのは full_sims・fast_sims・full_prob・gumbel_m_full・"
+    throw std::invalid_argument("SelfPlay::set_side_config: 側ごとに変えられるのは full_sims・full_sims_41・fast_sims・full_prob・gumbel_m_full・"
                                 "gumbel_m_fast・c_visit・c_scale・gumbel_rescale・gumbel_noise・cpuct だけ");
   cfg_b_ = cfg_;  // 片側だけ違う項目を入れ替える（ほかは A 側に合わせたまま持つ）
   cfg_b_.full_sims = cfg.full_sims;
+  cfg_b_.full_sims_41 = cfg.full_sims_41;
   cfg_b_.fast_sims = cfg.fast_sims;
   cfg_b_.full_prob = cfg.full_prob;
   cfg_b_.gumbel_m_full = cfg.gumbel_m_full;

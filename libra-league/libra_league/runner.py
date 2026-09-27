@@ -45,6 +45,10 @@ class Runner:
         if tr.get("full_only"):
             # 学習量（局面数 × replay_ratio / batch）を全読みの局面で数え直す形はまだ無い。今は `libra abtest` の腕の比較用だけ
             raise ValueError("[train] full_only はランではまだ使えない（libra abtest の比較用）")
+        if float(tr.get("ema_scale", 0.0)) > 0:
+            raise ValueError("[train] ema_scale はランではまだ使えない（libra abtest の比較用。docs/acceleration-2026-09-27.md §3 A）")
+        if int(cfg["search"].get("full_sims_41", 0)) > 0:
+            raise ValueError("[search] full_sims_41 はランではまだ使えない（libra eval --b-set の比較用。docs/acceleration-2026-09-27.md §3 B）")
         # 補助の頭（[net] opp_head・own_head と [train] opp_weight・own_weight）は学習だけで使う。頭の無いチェックポイントから
         # 続けるときは初期値の頭を足す（Trainer.load_state_dict）。幹の形と ONNX の出力（方策・形勢・V̂41）は変わらない
         self.replay = ReplayBuffer(sd.replay, sd.games, tr["window_games"], rr["chunk_games"], sr["max_ply"], sr["count_from_41"],

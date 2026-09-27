@@ -14,6 +14,9 @@ DEFAULTS: dict[str, Any] = {
     "search": {
         "full_sims": 96,
         "fast_sims": 24,
+        # 本将棋（41 手目から）の根の全読みの回数。0 なら full_sims と同じ。比べ（`libra eval --b-set full_sims_41=…`）用で、ランでは断る
+        # （docs/acceleration-2026-09-27.md §3 B）
+        "full_sims_41": 0,
         "full_prob": 0.25,
         "gumbel_m_full": 16,
         "gumbel_m_fast": 8,
@@ -111,6 +114,11 @@ DEFAULTS: dict[str, Any] = {
         "full_only": False,       # True で全読みの局面だけを学習に使う（KataGo [Wu19] §3.1）。今は `libra abtest` の腕だけ。ランは起動で断る
         "opp_weight": 0.0,        # > 0 で補助方策「相手の次の手」を学習する（KataGo [Wu19] §3.4 は 0.15。net.opp_head が要る）。今は `libra abtest` の腕だけ
         "own_weight": 0.0,        # > 0 で補助「盤上の駒が最後まで残るか」を学習する（KataGo [Wu19] §4.1 の陣地の重み 1.5/b² の和＝マスの平均の 1.5 倍。net.own_head が要る）。今は `libra abtest` の腕だけ
+        # > 0 で重みの指数移動平均（EMA）を持つ（KataGo の python/train.py の swa_scale・swa_period_samples: 最初の更新で写し、以後は
+        # period の局面ごとに 1/scale だけ今の重みへ寄せる。KataGo は自己対局に平均のほうを配る）。今は `libra abtest` の腕だけ（平均を
+        # `<腕>-ema.pt` として足して対局させる）。ランは起動で断る（docs/acceleration-2026-09-27.md §3 A）
+        "ema_scale": 0.0,
+        "ema_period_samples": 500000,  # KataGo の既定（1 エポック 100 万局面の半分）。バッチ 1,024 で約 488 step ごと
         "accum_steps": 1,         # > 1 でバッチを分けて勾配を足し合わせる（大きいネットがメモリに載らないとき。`libra abtest --scratch` 用）
         "compile": "max-autotune",  # 学習の forward・逆伝播の torch.compile: none | default | max-autotune（CUDA のときだけ効く。2026-09-16）
     },
