@@ -94,7 +94,7 @@ grad_clip = 1.0
 full_only = false
 opp_weight = 0.0
 own_weight = 0.0
-ema_scale = 0.0
+ema_scale = 8.0
 ema_period_samples = 500000
 accum_steps = 1
 compile = "max-autotune"
@@ -136,7 +136,7 @@ reference_ckpts = ["~/libra-run/experiments/2026-09-17-window/win1m.pt", "~/libr
 reference_games = 200
 reference_rotate = 0.8
 reference_min = 1
-match_games = 40
+match_games = 0
 match_go = "nodes 96"
 match_go_opp = "nodes 1000, nodes 10000, nodes 100000, nodes 1000000"
 match_opponent_opt = "EvalDir=../../yaneuraou_eval,Threads=1,USI_Hash=256,USI_OwnBook=false,BookFile=no_book,EnteringKingRule=CSARule27"
