@@ -306,7 +306,7 @@ Y=~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc   # 手元のやね
   --steps 30000 --games 1000 --no-vs-base --out ~/libra-run/experiments/2026-09-27-aux --publish
 ```
 
-**重みの平均（EMA、`train.ema_scale`）を比べるとき**は、平均を持たせた腕を 1 つ作る。学習は平均を持たない腕と同じで、終わると**そのままの重み `<腕>.pt` と平均の重み `<腕>-ema.pt` の 2 つ**が残り、両方が腕として対局に入る（KataGo の `python/train.py` の swa_scale 8・50 万局面ごと。docs/acceleration-2026-09-27.md §3 A）。平均の更新は約 488 step ごとなので、**10,000 step 以上**回す（5,000 step では出発点の重みが平均に多く残る）。ランでは使えない（起動で断る）。
+**重みの平均（EMA、`train.ema_scale`）を比べるとき**は、平均を持たせた腕を 1 つ作る。学習は平均を持たない腕と同じで、終わると**そのままの重み `<腕>.pt` と平均の重み `<腕>-ema.pt` の 2 つ**が残り、両方が腕として対局に入る（KataGo の `python/train.py` の swa_scale 8・50 万局面ごと。docs/acceleration-2026-09-27.md §3 A）。平均の更新は約 488 step ごとなので、**10,000 step 以上**回す（5,000 step では出発点の重みが平均に多く残る）。**2026-09-28 から本番の ls も平均を持つ**（`config/ls.toml` の `ema_scale = 8`）。本番のチェックポイントの `model` は平均（対局に使う重み）、`model_raw` は学習中の重みで、abtest の腕は `model_raw` から続ける。abtest は腕で付けたときだけ平均を持ち、本番の設定の `ema_scale` は引き継がない。`--vs-base` の `base` は平均の重みで打つ。
 
 ```bash
 ~/LibraShogi/bin/libra abtest --ckpt ~/libra-run/ls/checkpoints/archive/ckpt_000515078.pt \

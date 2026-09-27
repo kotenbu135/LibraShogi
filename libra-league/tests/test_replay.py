@@ -268,21 +268,75 @@ def test_runner_refuses_full_only(tmp_path: Path):
         Runner(sd, cfg, device=torch.device("cpu"))
 
 
-def test_runner_refuses_ema_and_full_sims_41(tmp_path: Path):
-    """重みの平均（[train] ema_scale）と本将棋の読みの回数（[search] full_sims_41）は比べ用なので、ランの起動で断る。"""
+def test_runner_refuses_full_sims_41(tmp_path: Path):
+    """本将棋の読みの回数（[search] full_sims_41）は比べ用なので、ランの起動で断る。"""
     import pytest
 
     from libra_league.config import load_config
     from libra_league.runner import Runner
 
-    for section, key, value in (("train", "ema_scale", 8.0), ("search", "full_sims_41", 192)):
-        cfg = load_config(None)
-        cfg["net"] = {"d_model": 32, "n_layers": 2, "n_heads": 4, "d_ff": 64, "dropout": 0.0}
-        cfg[section][key] = value
-        sd = StateDir(tmp_path / key)
-        sd.create()
-        with pytest.raises(ValueError, match=key):
-            Runner(sd, cfg, device=torch.device("cpu"))
+    cfg = load_config(None)
+    cfg["net"] = {"d_model": 32, "n_layers": 2, "n_heads": 4, "d_ff": 64, "dropout": 0.0}
+    cfg["search"]["full_sims_41"] = 192
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    with pytest.raises(ValueError, match="full_sims_41"):
+        Runner(sd, cfg, device=torch.device("cpu"))
+
+
+def _train_batch(n: int, seed: int) -> dict:
+    r = np.random.default_rng(seed)
+    t = r.uniform(-1, 1, n).astype(np.float32)
+    wdl = np.stack([np.clip(t, 0, 1), 1 - abs(t), np.clip(-t, 0, 1)], 1).astype(np.float32)
+    return {"sq": (r.random((n, 81, ls.SQ_FEATS)) < 0.1).astype(np.float32), "glob": r.random((n, ls.GLOB_FEATS)).astype(np.float32),
+            "wdl": wdl, "v41": wdl.copy(), "fuseki": r.random(n) < 0.4, "policy_idx": r.integers(0, ls.POLICY_SIZE, (n, 8)).astype(np.int64),
+            "policy_p": r.dirichlet(np.ones(8), n).astype(np.float32), "policy_valid": r.random(n) < 0.9}
+
+
+def test_runner_plays_with_the_average_and_resumes_training_from_raw(tmp_path: Path):
+    """[train] ema_scale の本番の形: チェックポイントの "model" は平均（対局に使う重み）、"model_raw" は学習中の重み。
+    起動し直すと学習は学習中の重みから、平均と更新の回数はそのまま続く。対局に使うネット（play_net）は平均。"""
+    from libra_league.config import load_config
+    from libra_league.runner import Runner
+
+    cfg = load_config(None)
+    cfg["net"] = {"d_model": 32, "n_layers": 2, "n_heads": 4, "d_ff": 64, "dropout": 0.0}
+    cfg["train"].update({"batch_size": 8, "compile": "none", "ema_scale": 4.0, "ema_period_samples": 16})  # 2 step ごと
+    cfg["run"].update({"export_onnx": False})
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    r = Runner(sd, cfg, device=torch.device("cpu"))
+    r.load()
+    assert r.play_net() is r.model  # 平均がまだ無いうちは学習中の重みで打つ
+    for i in range(5):
+        r.trainer.step(_train_batch(8, i))
+    assert r.trainer.ema_updates == 2
+    play = r.play_net()
+    assert play is not r.model and all(torch.equal(v, r.trainer.ema_state_dict()[k]) for k, v in play.state_dict().items())
+    r.checkpoint()
+    saved = torch.load(sd.checkpoints / "latest.pt", map_location="cpu", weights_only=False)
+    assert saved["ema_updates"] == 2 and saved["step"] == 5
+    assert all(torch.equal(saved["model_raw"][k], v) for k, v in r.model.state_dict().items())
+    assert all(torch.equal(saved["model"][k], v) for k, v in r.trainer.ema_state_dict().items())
+    assert any(not torch.equal(saved["model"][k], saved["model_raw"][k]) for k in saved["model"])
+    # 起動し直す: 学習中の重み・平均・更新の回数が戻り、続けた結果も止めなかった場合と同じ
+    r2 = Runner(sd, cfg, device=torch.device("cpu"))
+    r2.load()
+    assert all(torch.equal(saved["model_raw"][k], v) for k, v in r2.model.state_dict().items())
+    assert r2.trainer.ema_updates == 2 and all(torch.equal(saved["model"][k], v) for k, v in r2.play_net().state_dict().items())
+    for i in range(5, 8):
+        r.trainer.step(_train_batch(8, i))
+        r2.trainer.step(_train_batch(8, i))
+    assert r2.trainer.ema_updates == r.trainer.ema_updates == 4
+    for k, v in r.trainer.ema_state_dict().items():
+        torch.testing.assert_close(r2.trainer.ema_state_dict()[k], v, rtol=0, atol=1e-6)
+    # 平均をやめる（ema_scale = 0）: 学習は学習中の重みから続け、対局も学習中の重みに戻る
+    off = load_config(None)
+    off["net"], off["train"], off["run"] = cfg["net"], {**cfg["train"], "ema_scale": 0.0}, cfg["run"]
+    r3 = Runner(sd, off, device=torch.device("cpu"))
+    r3.load()
+    assert r3.trainer.ema is None and r3.play_net() is r3.model
+    assert all(torch.equal(saved["model_raw"][k], v) for k, v in r3.model.state_dict().items())
 
 
 def test_runner_adds_own_head_to_a_headless_checkpoint(tmp_path: Path):

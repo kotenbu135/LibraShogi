@@ -67,6 +67,11 @@ v41_weight = 0.5
 lambda_z = 1.0           # 0.5 → 1.0。布石の価値目標を結果 z だけにする（2026-09-18 のユーザーの決定。比較で差は出ず、V̂41 は補助ヘッド v41_weight 0.5 に残る）
 mirror_prob = 0.5
 grad_clip = 1.0
+# 重みの平均（EMA）。自己対局・ONNX・計測には平均の重みを使い、学習は学習中の重みで続ける（2026-09-28 のユーザーの決定「A を本番の ls に入れる」）。
+# KataGo の python/train.py（swa_scale 8、swa_period_samples 50 万局面）と自己対局への書き出し（-use-swa）と同じ形。
+# 比べで平均の重みは学習中の重みに +51.1 Elo（docs/acceleration-2026-09-27.md §5.1、docs/ls2-settings.md §1）。やめるときは 0
+ema_scale = 8.0
+ema_period_samples = 500000   # バッチ 1,024 で 488 step ごと
 
 [run]
 checkpoint_minutes = 10
@@ -112,7 +117,7 @@ reference_min = 1
 # 布石（1〜40 手目）は計測に使う重み（＝Elo を測った最強 Libra）が両陣とも作る。同じ局面を先後入れ替えて
 # 2 局ずつ打つので、布石の有利不利は打ち消し合う。相手は布石を指さないふつうの将棋エンジンでよくなる。
 # なおこの形では**布石の強さは測らない**（両陣とも Libra が作るので打ち消し合う）。測るのは 41 手目以降の将棋
-match_games = 40
+match_games = 0             # 40 → 0。外部計測はしばらく止める（2026-09-28 のユーザーの決定「外部計測はしばらく廃止でいい」。相手のエンジンが起動できず 9/27 に失敗が続いていた）
 match_fuseki = "self"
 match_opponent = "~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc"
 match_opponent_cwd = "~/fuseki-shogi-ai"

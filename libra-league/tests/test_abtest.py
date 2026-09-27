@@ -268,3 +268,20 @@ def test_full_sims_41_changes_only_the_main_game_budget():
     assert more["sims"] / more["moves"] > base["sims"] / base["moves"] * 1.5
     fuseki_only = _selfplay_stats({**cfg, "max_ply": 40})  # 40 手で終わる対局（本将棋が無い）では読みは変わらない
     assert _selfplay_stats({**cfg, "max_ply": 40, "full_sims_41": 16})["sims"] == fuseki_only["sims"]
+
+
+def test_abtest_continues_from_raw_weights_of_an_averaging_checkpoint(tmp_path: Path):
+    """本番（ema_scale 8）のチェックポイントからの比べ: 腕は学習中の重み（"model_raw"）から続け、平均を付けた腕以外に <腕>-ema は付かない。"""
+    sd, cfg = _run(tmp_path)
+    ck = torch.load(sd.checkpoints / "latest.pt", map_location="cpu", weights_only=False)
+    other = LibraNet(NetConfig.from_dict(cfg["net"])).state_dict()  # 「平均」の役
+    ck["model_raw"], ck["model"], ck["ema_updates"] = ck["model"], other, 3
+    ck["config"]["train"]["ema_scale"] = 8.0
+    torch.save(ck, sd.checkpoints / "latest.pt")
+    logs: list[str] = []
+    res = run_abtest(sd, load_config(None), sd.checkpoints / "latest.pt", ["a"], [], steps=0, games=0, sims=8, concurrent=2, threads=2, seed=5,
+                     positions=64, every=1, vs_base=False, out_dir=tmp_path / "o", device=torch.device("cpu"), chunk_index=None,
+                     games_total=None, log=logs.append)
+    a = torch.load(tmp_path / "o" / "a.pt", map_location="cpu", weights_only=False)
+    assert all(torch.equal(a["model"][k], v) for k, v in ck["model_raw"].items())
+    assert "ema" not in res["arms"]["a"] and not (tmp_path / "o" / "a-ema.pt").exists()

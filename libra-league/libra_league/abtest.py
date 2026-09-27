@@ -203,6 +203,10 @@ def run_abtest(sd: StateDir, base_cfg: dict, ckpt: Path, arms: list[str], base_s
     if config_from == "ckpt" and ck_cfg.get("train") and ck_cfg.get("search"):
         log("config: チェックポイントに保存された設定を使う（--config-from run で config.toml に切り替え）")
         base_cfg = ck_cfg
+    # 重みの平均は腕で付けたときだけ持つ（本番の ls の設定は ema_scale 8 なので、そのまま使うと全部の腕に <腕>-ema が付いて組が増える）。
+    # 元の重みは本番のチェックポイントの学習中の重み（"model_raw"）から続ける（Trainer.load_state_dict）
+    base_cfg = copy.deepcopy(base_cfg)
+    base_cfg.setdefault("train", {})["ema_scale"] = 0.0
     cfg0 = apply_sets(base_cfg, base_sets, scratch)
     ci = chunk_index if chunk_index is not None else int(ck_state.get("chunk_index", 0))
     gt = games_total if games_total is not None else int(ck_state.get("games_total", 0))

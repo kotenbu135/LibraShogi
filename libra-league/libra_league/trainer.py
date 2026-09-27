@@ -66,7 +66,6 @@ class Trainer:
         self.ema_period = max(1, round(float(cfg.get("ema_period_samples", 500000)) / cfg["batch_size"])) if self.ema_scale > 0 else 0
         self.ema: dict[str, torch.Tensor] | None = None
         self.ema_updates = 0
-        self._ema_steps = 0
 
     def update_ema(self) -> None:
         """平均を 1 回更新する（最初は写すだけ）。浮動小数でない値（あれば）は今の値を写す。"""
@@ -123,10 +122,8 @@ class Trainer:
         gn = torch.nn.utils.clip_grad_norm_(m.parameters(), self.cfg["grad_clip"])
         self.opt.step()
         self.step_count += 1
-        if self.ema_period:
-            self._ema_steps += 1
-            if self._ema_steps % self.ema_period == 0:
-                self.update_ema()
+        if self.ema_period and self.step_count % self.ema_period == 0:  # 通算の step で決める（起動し直しても更新の時点がずれない）
+            self.update_ema()
         out = {key: sum(float(p[key]) for p in parts) / len(parts) for key in parts[0] if key not in ("acc_n", "acc_d")}
         out["policy_acc"] = sum(float(p["acc_n"]) for p in parts) / max(1.0, sum(float(p["acc_d"]) for p in parts))
         return {**out, "grad_norm": float(gn), "lr": self.lr_at(self.step_count - 1)}
@@ -170,17 +167,39 @@ class Trainer:
         return loss, {key: v.detach() for key, v in st.items()}
 
     def state_dict(self) -> dict:
-        return {"model": self.model.state_dict(), "opt": self.opt.state_dict(), "step": self.step_count}
+        """チェックポイントの中身。"model" はいつも「対局に使う重み」: 平均（ema_scale > 0 で 1 回でも更新した後）があれば平均、
+        無ければ学習中の重み。平均があるときは学習中の重みを "model_raw" に分けて持つ（学習を続けるのはこちら。AdamW の状態も
+        こちらのもの）。対局・評価・書き出し・搾取者の凍結相手など "model" を読むところは、そのまま平均で打つ。"""
+        raw = self.model.state_dict()
+        ema = self.ema_state_dict()
+        if ema is None:
+            return {"model": raw, "opt": self.opt.state_dict(), "step": self.step_count}
+        return {"model": ema, "model_raw": raw, "ema_updates": self.ema_updates, "opt": self.opt.state_dict(), "step": self.step_count}
+
+    def play_state_dict(self) -> dict[str, torch.Tensor]:
+        """対局に使う重み（平均があれば平均、無ければ学習中の重み）。"""
+        return self.ema_state_dict() or self.model.state_dict()
 
     def load_state_dict(self, sd: dict) -> None:
-        """重み・AdamW の状態・step を戻す。保存した側に補助の頭（opp_head・own_head）が無ければ、その頭だけ初期値のまま・AdamW の状態も空で始める
-        （頭は最後に作るので、パラメータの並びの末尾に足されるだけ。幹と他の頭の状態はそのまま引き継ぐ）。"""
-        missing, unexpected = self.model.load_state_dict(sd["model"], strict=False)
+        """重み・AdamW の状態・step を戻す。学習は必ず学習中の重み（"model_raw"、無ければ "model"）から続ける。
+        平均を持つ設定なら、保存した平均（"model_raw" があるときの "model"）と更新の回数も戻す。平均の無い古いチェックポイントからは、
+        平均は空のまま始め、最初の更新で写す。保存した側に補助の頭（opp_head・own_head）が無ければ、その頭だけ初期値のまま・AdamW の状態も
+        空で始める（頭は最後に作るので、パラメータの並びの末尾に足されるだけ。幹と他の頭の状態はそのまま引き継ぐ）。"""
+        raw = sd.get("model_raw", sd["model"])
+        missing, unexpected = self.model.load_state_dict(raw, strict=False)
         if unexpected or any(not k.startswith(("opp_head.", "own_head.")) for k in missing):
             raise RuntimeError(f"重みが合わない: missing {missing[:5]} unexpected {unexpected[:5]}")
         if "opt" in sd:
             self.opt.load_state_dict(extend_opt_state(sd["opt"], self.opt) if missing else sd["opt"])
         self.step_count = int(sd.get("step", 0))
+        self.ema, self.ema_updates = None, 0
+        if self.ema_period and "model_raw" in sd:
+            cur = self.model.state_dict()
+            saved = sd["model"]
+            # 平均を保存した後に頭を足したときは、足した頭だけ今の値から平均を始める
+            self.ema = {k: (saved[k] if k in saved else v).detach().to(v.device).clone().float() if v.is_floating_point()
+                        else (saved[k] if k in saved else v).detach().to(v.device).clone() for k, v in cur.items()}
+            self.ema_updates = int(sd.get("ema_updates", 0))
 
 
 def masked_ce(logits: torch.Tensor, idx: torch.Tensor, p: torch.Tensor, valid: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

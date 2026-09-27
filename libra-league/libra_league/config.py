@@ -115,8 +115,9 @@ DEFAULTS: dict[str, Any] = {
         "opp_weight": 0.0,        # > 0 で補助方策「相手の次の手」を学習する（KataGo [Wu19] §3.4 は 0.15。net.opp_head が要る）。今は `libra abtest` の腕だけ
         "own_weight": 0.0,        # > 0 で補助「盤上の駒が最後まで残るか」を学習する（KataGo [Wu19] §4.1 の陣地の重み 1.5/b² の和＝マスの平均の 1.5 倍。net.own_head が要る）。今は `libra abtest` の腕だけ
         # > 0 で重みの指数移動平均（EMA）を持つ（KataGo の python/train.py の swa_scale・swa_period_samples: 最初の更新で写し、以後は
-        # period の局面ごとに 1/scale だけ今の重みへ寄せる。KataGo は自己対局に平均のほうを配る）。今は `libra abtest` の腕だけ（平均を
-        # `<腕>-ema.pt` として足して対局させる）。ランは起動で断る（docs/acceleration-2026-09-27.md §3 A）
+        # period の局面ごとに 1/scale だけ今の重みへ寄せる。KataGo は自己対局に平均のほうを配る）。ランでは自己対局・書き出し・計測に平均を
+        # 使い、チェックポイントの model を平均、model_raw を学習中の重みにする（2026-09-28 から ls で 8。docs/ls2-settings.md §1）。
+        # `libra abtest` では腕で付けたときだけ持ち、平均を `<腕>-ema.pt` として足して対局させる
         "ema_scale": 0.0,
         "ema_period_samples": 500000,  # KataGo の既定（1 エポック 100 万局面の半分）。バッチ 1,024 で約 488 step ごと
         "accum_steps": 1,         # > 1 でバッチを分けて勾配を足し合わせる（大きいネットがメモリに載らないとき。`libra abtest --scratch` 用）

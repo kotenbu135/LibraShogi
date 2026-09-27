@@ -174,3 +174,34 @@ def test_ema_off_by_default():
     tr = Trainer(LibraNet(SMALL), _cfg("none"), torch.device("cpu"))
     tr.step(_batch(8, 0))
     assert tr.ema_period == 0 and tr.ema_state_dict() is None
+
+
+def test_ema_checkpoint_resumes_from_raw_and_restores_the_average():
+    """チェックポイントの "model" は平均、"model_raw" は学習中の重み。読み戻すと学習は学習中の重みから、平均は同じ値と回数で続く。
+    平均の無い古いチェックポイントからは平均は空で始まり、平均をやめた設定では学習中の重みだけを読む。"""
+    torch.manual_seed(0)
+    cfg = {**_cfg("none"), "batch_size": 8, "ema_scale": 4.0, "ema_period_samples": 16}
+    a = Trainer(LibraNet(SMALL), cfg, torch.device("cpu"))
+    for i in range(5):
+        a.step(_batch(8, i))
+    sd = copy.deepcopy(a.state_dict())
+    assert set(sd) >= {"model", "model_raw", "ema_updates"} and sd["ema_updates"] == 2
+    b = Trainer(LibraNet(SMALL), cfg, torch.device("cpu"))
+    b.load_state_dict(sd)
+    assert all(torch.equal(b.model.state_dict()[k], v) for k, v in sd["model_raw"].items())
+    assert b.ema_updates == 2 and all(torch.equal(b.ema_state_dict()[k], v) for k, v in sd["model"].items())
+    for i in range(5, 9):
+        a.step(_batch(8, i))
+        b.step(_batch(8, i))
+    for k, v in a.model.state_dict().items():
+        torch.testing.assert_close(b.model.state_dict()[k], v, rtol=0, atol=1e-6)
+    for k, v in a.ema_state_dict().items():
+        torch.testing.assert_close(b.ema_state_dict()[k], v, rtol=0, atol=1e-6)
+    off = Trainer(LibraNet(SMALL), _cfg("none"), torch.device("cpu"))
+    off.load_state_dict(sd)
+    assert off.ema is None and all(torch.equal(off.model.state_dict()[k], v) for k, v in sd["model_raw"].items())
+    old = {"model": sd["model_raw"], "opt": sd["opt"], "step": sd["step"]}
+    fresh = Trainer(LibraNet(SMALL), cfg, torch.device("cpu"))
+    fresh.load_state_dict(old)
+    assert fresh.ema is None and fresh.play_state_dict() is not None
+    assert all(torch.equal(fresh.model.state_dict()[k], v) for k, v in old["model"].items())

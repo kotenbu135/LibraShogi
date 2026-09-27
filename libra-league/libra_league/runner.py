@@ -41,12 +41,13 @@ class Runner:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = LibraNet(NetConfig.from_dict(cfg["net"])).to(self.device)
         self.trainer = Trainer(self.model, cfg["train"], self.device)
+        # 対局に使う重み（[train] ema_scale > 0 なら重みの平均。KataGo の自己対局と同じ。docs/acceleration-2026-09-27.md §5.1）の入れ物
+        self._play: LibraNet | None = None
+        self._play_updates = -1
         tr, sr, rr = cfg["train"], cfg["search"], cfg["run"]
         if tr.get("full_only"):
             # 学習量（局面数 × replay_ratio / batch）を全読みの局面で数え直す形はまだ無い。今は `libra abtest` の腕の比較用だけ
             raise ValueError("[train] full_only はランではまだ使えない（libra abtest の比較用）")
-        if float(tr.get("ema_scale", 0.0)) > 0:
-            raise ValueError("[train] ema_scale はランではまだ使えない（libra abtest の比較用。docs/acceleration-2026-09-27.md §3 A）")
         if int(cfg["search"].get("full_sims_41", 0)) > 0:
             raise ValueError("[search] full_sims_41 はランではまだ使えない（libra eval --b-set の比較用。docs/acceleration-2026-09-27.md §3 B）")
         # 補助の頭（[net] opp_head・own_head と [train] opp_weight・own_weight）は学習だけで使う。頭の無いチェックポイントから
@@ -125,6 +126,9 @@ class Runner:
             self.state["step"] = self.trainer.step_count
             if "rng" in sd:
                 self.rng.bit_generator.state = sd["rng"]
+        if self.trainer.ema_period:
+            self.log(f"ema: scale {self.trainer.ema_scale:g}, every {self.trainer.ema_period} steps, "
+                     + (f"{self.trainer.ema_updates} updates restored" if self.trainer.ema is not None else "no average yet (first update copies)"))
         self.replay.load(self.state["chunk_index"], self.state["games_total"])
         # 索引に無いチャンク（書きかけ）は捨てる。書き終えたチャンクだけを索引に載せる設計
         for p in self.sd.replay.glob("chunk_*.tmp"):
@@ -164,12 +168,25 @@ class Runner:
         if self.exploiter_stats["games"]:
             self.state["exploiter_stats"] = dict(self.exploiter_stats)
         self.sd.write_state(self.state)
-        self.log(f"checkpoint step={step} games={self.state['games_total']} ({time.time() - t0:.1f}s)")
+        self.log(f"checkpoint step={step} games={self.state['games_total']}"
+                 + (f" ema_updates={self.trainer.ema_updates}" if self.trainer.ema_period else "") + f" ({time.time() - t0:.1f}s)")
         if self.cfg["run"].get("export_onnx", False):
             self.export_onnx(latest)
         self.auto.on_checkpoint(path)
         self.auto.poll()
         self.sd.write_state(self.state)
+
+    def play_net(self) -> LibraNet:
+        """対局に使うネット: 重みの平均があれば平均を入れた別のネット（更新のたびに入れ直す）、無ければ学習中のネットそのもの。
+        自己対局・リーグ・ワーカーへの配布・ONNX の書き出し・搾取者の布石の写しはこれを使う。`gen`（held-out との差）は学習中の重みで測る。"""
+        if self.trainer.ema is None:
+            return self.model
+        if self._play is None:
+            self._play = LibraNet(NetConfig.from_dict(self.cfg["net"])).to(self.device).eval()
+        if self._play_updates != self.trainer.ema_updates:
+            self._play.load_state_dict(self.trainer.ema_state_dict())
+            self._play_updates = self.trainer.ema_updates
+        return self._play
 
     def export_onnx(self, ckpt: Path) -> None:
         """latest.pt → latest.onnx（原子的に置き換え）。失敗してもランは止めない。"""
@@ -179,7 +196,7 @@ class Runner:
             from libra_net.export_onnx import export_model
 
             t0 = time.time()
-            m = copy.deepcopy(self.model).float().cpu().eval()
+            m = copy.deepcopy(self.play_net()).float().cpu().eval()
             out = ckpt.with_suffix(".onnx")
             tmp = out.with_suffix(".onnx.tmp")
             export_model(m, tmp, {"libra_step": str(self.trainer.step_count), "libra_net": self.cfg["net"], "libra_source": ckpt.name, "license": "Apache-2.0"})
@@ -193,7 +210,7 @@ class Runner:
         if self.inbox is None:
             return
         try:
-            publish_weights(self.sd.weights / "latest.pt", self.model, self.trainer.step_count, self.cfg["net"], self.cfg["run_id"])
+            publish_weights(self.sd.weights / "latest.pt", self.play_net(), self.trainer.step_count, self.cfg["net"], self.cfg["run_id"])
         except OSError as e:
             self.log(f"workers: publish failed: {e}")
 
@@ -419,7 +436,7 @@ class Runner:
         step = self.trainer.step_count
         try:
             pool.mkdir(parents=True, exist_ok=True)
-            publish_weights(pool / pool_name(step), self.model, step, self.cfg["net"], self.cfg["run_id"])
+            publish_weights(pool / pool_name(step), self.play_net(), step, self.cfg["net"], self.cfg["run_id"])
             prune_pool(pool, int(ex.get("pool_keep", 10)))
             self.log(f"exploiter: saved snapshot step {step} to {pool}")
         except OSError as e:
@@ -437,7 +454,7 @@ class Runner:
         # （2026-09-17、割合を変えるかはユーザーの判断待ち。それまでの搾取者モードのキャッシュ無しと同じ）
         self.league_loop = SelfPlayLoop({**self.cfg["search"], "eval_cache": False}, int(lg["n_games"]), int(lg["threads"]), int(self.rng.integers(0, 2**63)), self.device,
                                         sp["infer_dtype"], sp.get("compile", "none"))
-        self.league_loop.set_model(self.model)
+        self.league_loop.set_model(self.play_net())
         self.state.setdefault("league", {}).setdefault("stats", {})
         self.league_switch()
 
@@ -681,7 +698,7 @@ class Runner:
         sp = self.cfg["selfplay"]
         self.loop = SelfPlayLoop(self.cfg["search"], sp["n_games"], sp["threads"], int(self.rng.integers(0, 2**63)), self.device, sp["infer_dtype"],
                                  sp.get("compile", "none"))
-        self.loop.set_model(self.model)
+        self.loop.set_model(self.play_net())
         self.loop.timing = {}
         self.load_opponent()
         self.ensure_pool_snapshot()
@@ -773,9 +790,9 @@ class Runner:
                 self.last_train["sec"] = round(time.time() - t0, 1)
                 self.last_train["target"] = summarize_target_stats(target_acc)  # 学習目標と結果の差（metrics.jsonl・コンソール）
                 with self.timer.phase("train_publish"):
-                    self.loop.set_model(self.model)
+                    self.loop.set_model(self.play_net())
                     if self.league_loop is not None:
-                        self.league_loop.set_model(self.model)
+                        self.league_loop.set_model(self.play_net())
                     self.publish_weights()
                 self.state["step"] = self.trainer.step_count
                 new_games = 0
