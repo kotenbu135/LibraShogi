@@ -147,6 +147,9 @@ DEFAULTS: dict[str, Any] = {
              # 最強比（docs/restart-plan.md §3 M2）: これまでで最強の保存済みと best_games 局。95% 区間の下限が 0 を超えたら最強を置き換える。
              # best_stall_alert 回続けて更新できなければログに WARNING。0 で無効
              "best_games": 0, "best_stall_alert": 3,
+             # 布石と本将棋の分け方（docs/acceleration-2026-09-27.md §3 C）: 最強比を打つ節目に、新しい重みを布石だけ・本将棋だけに使って
+             # 最強と split_games 局ずつ打つ（`libra eval --a41`）。学習データは変わらない。0 で無効
+             "split_games": 0,
              # 固定の参照（同 M4）: run をまたいで同じ重み（例: 旧 ls の 646,699 と実験の win1m.pt）と reference_games 局ずつ打つ。空で無効
              "reference_ckpts": [], "reference_games": 0,
              # 参照に勝ちすぎたら自動で外し、そのときの archive を参照にする（0 で無効。docs/runbook.md §6）。

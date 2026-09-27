@@ -288,6 +288,11 @@ def collect_best(sd: StateDir) -> list[dict]:
     return _collect_jsonl(sd, "best.jsonl")
 
 
+def collect_split(sd: StateDir) -> list[dict]:
+    """eval/split.jsonl（布石と本将棋の分け方の推移）。"""
+    return _collect_jsonl(sd, "split.jsonl")
+
+
 def collect_reference(sd: StateDir) -> list[dict]:
     """eval/reference.jsonl（固定の参照との差の推移）。"""
     return _collect_jsonl(sd, "reference.jsonl")
@@ -419,6 +424,7 @@ class AutoJobs:
     def on_new_archive(self, new: Path) -> None:
         """基準が無ければこの世代を基準にし、あれば基準との対局を積む。最強比（best）と固定の参照（reference）も同じ節目で積む。"""
         best_job = self.enqueue_best(new)
+        self.enqueue_split(new, best_job)
         self.enqueue_references(new)
         if int(self.acfg.get("anchor_games", 0)) <= 0:
             return
@@ -458,6 +464,40 @@ class AutoJobs:
         st["queue"].append({"kind": "best", "args": self._eval_args(a, new, games, out), "out": str(out)})
         self.log(f"auto: queued best {a.name} vs {new.name} ({games} games)")
         return {"a": str(a), "out": str(out)}
+
+    # -- 布石と本将棋の分け方（split、docs/acceleration-2026-09-27.md §3 C）: 最強比と同じ相手で、新しい重みを片方の段階だけに使う --
+    def enqueue_split(self, new: Path, best_job: dict | None) -> None:
+        """最強比を積んだ節目に、「布石だけ新（41 手目から最強）」と「本将棋だけ新（1〜40 手目は最強）」を最強と split_games 局ずつ打つ。
+        全体の伸びは最強比そのもの。結果は eval/split/（eval/*.json の一覧に混ぜない）と eval/split.jsonl。"""
+        games = int(self.acfg.get("split_games", 0))
+        if games <= 0 or best_job is None:
+            return
+        best = Path(best_job["a"])
+        st = self._st()
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        for phase, a, a41 in (("fuseki", new, best), ("main", best, new)):
+            out = self.sd.root / "eval" / "split" / f"split-{ts}-{ckpt_step(best)}-{ckpt_step(new)}-{phase}.json"
+            out.parent.mkdir(parents=True, exist_ok=True)  # 途中の局を残す <out>.partial.jsonl を最初の局から書くため
+            st["queue"].append({"kind": "split", "phase": phase, "args": self._eval_args(a, best, games, out) + ["--a41", str(a41)],
+                                "out": str(out)})
+        self.log(f"auto: queued split {best.name} / {new.name} ({games} games x 2)")
+
+    def record_split(self, job: dict) -> None:
+        """分け方の結果を eval/split.jsonl に足す。elo は「その段階だけ新しい重みにした側」から見た最強との差。"""
+        try:
+            r = json.loads(Path(job["out"]).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            self.log(f"auto: split result unreadable: {e}")
+            return
+        if r.get("elo_a_minus_b") is None:
+            return
+        phase = job.get("phase")
+        new = r.get("a") if phase == "fuseki" else r.get("a41")
+        row = {"t": time.time(), "step": ckpt_step(new or ""), "games": self.state.get("games_total"), "best_step": ckpt_step(r.get("b", "")),
+               "phase": phase, "n": r.get("n"), "elo": r.get("elo_a_minus_b"), "ci95": r.get("elo_ci95")}
+        with open(self.sd.root / "eval" / "split.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        self.log(f"auto: split {phase} step {row['step']} vs best {row['best_step']}: {float(row['elo']):+.1f} Elo {row['ci95']}")
 
     def _eval_args(self, a: Path, b: Path, games: int, out: Path) -> list[str]:
         return ["eval", "--a", str(a), "--b", str(b), "--games", str(games),
@@ -834,6 +874,8 @@ class AutoJobs:
                 self.record_best(job)
             elif job.get("kind") == "reference" and rc == 0:
                 self.record_reference(job)
+            elif job.get("kind") == "split" and rc == 0:
+                self.record_split(job)
             if rc != 0:
                 # 失敗の理由は auto.log にしか出ない。末尾を state に写して progress と review から見えるようにする
                 job["tail"] = _log_tail(self.sd.root / "auto.log")
@@ -914,7 +956,7 @@ class AutoJobs:
         if out.exists():
             out.replace(out.with_name(out.name + ".interrupted"))
         if not any(q.get("out") == job["out"] for q in st["queue"]):
-            st["queue"].insert(0, {k: job[k] for k in ("kind", "args", "out", "ref", "anchor_step", "anchor_offset", "reuse") if k in job})
+            st["queue"].insert(0, {k: job[k] for k in ("kind", "args", "out", "ref", "anchor_step", "anchor_offset", "reuse", "phase") if k in job})
 
     def recover(self) -> None:
         """前のランナーが stop() を通らずに終わった（abort など）ときに残った計測ジョブを止めて積み直す。load() の後に 1 回呼ぶ。

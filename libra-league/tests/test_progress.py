@@ -243,3 +243,15 @@ def test_snapshot_carries_exploiter_curriculum(tmp_path):
     sd.status_json.write_text(json.dumps(st), encoding="utf-8")
     md = format_md(snapshot(sd, {}))
     assert "| 課程 | 終えた（6 段。" in md and "| 対本体 勝率 | 10.0%" in md
+
+
+def test_format_md_shows_the_latest_split_pair():
+    """分け方（eval/split.jsonl）の直近の節目の 2 行を 1 行にまとめて出す。古い節目の行は出さない。"""
+    from libra_league.progress import format_md
+
+    rows = [{"step": 1, "best_step": 0, "phase": "fuseki", "n": 1000, "elo": 5.0, "ci95": [-17.0, 27.0]},
+            {"step": 2, "best_step": 1, "phase": "fuseki", "n": 1000, "elo": 12.5, "ci95": [-9.5, 34.5]},
+            {"step": 2, "best_step": 1, "phase": "main", "n": 1000, "elo": 20.0, "ci95": [-2.0, 42.0]}]
+    md = format_md({"run": "ls", "generated": "2026-09-28 01:00", "process": "running", "now": {}, "auto": {}, "split": rows})
+    line = next(x for x in md.splitlines() if x.startswith("| 分け方"))
+    assert "step 2 vs 最強 1" in line and "布石だけ新 +12.5" in line and "本将棋だけ新 +20.0" in line and "+5.0" not in line

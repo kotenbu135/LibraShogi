@@ -138,8 +138,9 @@ def _anchor_jobs(tmp_path, **acfg):
         "a = sys.argv[sys.argv.index('--a') + 1]; b = sys.argv[sys.argv.index('--b') + 1]\n"
         "o = pathlib.Path(sys.argv[sys.argv.index('--out') + 1]); o.parent.mkdir(parents=True, exist_ok=True)\n"
         "elo, score = float(pathlib.Path(b + '.elo').read_text()), float(pathlib.Path(b + '.score').read_text())\n"
+        "a41 = sys.argv[sys.argv.index('--a41') + 1] if '--a41' in sys.argv else None\n"
         "o.write_text(json.dumps({'a': a, 'b': b, 'n': 100, 'score_a': score, 'elo_a_minus_b': elo,\n"
-        "                         'elo_ci95': [elo - 70, elo + 70]}))\n")
+        "                         'elo_ci95': [elo - 70, elo + 70], **({'a41': a41} if a41 else {})}))\n")
     cfg = load_config(None)
     cfg["auto"].update({"enabled": True, "every_games": 1000, "match_games": 0, "chain_eval": False})
     cfg["auto"].update(acfg)
@@ -363,6 +364,28 @@ def test_best_tracks_strongest_and_counts_stall(tmp_path):
     jobs.enqueue_best(sd.checkpoints / "archive" / "ckpt_000002000.pt")
     assert not state["auto"]["queue"]
     assert [h["kind"] for h in state["auto"]["history"]] == ["best", "best", "best"]
+
+
+def test_split_plays_each_phase_against_the_best(tmp_path):
+    """分け方（split_games）: 最強比を積んだ節目に、布石だけ新・本将棋だけ新の 2 局組を最強と打ち、eval/split.jsonl に残す。
+    結果は eval/split/ に置き、eval/*.json の一覧（collect_evals）には混ぜない。最強の決まっていない最初の節目では打たない。"""
+    from libra_league.auto import collect_evals, collect_split
+
+    sd, jobs, state = _anchor_jobs(tmp_path, anchor_games=0, best_games=1000, split_games=500)
+    _archive(sd, jobs, 1000, 1000.0)
+    assert not collect_split(sd)
+    _archive(sd, jobs, 2000, 1000.0 + 3600, elo=-100.0, score=0.3)
+    rows = collect_split(sd)
+    assert [(r["phase"], r["step"], r["best_step"]) for r in rows] == [("fuseki", 2000, 1000), ("main", 2000, 1000)]
+    assert [h["kind"] for h in state["auto"]["history"]] == ["best", "split", "split"]
+    split_jobs = [h for h in state["auto"]["history"] if h["kind"] == "split"]
+    fus, main = (h["args"] for h in split_jobs)
+    arc = sd.checkpoints / "archive"
+    assert fus[fus.index("--a") + 1].endswith("ckpt_000002000.pt") and fus[fus.index("--a41") + 1].endswith("ckpt_000001000.pt")
+    assert main[main.index("--a") + 1].endswith("ckpt_000001000.pt") and main[main.index("--a41") + 1].endswith("ckpt_000002000.pt")
+    assert all(a[a.index("--b") + 1] == str(arc / "ckpt_000001000.pt") and a[a.index("--games") + 1] == "500" for a in (fus, main))
+    assert len(list((sd.root / "eval" / "split").glob("*.json"))) == 2
+    assert all(not e["file"].startswith("split") for e in collect_evals(sd))
 
 
 def test_reference_evals_against_fixed_checkpoints(tmp_path):

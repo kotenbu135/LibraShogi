@@ -123,7 +123,7 @@ def _metric_row(r: dict) -> dict:
 def snapshot(sd: StateDir, cfg: dict | None = None, points: int = 120, now: float | None = None) -> dict:
     """リポジトリに置く要約。`libra status --json --history` と `libra review --json` と同じ値を、
     クラウドから読むぶんだけ絞って 1 つの dict にする。"""
-    from .auto import collect_anchor, collect_best, collect_matches, collect_reference, list_archives, load_metrics
+    from .auto import collect_anchor, collect_best, collect_matches, collect_reference, collect_split, list_archives, load_metrics
     from .review import review
     from .supervise import running_pid
 
@@ -172,11 +172,12 @@ def snapshot(sd: StateDir, cfg: dict | None = None, points: int = 120, now: floa
                      for j in (auto.get("history") or [])[-8:]],
         },
         "auto_cfg": {k: acfg.get(k) for k in ("enabled", "every_games", "eval_games", "eval_sims", "anchor_games",
-                                              "best_games", "reference_games", "reference_ckpts", "reference_rotate",
+                                              "best_games", "split_games", "reference_games", "reference_ckpts", "reference_rotate",
                                               "reference_min", "match_games",
                                               "match_go", "match_go_opp", "match_opponent_opt", "match_libra_opt",
                                               "match_fuseki", "match_opponent", "match_libra_standard", "match_use_best")},
         "best": collect_best(sd),
+        "split": collect_split(sd),
         "anchor": collect_anchor(sd),
         "reference": collect_reference(sd),
         "matches": collect_matches(sd),
@@ -294,6 +295,11 @@ def format_md(s: dict) -> str:
     if b:
         r = b[0]
         L.append(f"| 最強比（直近） | step {_fmt(r.get('step'))} vs {_fmt(r.get('best_step'))}: {_fmt(r.get('elo_vs_best'), plus=True)} Elo 区間 {r.get('ci95')}（{_fmt(r.get('n'))} 局） |")
+    sp = {r.get("phase"): r for r in (s.get("split") or []) if r.get("step") == ((s.get("split") or [{}])[-1]).get("step")}
+    if sp:
+        r = next(iter(sp.values()))
+        parts = [f"{name} {_fmt(sp[k].get('elo'), plus=True)} 区間 {sp[k].get('ci95')}" for k, name in (("fuseki", "布石だけ新"), ("main", "本将棋だけ新")) if k in sp]
+        L.append(f"| 分け方（直近） | step {_fmt(r.get('step'))} vs 最強 {_fmt(r.get('best_step'))}: {'、'.join(parts)}（{_fmt(r.get('n'))} 局ずつ） |")
     an = (s.get("anchor") or [])[-1:]
     if an:
         r = an[0]
