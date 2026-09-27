@@ -45,8 +45,8 @@ class Runner:
         if tr.get("full_only"):
             # 学習量（局面数 × replay_ratio / batch）を全読みの局面で数え直す形はまだ無い。今は `libra abtest` の腕の比較用だけ
             raise ValueError("[train] full_only はランではまだ使えない（libra abtest の比較用）")
-        if float(tr.get("opp_weight", 0.0)) > 0 or float(tr.get("own_weight", 0.0)) > 0 or cfg["net"].get("opp_head") or cfg["net"].get("own_head"):
-            raise ValueError("[train] opp_weight・own_weight と [net] opp_head・own_head はランではまだ使えない（libra abtest の比較用）")
+        # 補助の頭（[net] opp_head・own_head と [train] opp_weight・own_weight）は学習だけで使う。頭の無いチェックポイントから
+        # 続けるときは初期値の頭を足す（Trainer.load_state_dict）。幹の形と ONNX の出力（方策・形勢・V̂41）は変わらない
         self.replay = ReplayBuffer(sd.replay, sd.games, tr["window_games"], rr["chunk_games"], sr["max_ply"], sr["count_from_41"],
                                    window_frac=float(tr.get("window_frac", 0.0)), window_games_max=int(tr.get("window_games_max", 0)),
                                    heldout_every_chunks=int(rr.get("heldout_every_chunks", 0)), heldout_games=int(rr.get("heldout_games", 20000)))
@@ -531,7 +531,7 @@ class Runner:
                 loop.timing = {}
         return out
 
-    TRAIN_STAT_KEYS = ("loss", "policy", "value", "v41", "policy_acc", "grad_norm", "lr")
+    TRAIN_STAT_KEYS = ("loss", "policy", "value", "v41", "policy_acc", "grad_norm", "lr", "opp", "own")
     RATE_MIN_SPAN_S = 60.0  # これより短い窓からは局/日を出さない（起動直後の 0 は「止まっている」に読めるため）
 
     def add_train_stats(self, tr: dict) -> None:
@@ -747,7 +747,8 @@ class Runner:
                 steps = train_steps(new_games, avg_len, tr)
                 t0 = time.time()
                 # バッチ作成（CPU、replay_features は GIL を離す）と学習ステップ（GPU）を重ねる
-                sample = lambda: self.replay.sample(tr["batch_size"], self.rng, tr["mirror_prob"], tr["lambda_z"], self.cfg["search"]["policy_topk"])  # noqa: E731
+                sample = lambda: self.replay.sample(tr["batch_size"], self.rng, tr["mirror_prob"], tr["lambda_z"], self.cfg["search"]["policy_topk"],  # noqa: E731
+                                                    opp=self.trainer.opp, own=self.trainer.own)
                 fut = self.pool.submit(sample)
                 target_acc: dict = {}
                 for _ in range(steps):
