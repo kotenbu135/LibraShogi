@@ -89,7 +89,8 @@ def _load_partial(path: Path, header: dict) -> list[dict]:
 @torch.no_grad()
 def play_match(model_a: LibraNet, model_b: LibraNet, search_cfg: dict, n_games: int, concurrent: int, threads: int, seed: int,
                device: torch.device, dtype: torch.dtype = torch.float16, log=None, search_cfg_b: dict | None = None,
-               partial: Path | None = None, partial_tag: dict | None = None) -> dict:
+               partial: Path | None = None, partial_tag: dict | None = None, model_a41: LibraNet | None = None,
+               model_b41: LibraNet | None = None) -> dict:
     """A と B を n_games 局打つ。A の先手（偶数枠）と後手（奇数枠）はちょうど半分ずつ（奇数なら先手が 1 局多い）。
 
     局数ちょうどで止めるときに打ちかけの対局を捨てない: 枠ごとに「次の対局を始めてよいか」を始める前に決め
@@ -97,7 +98,11 @@ def play_match(model_a: LibraNet, model_b: LibraNet, search_cfg: dict, n_games: 
     短い対局に偏り、同時に打つ数（concurrent）を増やすほど偏りが大きくなる（2026-09-24 まではこの形で、64 枠・2,000 局で約 3%）。
 
     partial を渡すと、数えた対局を 1 局ずつ追記し、次に同じ条件で呼ばれたらその続きから打つ（ランの停止・起動で
-    計測ジョブが止められても、打ち終えた対局を捨てない）。続きは種を変えて打つ（同じ種だと同じ対局をもう一度打つため）。"""
+    計測ジョブが止められても、打ち終えた対局を捨てない）。続きは種を変えて打つ（同じ種だと同じ対局をもう一度打つため）。
+
+    model_a41・model_b41 を渡すと、その側は 41 手目（本将棋）からそのネットで読む（1〜40 手目の布石は model_a・model_b）。
+    布石と本将棋のどちらで強くなったかを、新旧の重みを組み合わせて分けるのに使う。替えるのは根の段階で決めるので、
+    40 手目の読みの中の本将棋の局面は布石のネットが評価する（指し手を決めた側のネットで読む）。"""
     cfg = dict(search_cfg)
     cfg["full_prob"] = 1.0  # 評価は全読みで固定
     cfg["resign_threshold"] = 0.0  # 計測の対局では投了しない（誤投了が Elo に乗ると物差しが狂う。自己対局だけで使う）
@@ -146,6 +151,16 @@ def play_match(model_a: LibraNet, model_b: LibraNet, search_cfg: dict, n_games: 
     sq = np.zeros((n_slots, 81, ls.SQ_FEATS), np.float32)
     glob = np.zeros((n_slots, ls.GLOB_FEATS), np.float32)
     slot_swap = (np.arange(n_slots) % 2).astype(np.int8)  # 奇数枠は B が先手
+    split41 = model_a41 is not None or model_b41 is not None
+    # (ネット, 受け持つ who の値)。同じネットが布石と本将棋の両方を受け持つときは 1 回にまとめて評価する
+    nets: list[tuple[LibraNet, list[int]]] = []
+    for k, model in enumerate((model_a, model_b) + ((model_a41 or model_a, model_b41 or model_b) if split41 else ())):
+        for m, ks in nets:
+            if m is model:
+                ks.append(k)
+                break
+        else:
+            nets.append((model, [k]))
     t0 = time.time()
     last_log = 0
     try:
@@ -154,13 +169,15 @@ def play_match(model_a: LibraNet, model_b: LibraNet, search_cfg: dict, n_games: 
                 raise RuntimeError(f"eval: all slots stopped at {len(games)}/{n_games} games")
             eng.collect(sq, glob)
             who = eng.root_turns() ^ slot_swap  # 0 なら A のネット、1 なら B
+            if split41:
+                who = who + 2 * eng.root_phases()  # 2・3 は 41 手目からの A・B
             logits = np.zeros((n_slots, ls.POLICY_SIZE), np.float32)
             wdl = np.zeros((n_slots, 3), np.float32)
             sq_t = torch.from_numpy(sq).to(device).to(dtype)
             gl_t = torch.from_numpy(glob).to(device).to(dtype)
             outs = []
-            for k, model in ((0, model_a), (1, model_b)):
-                idx = np.flatnonzero((who == k) & ~idle)
+            for model, ks in nets:
+                idx = np.flatnonzero(np.isin(who, ks) & ~idle)
                 if idx.size == 0:
                     continue
                 it = torch.from_numpy(idx).to(device)
@@ -238,16 +255,21 @@ def play_match(model_a: LibraNet, model_b: LibraNet, search_cfg: dict, n_games: 
 
 
 def main_eval(a: Path, b: Path, search_cfg: dict, n_games: int, concurrent: int, threads: int, seed: int, out: Path | None,
-              search_cfg_b: dict | None = None) -> dict:
+              search_cfg_b: dict | None = None, a41: Path | None = None, b41: Path | None = None) -> dict:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ma = load_model(a, device)
     mb = load_model(b, device)
+    ma41 = load_model(a41, device) if a41 else None
+    mb41 = load_model(b41, device) if b41 else None
+    tag41 = {**({"a41": str(a41)} if a41 else {}), **({"b41": str(b41)} if b41 else {})}
     # 打ち終えた対局は <out>.partial.jsonl に 1 局ずつ残し、止められて同じ引数で起動し直されたら続きから打つ（auto.py の積み直し）
     partial = out.with_name(out.name + ".partial.jsonl") if out else None
     res = play_match(ma, mb, search_cfg, n_games, concurrent, threads, seed, device, log=lambda s: print(s, flush=True),
-                     search_cfg_b=search_cfg_b, partial=partial, partial_tag={"a": str(a), "b": str(b), "seed": seed})
+                     search_cfg_b=search_cfg_b, partial=partial, partial_tag={"a": str(a), "b": str(b), "seed": seed, **tag41},
+                     model_a41=ma41, model_b41=mb41)
     res["a"] = str(a)
     res["b"] = str(b)
+    res.update(tag41)
     if out:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")

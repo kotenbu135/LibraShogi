@@ -91,3 +91,38 @@ def test_main_eval_removes_the_partial_file_when_done(tmp_path: Path, monkeypatc
     res = evaluate.main_eval(tmp_path / "a.pt", tmp_path / "b.pt", CFG, 4, 4, 2, 0, out)
     assert res["n"] == 4 and out.exists()
     assert not out.with_name(out.name + ".partial.jsonl").exists()
+
+
+CFG41 = {**CFG, "max_ply": 56}  # 41 手目から 16 手まで打つ
+
+
+class _Spy(torch.nn.Module):
+    """評価した行の「葉が布石か」（glob[16]）を記録するネット。"""
+
+    def __init__(self, net: LibraNet):
+        super().__init__()
+        self.net, self.fuseki = net, []
+
+    def forward(self, sq, glob):
+        self.fuseki.extend(glob[:, 16].tolist())
+        return self.net(sq, glob)
+
+
+def test_play_match_switches_a_side_net_from_move_41():
+    """model_a41 を渡すと A 側は 41 手目から そのネットで読む: 本将棋の根からは本将棋の葉しか出ないので、
+    model_a41 が見る行はすべて本将棋、布石の A のネットは布石の行を受け持つ。B 側は替わらない。"""
+    a, a41, b = _Spy(_net(1)), _Spy(_net(3)), _Spy(_net(2))
+    res = evaluate.play_match(a, b, CFG41, 4, 4, 2, 0, torch.device("cpu"), torch.float32, model_a41=a41)
+    assert res["n"] == 4 and res["avg_plies"] > 40
+    assert a41.fuseki and set(a41.fuseki) == {0.0}
+    assert 1.0 in a.fuseki
+    assert 1.0 in b.fuseki and 0.0 in b.fuseki  # B は布石も本将棋も同じネット
+
+
+def test_play_match_split41_with_the_same_weights_plays_the_same_games():
+    """41 手目から同じ重みの別のネットに替えても、対局は替えないときと同じ（行の振り分けだけが変わる）。"""
+    base = evaluate.play_match(_net(1), _net(2), CFG41, 4, 4, 2, 0, torch.device("cpu"), torch.float32)
+    split = evaluate.play_match(_net(1), _net(2), CFG41, 4, 4, 2, 0, torch.device("cpu"), torch.float32,
+                                model_a41=_net(1), model_b41=_net(2))
+    for k in ("a_as_sente", "a_as_gote", "reasons", "avg_plies"):
+        assert split[k] == base[k]

@@ -318,6 +318,24 @@ Y=~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc   # 手元のやね
 側ごとに変えられるのは読む手の選び方だけ（`full_sims`・`fast_sims`・`gumbel_m_full`・`gumbel_m_fast`・`c_visit`・`c_scale`・`gumbel_rescale`・`gumbel_noise`・`cpuct`）。ほかの鍵を渡すと例外になる（枠ごとに棋譜や記録の形が変わってしまうため）。
 **これは「読む手の選び方」の比較で、σ が学習データ（方策の目標）の形を変える分は測れない**（窓の中の目標は今の σ で作った棋譜のもの）。そこまで見るなら σ を変えた自己対局を別に回すことになる。
 
+## 7.2 布石と本将棋のどちらで強くなったかを分ける（`libra eval --a41`）
+
+新しい重み N と旧い重み O を、布石（1〜40 手目）と本将棋（41 手目から）で組み合わせて O と打たせる。`--a41` は A 側が 41 手目から使う重み（`--b41` は B 側）。
+GPU を使うので **ls・lx をコンソールで止めてから**回す。1 回 2,000 局で数十分（未測定）。
+
+```bash
+N=~/libra-run/ls/checkpoints/archive/ckpt_000515078.pt   # 600 万局
+O=~/libra-run/ls/checkpoints/archive/ckpt_000317975.pt   # 360 万局（v0.2）
+cd ~/LibraShogi
+bin/libra eval --a $N --a41 $O --b $O --games 2000 --publish   # 布石だけ新しい → 布石の伸び
+bin/libra eval --a $O --a41 $N --b $O --games 2000 --publish   # 本将棋だけ新しい → 本将棋の伸び
+bin/libra eval --a $N --b $O --games 2000 --publish            # 全部新しい → 全体の伸び
+```
+
+- 出力は `~/libra-run/experiments/<時刻>-split41.json`（`--a41`・`--b41` を付けた対局は run の `eval/` に置かない。コンソールの Elo の一覧に混ざるため）。`--publish` で `progress` ブランチの `experiments/` にも出る。
+- 読み方: 前 2 つの Elo の和が 3 つ目と区間の中で合えば、全体の伸びを布石と本将棋に分けられる。合わなければ、布石と本将棋の強さが噛み合って効いている（docs/method-evidence.md §2.14）。
+- 替えるのは指し手を決める側の段階で決める。40 手目の読みの中で本将棋の局面を評価するのは布石のネット。
+
 ## 8. desktop で Libra と指す（自分で体感する）
 
 desktop（天秤将棋GUI 0.10.3、`%LOCALAPPDATA%\天秤将棋GUI\tenbin-shogi-gui.exe`）には Windows 版 `libra.exe` を「LibraShogi 0.0.2」として登録済み（**v0.2 から名乗りは `LibraShogi 0.2.0` に変わる。GUI の一覧の表示名が変わるので、配布物を入れ替えたら登録し直す**）（`%APPDATA%\com.fusekishogi.tenbin\engines\libra\engine\`。モデルは同じフォルダの `libra.onnx`）。2026-09-14 から DirectML 版の DLL（`onnxruntime.dll` 1.24.4・`DirectML.dll`）に差し替え、GPU で読む（`isready` で `info string … provider dml`）。以前の CPU 版は同じフォルダの `*.cpu-prev`、以前の exe は `libra.exe.prev`。学習中の ls・lx と GPU を共有するので、desktop で読ませている間は局/日が少し落ちる。 desktop 0.10.0 から、布石に対応したエンジンは本将棋（41 手目以降）の席にも選べるので、**1 回の登録で 1 手目から終局まで指せる**（布石と本将棋の両方に「LibraShogi」を選ぶ。同じ id なので 1 本のプロセスが続けて指す）。GUI が終局（千日手・入玉宣言・手数上限）を裁き、宣言できるエンジンには毎手 `Declare_Win=true` を送る（docs/protocol.md §1）。天秤将棋の両玉と先後の選択も Libra の `scale.json` と `winrate` で決まる（同 §2）。

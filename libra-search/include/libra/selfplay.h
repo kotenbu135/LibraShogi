@@ -154,6 +154,8 @@ class SelfPlay {
   int active() const { return active_; }
   // 各対局のルート（いま考えている手番）の色を書く（0 先手、1 後手）。評価対局で「どちらのネットで読むか」を決めるのに使う
   void root_turns(std::int8_t* out) const;
+  // 各対局のルートの段階を書く（0 布石＝1〜40 手目、1 本将棋＝41 手目から）。評価対局で布石と本将棋でネットを替えるのに使う
+  void root_phases(std::int8_t* out) const;
   // 直前の collect で各行に書いた葉の手番を書く（0 先手、1 後手。葉を出さなかった行は根の手番）。
   // 搾取者の探索木の中で、相手の手番の葉の方策を相手のネットから取るのに使う
   void leaf_turns(std::int8_t* out) const;

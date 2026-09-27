@@ -1314,6 +1314,10 @@ void SelfPlay::root_turns(std::int8_t* out) const {
   for (size_t i = 0; i < games_.size(); ++i) out[i] = games_[i]->pos.turn() == BLACK ? 0 : 1;
 }
 
+void SelfPlay::root_phases(std::int8_t* out) const {
+  for (size_t i = 0; i < games_.size(); ++i) out[i] = games_[i]->pos.phase() == PHASE_NORMAL ? 1 : 0;
+}
+
 void SelfPlay::leaf_turns(std::int8_t* out) const {
   for (size_t i = 0; i < games_.size(); ++i) out[i] = games_[i]->leaf_turn;
 }

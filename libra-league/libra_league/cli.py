@@ -80,6 +80,9 @@ def main(argv: list[str] | None = None) -> int:
     p_ev.add_argument("--no-noise", action="store_true", help="根の Gumbel ノイズを切る（手を乱数で選ばない。エンジンとしての強さに近い条件）")
     p_ev.add_argument("--b-set", action="append", default=[], help="B 側だけ別の探索設定で読む（<鍵>=<値>。例 gumbel_rescale=true と c_scale=0.1 で σ の形を比べる）。"
                       "変えられるのは full_sims・fast_sims・gumbel_m_full・gumbel_m_fast・c_visit・c_scale・gumbel_rescale・gumbel_noise・cpuct")
+    p_ev.add_argument("--a41", default=None, help="A 側が 41 手目（本将棋）から使うチェックポイント（既定: --a のまま）。布石と本将棋のどちらで"
+                      "強くなったかを新旧の重みの組み合わせで分ける（docs/runbook.md §7.2）")
+    p_ev.add_argument("--b41", default=None, help="B 側が 41 手目から使うチェックポイント（既定: --b のまま）")
     p_ev.add_argument("--out", default=None, help="結果 JSON の出力先（既定: <run>/eval/<時刻>.json）")
     p_ev.add_argument("--publish", action="store_true", help="結果を progress ブランチの experiments/ へ push する（手元の PC の外から読めるようにする）")
     p_ev.add_argument("--branch", default="progress", help="--publish の書き出し先（既定 progress。main には入れない）")
@@ -438,12 +441,13 @@ def main(argv: list[str] | None = None) -> int:
                 scfg_b[key] = value
         if a.out:
             out = Path(a.out).expanduser()
-        elif scfg_b is not None:
-            # 側ごとに設定を変えた対局は run の eval/ に置かない（コンソールの Elo の一覧に世代間の計測として並んでしまう）
-            out = Path(a.root).expanduser() / "experiments" / (time.strftime("%Y%m%d-%H%M%S") + "-sigma.json")
+        elif scfg_b is not None or a.a41 or a.b41:
+            # 側ごとに設定や重みを変えた対局は run の eval/ に置かない（コンソールの Elo の一覧に世代間の計測として並んでしまう）
+            out = Path(a.root).expanduser() / "experiments" / (time.strftime("%Y%m%d-%H%M%S") + ("-sigma.json" if scfg_b is not None else "-split41.json"))
         else:
             out = sd.root / "eval" / (time.strftime("%Y%m%d-%H%M%S") + ".json")
-        res = main_eval(Path(a.a), Path(a.b), scfg, a.games, a.concurrent, a.threads, a.seed, out, search_cfg_b=scfg_b)
+        res = main_eval(Path(a.a), Path(a.b), scfg, a.games, a.concurrent, a.threads, a.seed, out, search_cfg_b=scfg_b,
+                        a41=Path(a.a41).expanduser() if a.a41 else None, b41=Path(a.b41).expanduser() if a.b41 else None)
         print(json.dumps({k: v for k, v in res.items() if not k.startswith("calibration")}, ensure_ascii=False))
         for side in ("a", "b"):
             print(f"calibration_{side}:", " ".join(f"[{c['lo']:.1f},{c['hi']:.1f}) n={c['n']} pred={c['pred']:.2f} act={c['actual']:.2f}" for c in res[f"calibration_{side}"]))

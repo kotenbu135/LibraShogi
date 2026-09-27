@@ -258,6 +258,12 @@ PYBIND11_MODULE(_search, m) {
              s.root_turns(out.mutable_data());
              return out;
            })
+      .def("root_phases",
+           [](const SelfPlay& s) {
+             py::array_t<std::int8_t> out(s.n_games());
+             s.root_phases(out.mutable_data());
+             return out;
+           })
       .def("leaf_turns",
            [](const SelfPlay& s) {
              py::array_t<std::int8_t> out(s.n_games());
