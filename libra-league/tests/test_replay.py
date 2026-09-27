@@ -268,6 +268,52 @@ def test_runner_refuses_full_only(tmp_path: Path):
         Runner(sd, cfg, device=torch.device("cpu"))
 
 
+def test_runner_adds_own_head_to_a_headless_checkpoint(tmp_path: Path):
+    """本番のランに補助「駒が最後まで残るか」を入れる形: 頭の無いチェックポイントから続けて、初期値の頭を足して学習し、
+    metrics に own の損失が出て、次のチェックポイントに頭が入る。幹の重みは引き継ぐ。"""
+    import threading
+    import time
+
+    from libra_league.config import load_config
+    from libra_league.runner import Runner
+    from libra_league.state import read_json
+    from libra_league.trainer import Trainer
+
+    net = {"d_model": 32, "n_layers": 2, "n_heads": 4, "d_ff": 64, "dropout": 0.0}
+    cfg = load_config(None)
+    cfg["net"] = dict(net)
+    cfg["search"].update({"full_sims": 4, "fast_sims": 4, "proof_nodes": 0, "mate_nodes_root": 0, "max_moves_per_game": 20})
+    cfg["selfplay"].update({"n_games": 4, "threads": 2, "infer_dtype": "float32"})
+    cfg["train"].update({"batch_size": 8, "min_window_games": 4, "train_every_games": 4, "window_games": 100})
+    cfg["run"].update({"status_seconds": 0.5, "checkpoint_minutes": 100, "chunk_games": 4, "export_onnx": False, "metrics_minutes": 0.02})
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    old = LibraNet(NetConfig.from_dict(net))
+    ck = Trainer(old, cfg["train"], torch.device("cpu")).state_dict()
+    ck["config"] = {"net": dict(net)}
+    torch.save(ck, sd.checkpoints / "latest.pt")
+
+    cfg["net"]["own_head"] = True
+    cfg["train"]["own_weight"] = 1.5
+    r = Runner(sd, cfg, device=torch.device("cpu"))
+    r.load()
+    trunk = {k: v.clone() for k, v in r.model.state_dict().items() if not k.startswith("own_head.")}
+    assert all(torch.equal(v, old.state_dict()[k]) for k, v in trunk.items())
+    th = threading.Thread(target=r.run, daemon=True)
+    th.start()
+    t0 = time.time()
+    while time.time() - t0 < 120:
+        if (read_json(sd.status_json, {}).get("train_avg") or {}).get("own") is not None:
+            break
+        time.sleep(0.5)
+    sd.set_flag("STOP")
+    th.join(timeout=60)
+    assert read_json(sd.status_json)["train_avg"]["own"] > 0
+    r.checkpoint()
+    saved = torch.load(sd.checkpoints / "latest.pt", map_location="cpu", weights_only=False)
+    assert any(k.startswith("own_head.") for k in saved["model"]) and saved["config"]["net"]["own_head"]
+
+
 def test_opp_targets_are_the_next_positions_policy_target(tmp_path: Path):
     """補助方策「相手の次の手」の目標は、次の局面（手番は相手）の方策の目標そのもの。次が全読みでないときと最後の局面は無し。
     opp を付けても乱数の引き方と他の目標は変わらない。"""

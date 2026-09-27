@@ -281,7 +281,7 @@ Y=~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc   # 手元のやね
 - 目安の時間（RTX 5070 Ti を専有、窓 47 万局、5,000 step、1,000 局 × 3）: 窓の読み込み 1〜2 分、腕 1 つの学習 約 11 分、対局 1 本 約 8 分で**合わせて 1 時間前後**。GPU を使うので、回す間は ls・lx を停止する（CLAUDE.md「稼働中のランの扱い」）。
 - 扱うのは学習側（`[train]`）の設定。探索（`[search]`）の設定は窓の中の棋譜と方策の目標を作り直さないと比べられないので、この命令では変えても意味がない。
 
-**補助方策「相手の次の手」（`net.opp_head`・`train.opp_weight`）を比べるとき**は、頭を足した腕を作る。頭は幹の形を変えないので元の重みと AdamW の状態を引き継ぎ、頭だけ初期値から学ぶ（ONNX には出ない）。ランでは使えない（起動で断る）。
+**補助方策「相手の次の手」（`net.opp_head`・`train.opp_weight`）を比べるとき**は、頭を足した腕を作る。頭は幹の形を変えないので元の重みと AdamW の状態を引き継ぎ、頭だけ初期値から学ぶ（ONNX には出ない）。ランでも `config/<run-id>.toml` の `[net]`・`[train]` に書けば同じ形で入る（頭の無いチェックポイントから続けるときは初期値の頭を足す）。入れる前に docs/ls2-settings.md に出所・理由・計測を書く（CLAUDE.md 11）。
 
 ```bash
 ~/LibraShogi/bin/libra abtest --ckpt ~/libra-run/ls/checkpoints/archive/ckpt_000515078.pt \
