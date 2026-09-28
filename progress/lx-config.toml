@@ -64,6 +64,7 @@ pool_keep = 30
 curriculum_sims = [1, 2, 4, 8, 16, 32]
 curriculum_threshold = 0.75
 curriculum_games = 2000
+refresh_during_curriculum = false
 
 [league]
 enabled = false
