@@ -157,7 +157,8 @@ def verify_game(g: dict, search: dict) -> None:
     確かめるもの: 玉の配置と全手の合法性、終局より後に手が無いこと、方策の添字がその局面の合法手であること、
     終局の判定（result・reason・plies）、sfen41（本将棋に入った最初の局面。入らずに終わった局は最終局面）。
     手数の上限（max_moves_per_game）で打ち切った局は、再生した局面は終局していないが reason が timeout で手番側の負け
-    （selfplay.cpp の安全弁）。root_q・v41・policy_p は探索の出力で、再生からは確かめられない（値域は read_games_file が見る）。"""
+    （selfplay.cpp の安全弁）。投了（reason resign）で終わった局も再生した局面は終局していないので、投了の条件を _check_resign で見る。
+    root_q・v41・policy_p は探索の出力で、再生からは確かめられない（値域は read_games_file が見る）。"""
     p = ls.Position()
     p.set_max_ply(int(search["max_ply"]), bool(search["count_from_41"]))
     for key in ("kb", "kw"):
@@ -166,8 +167,10 @@ def verify_game(g: dict, search: dict) -> None:
         p.do_move(u)
     moves, off, pidx = g["moves"], g["policy_off"], g["policy_idx"]
     sfen41 = None
+    ply_before = []  # 各手を指す前の手数（投了の判定の resign_min_ply と比べる）
     for j in range(len(moves)):
         _check(not p.is_over(), f"move {j}: after the end")
+        ply_before.append(p.ply)
         codes = p.legal_move_codes()
         m = int(moves[j])
         _check(m in codes, f"move {j}: illegal")
@@ -181,13 +184,32 @@ def verify_game(g: dict, search: dict) -> None:
     if sfen41 is None:
         sfen41 = p.sfen()
     res, reason = p.outcome()
-    if res == "ongoing":
+    if res == "ongoing" and g["reason"] == "resign":
+        _check_resign(g, search, ply_before, p.turn)
+    elif res == "ongoing":
         _check(len(moves) >= int(search["max_moves_per_game"]) and g["reason"] == "timeout"
                and g["result"] == (-1 if p.turn == "sente" else 1), f"unfinished game ({len(moves)} moves, {g['reason']})")
     else:
         _check(g["reason"] == reason and g["result"] == _RESULT.get(res), f"outcome {res}/{reason} != {g['result']}/{g['reason']}")
     _check(g["plies"] == p.ply, f"plies {g['plies']} != {p.ply}")
     _check(g["sfen41"] == sfen41, "sfen41")
+
+
+def _check_resign(g: dict, search: dict, ply_before: list[int], turn: str) -> None:
+    """投了で終わった局を selfplay.cpp の resign_check と同じ条件で確かめる。投了した側は最後の手を指した側（指した後に投了する）で、
+    その側の最後の resign_runs 手がどれも resign_min_ply 以降かつ root_q ≤ −resign_threshold。比べは C++ と同じ float32 で行う。
+    resign_disable_prob（投了しない見本）は乱数で決まるので確かめない。"""
+    thr = float(search.get("resign_threshold", 0.0))
+    _check(thr > 0.0, "resign while resign_threshold is 0")
+    _check(g["result"] == (1 if turn == "sente" else -1), f"resign: result {g['result']} is not the non-resigning side")
+    runs, min_ply = int(search.get("resign_runs", 1)), int(search.get("resign_min_ply", 0))
+    n = len(g["moves"])
+    idx = list(range(n - 1, -1, -2))[:runs]
+    _check(len(idx) == runs, f"resign after {n} moves < resign_runs")
+    lim = np.float32(-thr)
+    for j in idx:
+        _check(ply_before[j] >= min_ply and np.float32(g["root_q"][j]) <= lim,
+               f"resign: move {j} (ply {ply_before[j]}, q {float(g['root_q'][j]):.3f}) does not meet the resign condition")
 
 
 def verify_games_file(path: Path, search: dict, max_bytes: int = MAX_FILE_BYTES) -> tuple[dict, list[dict]]:

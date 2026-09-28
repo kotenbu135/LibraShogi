@@ -158,6 +158,47 @@ def test_verify_game_accepts_selfplay_records(tmp_path: Path):
     assert len(got) == 20
 
 
+def _resign_games(n: int, seed: int, cfg: dict) -> list[dict]:
+    """値の頭が手番側の負けを強く言う（投了のしきい値を超える）ようにして打ち、投了で終わった局を作る。"""
+    sp = librasearch.SelfPlay(cfg, 8, seed=seed, threads=2)
+    sq = np.zeros((8, 81, ls.SQ_FEATS), np.float32)
+    glob = np.zeros((8, ls.GLOB_FEATS), np.float32)
+    rng = np.random.default_rng(seed)
+    out: list[dict] = []
+    while len(out) < n:
+        sp.collect(sq, glob)
+        sp.apply(rng.standard_normal((8, ls.POLICY_SIZE), dtype=np.float32), np.tile(np.array([0.02, 0.03, 0.95], np.float32), (8, 1)))
+        out += sp.take_finished()
+    return out[:n]
+
+
+RESIGN = {"resign_threshold": 0.5, "resign_runs": 1, "resign_disable_prob": 0.0, "resign_min_ply": 50}
+
+
+def test_verify_game_accepts_resigned_games(tmp_path: Path):
+    """投了で終わった局（再生した局面は終局していない）も、投了の設定が同じなら検査を通る。2026-09-28 に投了の局を未完として全部捨てていた。"""
+    cfg = {"full_sims": 8, "fast_sims": 4, "full_prob": 0.5, "max_ply": 320, **RESIGN}
+    games = _resign_games(8, 21, cfg)
+    resigned = [g for g in games if g["reason"] == "resign"]
+    assert resigned
+    for g in games:
+        verify_game(g, _search(**RESIGN))
+    meta, got = verify_games_file(write_games_file(tmp_path, "w1", 1, "ls", games), _search(**RESIGN))
+    assert len(got) == 8
+    g0 = resigned[0]
+    # 投了しない設定・投了できない手数・最後の手の値がしきい値に届かない・連続の手数が足りない・結果の向きが逆、はどれも弾く
+    bad = {
+        "no_resign": ({}, g0),
+        "min_ply": ({**RESIGN, "resign_min_ply": 400}, g0),
+        "root_q": (RESIGN, {**g0, "root_q": np.concatenate([g0["root_q"][:-1], np.float32([-0.4])])}),
+        "runs": ({**RESIGN, "resign_runs": 400}, g0),
+        "result": (RESIGN, {**g0, "result": -g0["result"]}),
+    }
+    for name, (kw, g) in bad.items():
+        with pytest.raises(GamesFileError, match="resign"):
+            verify_game(g, _search(**kw))
+
+
 def test_verify_game_rejects_tampered_records(tmp_path: Path):
     games = _games(8, 15)
     g0 = next(g for g in games if g["result"] != 0 and len(g["moves"]) > 10 and int(g["policy_off"][-1]) > 0)
