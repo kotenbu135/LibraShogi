@@ -382,6 +382,10 @@ class Runner:
         ex = self.cfg.get("exploiter", {})
         if not ex.get("main_source") or self.loop is None or self.loop.opponent is None:
             return
+        if self.curriculum_active() and not ex.get("refresh_during_curriculum", True):
+            # 課程の間は相手を替えない。替えると弱くした相手の段の中で相手が強くなり、段の勝率が作り直しのたびに下がる
+            # （2026-09-28、2 段目で 3 回作り直し。docs/lx-settings.md §5）。課程を終えたら下の条件で最新に作り直す
+            return
         es = self.exploiter_state()
         hours = float(ex.get("refresh_hours", 0.0) or 0.0)
         last = es.get("refreshed_at")
