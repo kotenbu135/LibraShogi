@@ -89,7 +89,10 @@ DEFAULTS: dict[str, Any] = {
                   # 課程の間の局は対本体勝率（収束の物差し）にも本体へ渡す布石にも数えない
                   "curriculum_sims": [],
                   "curriculum_threshold": 0.75,
-                  "curriculum_games": 2000},
+                  "curriculum_games": 2000,
+                  # false なら課程の間は凍結相手を作り直さない（段の中で相手を固定する）。課程を終えたら refresh_hours・
+                  # refresh_steps の条件で最新に作り直す（止めていた間に条件は満たされているので、ほぼ直後）
+                  "refresh_during_curriculum": True},
     # 本体と過去の搾取者の対局（libra_league/league.py、docs/decisions.md 2026-09-14）: 自己対局とは別のエンジン（別の固定バッチ）で
     # n_games 局を pool（搾取者の [exploiter] pool_out）の新しい recent 体と打ち、本体の手だけを方策の学習に使う。本体はふだん通り自分のネットで読む。
     # 相手は PFSP（本体の勝率 x に (1 − x)²）で switch_games 局ごとに選び直す。プールが空なら pool_check_minutes ごとに見に行く。搾取者の run では無効

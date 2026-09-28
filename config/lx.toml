@@ -124,6 +124,11 @@ pool_keep = 30
 curriculum_sims = [1, 2, 4, 8, 16, 32]
 curriculum_threshold = 0.75
 curriculum_games = 2000
+# **課程の間は凍結相手を作り直さない**（2026-09-28。docs/lx-settings.md §5 の表）。2 段目（読み 2 回）の 2.6 日で
+# 3 回作り直し、そのたびに段の勝率が数え直しになり、2 回は 6〜8 ポイント下がった（lx が 1 日に伸ばす分とほぼ同じ）。
+# 課程の局は本体へは何も渡さないので、相手が数日古くても失うものは無い。課程を終えたら refresh_hours・refresh_steps
+# の条件で最新の本体に作り直す
+refresh_during_curriculum = false
 
 [auto]
 enabled = false              # 自動計測（archive・最強比・固定の参照・対外対局）は本体の物差し。搾取者では回さない
