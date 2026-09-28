@@ -1,29 +1,29 @@
 {
  "schema": 1,
  "run": "ls",
- "generated": "2026-09-28 16:33:25",
- "t": 1790580805.9,
+ "generated": "2026-09-28 16:59:01",
+ "t": 1790582341.4,
  "process": "running",
  "flags": [],
  "now": {
-  "step": 574852,
-  "generation": 1206,
-  "games_total": 6820267,
-  "games_per_day_1h": 1369083,
+  "step": 575783,
+  "generation": 1209,
+  "games_total": 6832753,
+  "games_per_day_1h": 746831,
   "window_games": 2000000,
   "active_games": 512,
-  "elapsed_h": 195.76,
+  "elapsed_h": 196.19,
   "heldout_games": 20000,
-  "status_time": "2026-09-28 16:33:25",
+  "status_time": "2026-09-28 16:59:01",
   "train": {
-   "loss": 2.210575,
-   "policy": 1.477748,
-   "value": 0.49013,
-   "v41": 0.485395,
-   "policy_acc": 0.628913,
-   "grad_norm": 1.418198,
+   "loss": 2.210547,
+   "policy": 1.477282,
+   "value": 0.490265,
+   "v41": 0.486,
+   "policy_acc": 0.624424,
+   "grad_norm": 1.449812,
    "lr": 0.0002,
-   "steps": 133
+   "steps": 171
   },
   "gen": {
    "window": {
@@ -89,9 +89,9 @@
   "anchor_step": 117436,
   "anchor_offset": 972.5,
   "best_step": 543989,
-  "best_stall": 0,
-  "queue": 4,
-  "running": "best",
+  "best_stall": 1,
+  "queue": 3,
+  "running": "split",
   "last_archive_games": 6800000,
   "references": [
    "ckpt_000281893.pt"
@@ -101,19 +101,6 @@
    "ckpt_000062426.pt"
   ],
   "jobs": [
-   {
-    "kind": "match",
-    "rc": 1,
-    "secs": 30,
-    "out": "auto-20260926-142109-2.jsonl",
-    "tail": [
-     "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
-     "==== 2026-09-27 13:54:56 match: match --games 10 --go nodes 96 --out ~auto-20260926-142109-2.jsonl --go-opp nodes 10000 --fuseki self --fuseki-seed 6000000 --opponent ~/fuseki-sh",
-     "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
-     "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
-     "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
-    ]
-   },
    {
     "kind": "match",
     "rc": 1,
@@ -173,6 +160,13 @@
     "rc": 0,
     "secs": 3722,
     "out": "anchor-20260928-092319-117436-543989.json",
+    "tail": null
+   },
+   {
+    "kind": "best",
+    "rc": 0,
+    "secs": 3665,
+    "out": "best-20260928-155756-543989-573360.json",
     "tail": null
    }
   ]
@@ -517,6 +511,21 @@
    ],
    "improved": true,
    "stall": 0
+  },
+  {
+   "t": 1790582341.33109,
+   "step": 573360,
+   "games": 6832753,
+   "best_step": 543989,
+   "n": 2000,
+   "score_new": 0.5107,
+   "elo_vs_best": 7.5,
+   "ci95": [
+    -7.8,
+    22.7
+   ],
+   "improved": false,
+   "stall": 1
   }
  ],
  "split": [
@@ -7223,44 +7232,92 @@
    "gen_heldout_fuseki_corr_v": 0.6234
   },
   {
-   "t": 1790580565.8,
-   "step": 574890,
-   "games_total": 6820798,
-   "gpd": 1473640,
-   "gpd_5m": 507303,
+   "t": 1790581169.5,
+   "step": 575156,
+   "games_total": 6824393,
+   "gpd": 1218123,
+   "gpd_5m": 532743,
    "window": 2000000,
-   "rss_mb": 22496,
+   "rss_mb": 22549,
    "swap_mb": 0,
    "gpu_mb": 8712,
-   "loss": 2.210575,
-   "policy": 1.477748,
-   "value": 0.49013,
-   "v41": 0.485395,
-   "policy_acc": 0.628913,
-   "grad_norm": 1.418198,
+   "loss": 2.223672,
+   "policy": 1.488273,
+   "value": 0.491719,
+   "v41": 0.487361,
+   "policy_acc": 0.621795,
+   "grad_norm": 1.438054,
    "lr": 0.0002,
    "steps": 133,
    "train_avg": true,
    "target_minus_z": 0.0,
-   "v41_minus_z": -0.0466,
-   "draw_target": 0.0034,
-   "draw_actual": 0.0034,
-   "rootq_minus_z_fuseki": -0.0051,
-   "rootq_minus_z_normal": -0.0654,
-   "t_train_sample": 0.16,
-   "t_train_step": 9.36,
-   "t_sp_eval": 79.34,
-   "sp_games": 28340,
-   "sp_draw": 0.0046,
+   "v41_minus_z": -0.0503,
+   "draw_target": 0.0029,
+   "draw_actual": 0.0029,
+   "rootq_minus_z_fuseki": -0.0034,
+   "rootq_minus_z_normal": -0.0652,
+   "t_train_sample": 0.17,
+   "t_train_step": 9.03,
+   "t_sp_eval": 80.24,
+   "sp_games": 31935,
+   "sp_draw": 0.0045,
    "sp_plies": 80.0,
-   "sp_sente": 0.5088,
-   "sp_sennichite": 0.0017,
+   "sp_sente": 0.5081,
+   "sp_sennichite": 0.0016,
    "sp_perpetual_check": 0.0,
    "sp_max_ply": 0.0029,
-   "sp_resign": 0.8402,
-   "sp_ruling41": 0.048,
+   "sp_resign": 0.8406,
+   "sp_ruling41": 0.0477,
    "sp_no_legal_move": 0.1072,
-   "sp_mate_found": 0.3229,
+   "sp_mate_found": 0.3222,
+   "gen_window_corr_v": 0.572,
+   "gen_window_policy_acc": 0.5616,
+   "gen_window_policy_ce": 1.2038,
+   "gen_window_fuseki_corr_v": 0.6349,
+   "gen_heldout_corr_v": 0.5864,
+   "gen_heldout_policy_acc": 0.5439,
+   "gen_heldout_policy_ce": 1.2178,
+   "gen_heldout_fuseki_corr_v": 0.628
+  },
+  {
+   "t": 1790582070.6,
+   "step": 575631,
+   "games_total": 6830772,
+   "gpd": 855938,
+   "gpd_5m": 625101,
+   "window": 2000000,
+   "rss_mb": 22554,
+   "swap_mb": 0,
+   "gpu_mb": 8712,
+   "loss": 2.210547,
+   "policy": 1.477282,
+   "value": 0.490265,
+   "v41": 0.486,
+   "policy_acc": 0.624424,
+   "grad_norm": 1.449812,
+   "lr": 0.0002,
+   "steps": 171,
+   "train_avg": true,
+   "target_minus_z": 0.0,
+   "v41_minus_z": -0.0481,
+   "draw_target": 0.0039,
+   "draw_actual": 0.0039,
+   "rootq_minus_z_fuseki": -0.0033,
+   "rootq_minus_z_normal": -0.0736,
+   "t_train_sample": 0.23,
+   "t_train_step": 9.89,
+   "t_sp_eval": 77.77,
+   "sp_games": 6379,
+   "sp_draw": 0.0049,
+   "sp_plies": 80.4,
+   "sp_sente": 0.52,
+   "sp_sennichite": 0.0013,
+   "sp_perpetual_check": 0.0,
+   "sp_max_ply": 0.0036,
+   "sp_resign": 0.841,
+   "sp_ruling41": 0.0472,
+   "sp_no_legal_move": 0.1069,
+   "sp_mate_found": 0.32,
    "gen_window_corr_v": 0.572,
    "gen_window_policy_acc": 0.5616,
    "gen_window_policy_ce": 1.2038,
@@ -7272,7 +7329,7 @@
   }
  ],
  "review": {
-  "time": "2026-09-28 16:33:25",
+  "time": "2026-09-28 16:59:01",
   "run": "ls",
   "items": [
    {
@@ -7291,18 +7348,18 @@
    },
    {
     "name": "M2 最強比",
-    "verdict": "続ける",
-    "why": "step 543989 が最強を更新（+58.2 Elo、区間 [42.9, 73.8]）",
+    "verdict": "注意",
+    "why": "step 573360 は最強 step 543989 を更新できず（+7.5 Elo、区間 [-7.8, 22.7]、足踏み 1）",
     "values": {
-     "step": 543989,
-     "best_step": 485419,
-     "elo_vs_best": 58.2,
+     "step": 573360,
+     "best_step": 543989,
+     "elo_vs_best": 7.5,
      "ci95": [
-      42.9,
-      73.8
+      -7.8,
+      22.7
      ],
-     "improved": true,
-     "stall": 0
+     "improved": false,
+     "stall": 1
     }
    },
    {
@@ -7323,7 +7380,7 @@
    {
     "name": "M4 参照 ckpt_000062426.pt",
     "verdict": "まだ無い",
-    "why": "対 ckpt_000062426.pt: もう測っていない（最後は step 281893、3,592,420 局前）",
+    "why": "対 ckpt_000062426.pt: もう測っていない（最後は step 281893、3,602,980 局前）",
     "values": {
      "last": {
       "t": 1789951881.1436996,
@@ -7340,7 +7397,7 @@
       ]
      },
      "gap_games": 410926,
-     "behind_games": 3592420,
+     "behind_games": 3602980,
      "score": 0.855
     }
    },
@@ -7364,14 +7421,14 @@
       ]
      },
      "gap_games": 493451,
-     "behind_games": 302102,
+     "behind_games": 312662,
      "score": 0.745
     }
    },
    {
     "name": "M4 参照 ckpt_000646699.pt",
     "verdict": "まだ無い",
-    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、5,583,653 局前）",
+    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、5,594,213 局前）",
     "values": {
      "last": {
       "t": 1789725300.1884296,
@@ -7388,14 +7445,14 @@
       ]
      },
      "gap_games": 395416,
-     "behind_games": 5583653,
+     "behind_games": 5594213,
      "score": 0.895
     }
    },
    {
     "name": "M4 参照 win1m.pt",
     "verdict": "まだ無い",
-    "why": "対 win1m.pt: もう測っていない（最後は step 281893、3,594,933 局前）",
+    "why": "対 win1m.pt: もう測っていない（最後は step 281893、3,605,493 局前）",
     "values": {
      "last": {
       "t": 1789951515.1918266,
@@ -7412,29 +7469,18 @@
       ]
      },
      "gap_games": 411144,
-     "behind_games": 3594933,
+     "behind_games": 3605493,
      "score": 0.835
     }
    },
    {
     "name": "計測ジョブ",
     "verdict": "注意",
-    "why": "直近 8 件のうち 3 件が失敗（match）。最後の失敗: match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
+    "why": "直近 8 件のうち 2 件が失敗（match）。最後の失敗: match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
     "values": {
      "n_recent": 8,
-     "n_failed": 3,
+     "n_failed": 2,
      "failed": [
-      {
-       "kind": "match",
-       "rc": 1,
-       "tail": [
-        "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval ",
-        "==== 2026-09-27 13:54:56 match: match --games 10 --go nodes 96 --out ~auto-20260926-142109-2.jsonl --go-opp nodes 10000 --fuseki self --fuseki-seed 6000000 --opponent ~/fuseki-sh",
-        "match: 布石は Libra が両陣とも作る（--fuseki self）。同じ局面を先後入れ替えて 2 局ずつ打つ",
-        "starting engines: libra=['~/LibraShogi/bin/libra-usi'] opp=['~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc']",
-        "match: opp を起動できない（~/fuseki-shogi-ai/vendor/YaneuraOu/source/YaneuraOu-by-gcc、cwd=~/fuseki-shogi-ai）: RuntimeError: opp: process exited (last: ['info string Using 1 thread', 'info string loading eval "
-       ]
-      },
       {
        "kind": "match",
        "rc": 1,
@@ -7463,9 +7509,9 @@
    {
     "name": "局/日（1 時間平均）",
     "verdict": "続ける",
-    "why": "1,369,083",
+    "why": "746,831",
     "values": {
-     "gpd": 1369083
+     "gpd": 746831
     }
    }
   ],
@@ -8783,9 +8829,19 @@
      1322.2,
      1391.2
     ],
-    "games": 4200,
-    "opponents": 3,
+    "games": 6200,
+    "opponents": 4,
     "step": 543989
+   },
+   "step 573,360": {
+    "elo": 1364.2,
+    "ci95": [
+     1326.4,
+     1401.9
+    ],
+    "games": 2000,
+    "opponents": 1,
+    "step": 573360
    },
    "step 62,426": {
     "elo": 903.3,
@@ -8885,16 +8941,16 @@
    "Tenbin Fuseki Engine 0.1 [Threads=2, nodes 400]"
   ],
   "fit": {
-   "n_nodes": 27,
-   "n_pairs": 79,
+   "n_nodes": 28,
+   "n_pairs": 80,
    "chi2": 1154.0,
    "df": 53,
    "chi2_per_df": 21.77,
-   "rms_z": 3.82
+   "rms_z": 3.8
   },
   "converged": true,
-  "iters": 960,
-  "n_evals": 82,
+  "iters": 973,
+  "n_evals": 83,
   "curve": {
    "points": [
     {
@@ -9221,11 +9277,26 @@
       1322.2,
       1391.2
      ],
-     "n": 4200,
-     "opponents": 3,
+     "n": 6200,
+     "opponents": 4,
      "score": 0.5,
      "in_band": true,
      "node": "step 543,989"
+    },
+    {
+     "step": 573360,
+     "games": 6799982,
+     "t": 1790578673.1,
+     "elo": 1364.2,
+     "ci95": [
+      1326.4,
+      1401.9
+     ],
+     "n": 2000,
+     "opponents": 1,
+     "score": 0.5,
+     "in_band": true,
+     "node": "step 573,360"
     }
    ],
    "intervals": [
@@ -9417,23 +9488,32 @@
      "elo_per_doubling": 512.7,
      "elo_per_1m": 119.3,
      "in_band": true
+    },
+    {
+     "games_from": 6399848,
+     "games_to": 6799982,
+     "d_elo": 7.5,
+     "doublings": 0.087,
+     "elo_per_doubling": 85.7,
+     "elo_per_1m": 18.7,
+     "in_band": true
     }
    ],
    "fit": {
-    "elo_per_doubling": 143.6,
-    "intercept": -1903.1,
-    "n": 22,
-    "rms_resid": 62.1,
+    "elo_per_doubling": 143.7,
+    "intercept": -1905.4,
+    "n": 23,
+    "rms_resid": 60.7,
     "games_from": 4738,
-    "games_to": 6399848
+    "games_to": 6799982
    },
    "fit_recent": {
-    "elo_per_doubling": 148.1,
-    "intercept": -1986.9,
+    "elo_per_doubling": 139.8,
+    "intercept": -1806.7,
     "n": 17,
-    "rms_resid": 19.0,
-    "games_from": 400021,
-    "games_to": 6399848
+    "rms_resid": 15.3,
+    "games_from": 800281,
+    "games_to": 6799982
    },
    "recent_doublings": 4,
    "thin": [
