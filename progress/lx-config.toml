@@ -101,9 +101,9 @@ accum_steps = 1
 compile = "max-autotune"
 
 [workers]
-enabled = false
+enabled = true
 ingest_seconds = 10.0
-max_lag_steps = 2000
+max_lag_steps = 10000
 
 [run]
 checkpoint_minutes = 10
