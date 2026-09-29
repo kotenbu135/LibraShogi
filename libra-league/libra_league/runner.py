@@ -22,11 +22,11 @@ from .runconfig import resolve as resolve_config
 from .league import add_result, list_pool, main_winrate, pfsp_pick, pool_name, prune_pool, tag_league_game
 from .looptime import LoopTimer
 from .replay import ReplayBuffer, add_target_stats, summarize_target_stats
-from .selfplay import SelfPlayLoop
+from .selfplay import SelfPlayLoop, mask_opponent_moves
 from .state import StateDir, write_json_atomic
 from .supervise import EXIT_ALREADY_RUNNING, EXIT_NO_CONFIG, acquire_lock
 from .trainer import Trainer
-from .workers import Inbox, load_weights, publish_weights
+from .workers import Inbox, load_weights, publish_exploiter, publish_weights
 
 
 def train_steps(new_games: int, avg_len: float, tr: dict) -> int:
@@ -88,11 +88,17 @@ class Runner:
         self.last_gen = 0.0
         self.last_gen_games = -1
         self.gen: dict | None = None  # 一般化の物差し（genprof.py。窓の中と held-out）
-        # 自己対局ワーカー（[workers] enabled）: 重みを weights/ に配り、inbox/ に届いた局を取り込む。搾取者の run では使わない
+        # 自己対局ワーカー（[workers] enabled）: 重みを weights/ に配り、inbox/ に届いた局を取り込む。搾取者の run では凍結相手と
+        # 相手の読み（課程の段）も配り（publish_exploiter）、今の相手・段で打った局だけを取り込む（exploiter_inbox_accept）
         self.inbox: Inbox | None = None
+        self.is_exploiter = bool(cfg.get("exploiter", {}).get("main_ckpt"))
+        self.opponent_model: LibraNet | None = None  # 配る凍結相手（load_opponent が読んだもの）
+        self.opponent_net_cfg: dict = {}
+        self.published_opponent_step: int | None = None
         wk = cfg.get("workers", {})
-        if wk.get("enabled") and not cfg.get("exploiter", {}).get("main_ckpt"):
-            self.inbox = Inbox(sd.inbox, cfg["run_id"], int(wk.get("max_lag_steps", 0)), self.log)
+        if wk.get("enabled"):
+            self.inbox = Inbox(sd.inbox, cfg["run_id"], int(wk.get("max_lag_steps", 0)), self.log,
+                               accept=self.exploiter_inbox_accept if self.is_exploiter else None)
         # 本体と過去の搾取者の対局（[league] enabled）: 自己対局とは別のエンジンで打つ。搾取者の run では使わない
         self.league_enabled = bool(cfg.get("league", {}).get("enabled")) and not cfg.get("exploiter", {}).get("main_ckpt")
         self.league_loop: SelfPlayLoop | None = None
@@ -219,6 +225,15 @@ class Runner:
         if self.inbox is None:
             return 0
         games = self.inbox.poll(self.trainer.step_count)
+        if games and self.is_exploiter:
+            # 相手の手の方策は学習しない印と、搾取者から見た結果を、手元の局（SelfPlayLoop.round）と同じく付け直す。
+            # ワーカーの印（full）は信用せず、枠の番号から搾取者の側を決める
+            # 途中で段が上がったら、残りの局（前の段の読みで打った局）は新しい段の勝率に数えない（学習には使う）
+            tag = (self.opponent_step, self.current_opponent_sims())
+            for g in games:
+                mask_opponent_moves(g, SelfPlayLoop.exploiter_is_sente(int(g["slot"])))
+                if (self.opponent_step, self.current_opponent_sims()) == tag:
+                    self.record_exploiter_result(int(g["exploiter_result"]))
         if games:
             self.replay.add_games(games)
             self.state["games_total"] = self.replay.total_games
@@ -260,6 +275,8 @@ class Runner:
         sd = torch.load(p, map_location=self.device, weights_only=False)
         m = LibraNet(NetConfig.from_dict(sd.get("config", {}).get("net", {}))).to(self.device)
         m.load_state_dict(sd["model"])
+        self.opponent_model = m
+        self.opponent_net_cfg = dict(sd.get("config", {}).get("net", {}))
         assert self.loop is not None
         prior = bool(ex.get("opponent_prior", True))
         self.loop.set_opponent(m, opponent_prior=prior)
@@ -301,6 +318,36 @@ class Runner:
         self.loop.set_side_sims(sims)
         self.log(f"exploiter: curriculum stage {min(stage, len(stages))}/{len(stages)}: opponent "
                  + (f"{sims} sims" if sims is not None else "full search (curriculum done)"))
+        self.publish_exploiter()
+
+    def current_opponent_sims(self) -> int | None:
+        """今の相手の読みの回数（課程の段）。課程が無い・終えたなら None（本番の読み）。"""
+        stages = self.curriculum_stages()
+        stage = int(self.curriculum_state()["stage"]) if stages else 0
+        return stages[stage] if stage < len(stages) else None
+
+    def publish_exploiter(self) -> None:
+        """ワーカーに凍結相手と今の相手の読みを配る（[workers] enabled の搾取者の run だけ）。相手は替わったときだけ書き直す。"""
+        if self.inbox is None or not self.is_exploiter or self.opponent_model is None or self.opponent_step is None:
+            return
+        step = int(self.opponent_step)
+        try:
+            publish_exploiter(self.sd.weights, self.opponent_model if step != self.published_opponent_step else None, step,
+                              self.opponent_net_cfg, self.current_opponent_sims(), bool(self.cfg["exploiter"].get("opponent_prior", True)),
+                              self.cfg["run_id"])
+            self.published_opponent_step = step
+        except OSError as e:
+            self.log(f"workers: publish exploiter failed: {e}")
+
+    def exploiter_inbox_accept(self, meta: dict) -> str | None:
+        """ワーカーの対局ファイルを使うか。今の凍結相手・今の相手の読みで打った局だけを使う（違えば捨てる理由を返す）。"""
+        ex = meta.get("exploiter")
+        if not isinstance(ex, dict):
+            return "not an exploiter games file"
+        want = {"opponent_step": None if self.opponent_step is None else int(self.opponent_step), "opponent_sims": self.current_opponent_sims()}
+        if ex != want:
+            return f"played against {ex}, now {want}"
+        return None
 
     def record_exploiter_result(self, r: int) -> None:
         """搾取者の 1 局の結果（搾取者から見て +1・0・−1）。課程の途中の局は段の成績だけに数え、対本体勝率には数えない。"""
@@ -721,8 +768,7 @@ class Runner:
             self.sd.inbox.mkdir(exist_ok=True)
             self.sd.weights.mkdir(exist_ok=True)
             self.publish_weights()
-        elif self.cfg.get("workers", {}).get("enabled"):
-            self.log("workers: disabled (exploiter runs do not take worker games)")
+            self.publish_exploiter()
         self.log(f"run: device={self.device} params={self.model.n_params()/1e6:.1f}M n_games={sp['n_games']} threads={sp['threads']}"
                  + (f" workers=inbox(max_lag_steps={self.inbox.max_lag_steps})" if self.inbox else "")
                  + (f" league=n_games {self.cfg['league']['n_games']} vs {self.cfg['league']['pool']}" if self.league_loop is not None else ""))

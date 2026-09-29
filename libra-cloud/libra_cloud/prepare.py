@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -50,7 +51,7 @@ def write_run_dir(ckpt: Path, config: Path, out: Path, n_games: int = 512, threa
     import torch
 
     from libra_league.config import dump_toml, load_config
-    from libra_league.workers import publish_weights
+    from libra_league.workers import EXPLOITER_FILE, OPPONENT_FILE, publish_weights
     from libra_net.model import LibraNet, NetConfig
 
     from .bench import bench_config
@@ -69,6 +70,14 @@ def write_run_dir(ckpt: Path, config: Path, out: Path, n_games: int = 512, threa
     host_cfg = bench_config(cfg, n_games, threads)
     if worker and cfg["selfplay"].get("openings"):
         host_cfg["selfplay"]["openings"] = f"{HOST_RUN_ROOT}/{cfg['run_id']}/openings.json"
+    if worker and cfg["exploiter"].get("main_ckpt"):
+        # 搾取者の run: ワーカーは凍結相手と相手の読みを weights/ の opponent.pt・exploiter.json から読む（ブリッジが送る）。
+        # main_ckpt は「搾取者の run である」印としてだけ残す（ワーカーはこのパスを読まない）。学習側が配った写しがあれば束に入れる
+        host_cfg["exploiter"]["main_ckpt"] = f"{HOST_RUN_ROOT}/{cfg['run_id']}/weights/{OPPONENT_FILE}"
+        for name in (OPPONENT_FILE, EXPLOITER_FILE):
+            src = ckpt.parent.parent / "weights" / name
+            if src.exists():
+                shutil.copyfile(src, run / "weights" / name)
     (run / "config.toml").write_text(dump_toml(host_cfg), encoding="utf-8")
     return run
 

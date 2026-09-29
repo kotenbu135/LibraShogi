@@ -8,6 +8,8 @@
   ただし前の送信から --min-push-seconds（300）が経つまでは送らない（20 MB を 69 秒ごとに送ると 3 時間で 6.7 GB になり、
   回線が詰まると送信が遅れて局が古くなる。学習側の max_lag_steps 2000 は ls で約 24 分）。
 - 布石（[selfplay] openings）が変わったらホストの <run>/openings.json へ送る。
+- 搾取者の run では、凍結相手 weights/opponent.pt と相手の読み weights/exploiter.json も変わったら送る（相手を先に送る。
+  ワーカーは json の相手の step と opponent.pt の step が揃うまで相手を替えない）。
 - ホストの inbox/*.npz を取ってきてホストから消し、手元で手を再生して検査（workers.verify_games_file）してから
   学習側の inbox/ に置く（.tmp に書いてから os.replace）。不正なものは <out>/rejected/ に残す。
 - 学習側の inbox/ が無い（[workers] enabled でない）間は取ってこない（ホストに溜まる）。
@@ -31,7 +33,7 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from libra_league.config import load_config
-from libra_league.workers import MAX_FILE_BYTES, GamesFileError, verify_games_file
+from libra_league.workers import EXPLOITER_FILE, MAX_FILE_BYTES, OPPONENT_FILE, GamesFileError, verify_games_file
 
 NAME = re.compile(r"^[A-Za-z0-9_]{1,32}-\d{1,16}-\d{1,9}\.npz$")  # write_games_file の名前
 KEEP_REJECTED = 20
@@ -144,6 +146,8 @@ class Bridge:
         self.log = log
         self.inbox = run_dir / "inbox"
         self.weights = run_dir / "weights" / "latest.pt"
+        self.opponent = run_dir / "weights" / OPPONENT_FILE     # 搾取者の run だけ（無ければ送らない）
+        self.exploiter = run_dir / "weights" / EXPLOITER_FILE
         op = self.cfg["selfplay"].get("openings") or ""
         self.openings = Path(op).expanduser() if op else None
         self.staging = out / "staging"
@@ -232,7 +236,9 @@ class Bridge:
     def cycle(self) -> int:
         """送信に失敗しても回収は続ける（送れなかったものは次の周回で送り直す。ワーカーはその間古い重みで打つ）。
         ホストが落ちていれば回収も失敗するので、serve の打ち切りはそちらで働く。"""
-        pushes = [(self.weights, "weights/latest.pt", self.min_push_s)] + ([(self.openings, "openings.json", 0.0)] if self.openings is not None else [])
+        pushes = ([(self.weights, "weights/latest.pt", self.min_push_s),
+                   (self.opponent, f"weights/{OPPONENT_FILE}", 0.0), (self.exploiter, f"weights/{EXPLOITER_FILE}", 0.0)]
+                  + ([(self.openings, "openings.json", 0.0)] if self.openings is not None else []))
         for src, rel, min_interval in pushes:
             try:
                 self.push_if_changed(src, rel, min_interval)

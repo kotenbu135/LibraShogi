@@ -20,7 +20,8 @@ from libra_league.config import dump_toml, load_config
 from libra_league.replay import ReplayBuffer
 from libra_league.runner import train_steps
 from libra_league.state import StateDir, read_json
-from libra_league.workers import (GamesFileError, Inbox, Worker, load_weights, publish_weights, read_games_file, verify_game,
+from libra_league.workers import (EXPLOITER_FILE, OPPONENT_FILE, GamesFileError, Inbox, Worker, load_weights, publish_exploiter,
+                                  publish_weights, read_exploiter, read_games_file, verify_game,
                                   verify_games_file, worker_seed, write_games_file)
 from libra_net.model import LibraNet, NetConfig
 
@@ -284,6 +285,132 @@ def test_inbox_ingest(tmp_path: Path):
     assert len(list((inbox / "rejected").iterdir())) == 2
     assert any("rejected" in s for s in logs) and any("stale" in s for s in logs)
     assert ib.poll(step=100) == []
+
+
+def test_games_file_exploiter_tag(tmp_path: Path):
+    """搾取者のワーカーの局は、打った凍結相手と相手の読みを meta に持つ。値は read_games_file が検査する。"""
+    g = _games(2, 4)
+    p = write_games_file(tmp_path, "w1", 7, "lx", g, exploiter={"opponent_step": 557524, "opponent_sims": 4})
+    assert read_games_file(p)[0]["exploiter"] == {"opponent_step": 557524, "opponent_sims": 4}
+    p = write_games_file(tmp_path, "w1", 7, "lx", g, exploiter={"opponent_step": 5, "opponent_sims": None})
+    assert read_games_file(p)[0]["exploiter"] == {"opponent_step": 5, "opponent_sims": None}
+    assert "exploiter" not in read_games_file(write_games_file(tmp_path, "w1", 7, "ls", g))[0]
+    for bad in ({"opponent_step": -1, "opponent_sims": 4}, {"opponent_step": 5, "opponent_sims": 0}):
+        q = write_games_file(tmp_path, "w1", 7, "lx", g, exploiter={"opponent_step": 5, "opponent_sims": 4})
+
+        def edit(a, meta, bad=bad):
+            meta["exploiter"] = bad
+        with pytest.raises(GamesFileError, match="opponent"):
+            read_games_file(_rewrite(q, tmp_path / "bad.npz", edit))
+
+
+def test_publish_and_read_exploiter(tmp_path: Path):
+    wd = tmp_path / "weights"
+    assert read_exploiter(wd) is None
+    m = LibraNet(NetConfig.from_dict(NET))
+    publish_exploiter(wd, m, 77, NET, 2, True, "lx")
+    d = read_exploiter(wd)
+    assert d["opponent_step"] == 77 and d["opponent_sims"] == 2 and d["opponent_prior"] is True and d["run_id"] == "lx"
+    assert load_weights(wd / OPPONENT_FILE)[1:] == (77, "lx")
+    mt = (wd / OPPONENT_FILE).stat().st_mtime_ns
+    publish_exploiter(wd, None, 77, NET, None, True, "lx")  # 段だけ替える（相手は書き直さない）
+    assert read_exploiter(wd)["opponent_sims"] is None and (wd / OPPONENT_FILE).stat().st_mtime_ns == mt
+    (wd / EXPLOITER_FILE).write_text("{broken", encoding="utf-8")
+    assert read_exploiter(wd) is None
+    assert list(wd.glob("*.tmp")) == []
+
+
+def test_exploiter_worker_tags_games_with_opponent_and_sims(tmp_path: Path):
+    """搾取者の run のワーカー: 配られた相手が揃うまで打たず、揃ったら相手と読みの印を付けて出す。読みが替われば印も替わる。"""
+    cfg = _tiny_cfg(tmp_path)
+    cfg["run_id"] = "lx"
+    cfg["exploiter"]["main_ckpt"] = "/nonexistent/main.pt"  # 印としてだけ使う（ワーカーはこのパスを読まない）
+    root = tmp_path / "lx"
+    wd = root / "weights"
+    wd.mkdir(parents=True)
+    publish_weights(wd / "latest.pt", LibraNet(NetConfig.from_dict(NET)), 5, NET, "lx")
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    w = Worker(cfg, "a", wd / "latest.pt", inbox, torch.device("cpu"), stop_root=root, lock=None, entropy=3, poll_seconds=0.1,
+               reload_seconds=0.2, log=lambda s: None)
+    t = threading.Thread(target=w.run, daemon=True)
+    t.start()
+    time.sleep(1.0)
+    assert list(inbox.glob("*.npz")) == []  # 相手が来るまで打たない
+    opp = LibraNet(NetConfig.from_dict(NET))
+    publish_exploiter(wd, None, 100, NET, 1, True, "lx")  # json だけ先に届いた（相手のファイルが無い）
+    time.sleep(1.0)
+    assert list(inbox.glob("*.npz")) == [] and w.ex_tag is None
+    publish_exploiter(wd, opp, 100, NET, 1, True, "lx")
+    _wait(lambda: list(inbox.glob("*.npz")), 120, "worker files")
+    publish_exploiter(wd, None, 100, NET, 2, True, "lx")
+    _wait(lambda: any(read_games_file(p)[0]["exploiter"]["opponent_sims"] == 2 for p in inbox.glob("*.npz")), 120, "files at 2 sims")
+    (root / "STOP").write_text("1")
+    t.join(timeout=60)
+    assert not t.is_alive()
+    tags = [read_games_file(p)[0]["exploiter"] for p in sorted(inbox.glob("*.npz"), key=lambda p: p.stat().st_mtime)]
+    assert tags[0] == {"opponent_step": 100, "opponent_sims": 1} and tags[-1] == {"opponent_step": 100, "opponent_sims": 2}
+    for p in inbox.glob("*.npz"):
+        verify_games_file(p, cfg["search"])  # ブリッジの検査を通る（相手の側を別の読みで打った局も、規則は同じ）
+
+
+def test_runner_exploiter_inbox_takes_only_current_opponent_and_stage(tmp_path: Path):
+    """搾取者の学習側: 凍結相手と段を weights/ に配り、今の相手・段で打った局だけを取り込み、課程の勝率に数える。"""
+    from libra_league.runner import Runner
+
+    for name, step in (("main.pt", 5), ("source.pt", 100)):
+        torch.save({"model": LibraNet(NetConfig.from_dict(NET)).state_dict(), "config": {"net": NET}, "step": step}, tmp_path / name)
+    cfg = _tiny_cfg(tmp_path)
+    cfg["run_id"] = "lx"
+    cfg["exploiter"].update({"main_ckpt": str(tmp_path / "main.pt"), "main_source": str(tmp_path / "source.pt"), "refresh_hours": 24.0,
+                             "curriculum_sims": [1, 2], "curriculum_threshold": 0.6, "curriculum_games": 4,
+                             "refresh_during_curriculum": False})
+    cfg["workers"]["max_lag_steps"] = 0
+    sd = StateDir(tmp_path / "lx")
+    sd.create()
+    r = Runner(sd, cfg, device=torch.device("cpu"))
+
+    class Loop:
+        opponent = None
+
+        def set_opponent(self, m, opponent_prior=True):
+            self.opponent = m
+
+        def set_side_sims(self, sims):
+            self.sims = sims
+    r.loop = Loop()
+    r.state.setdefault("exploiter", {})["refreshed_at"] = time.time()
+    r.load_opponent()
+    d = read_exploiter(sd.weights)
+    assert d == {"format": 1, "run_id": "lx", "opponent_step": 5, "opponent_sims": 1, "opponent_prior": True}
+    assert load_weights(sd.weights / OPPONENT_FILE)[1] == 5
+    sd.inbox.mkdir(exist_ok=True)
+    g = _games(8, 6)
+    for x in g:
+        x["result"] = 1 if int(x["slot"]) % 2 == 0 else -1  # 偶数枠は搾取者が先手: どの局も搾取者の勝ち
+    write_games_file(sd.inbox, "a", 0, "lx", g[:2], exploiter={"opponent_step": 5, "opponent_sims": 1})
+    write_games_file(sd.inbox, "a", 0, "lx", g[2:4], exploiter={"opponent_step": 5, "opponent_sims": 2})   # 別の段
+    write_games_file(sd.inbox, "a", 0, "lx", g[4:6], exploiter={"opponent_step": 4, "opponent_sims": 1})   # 古い相手
+    write_games_file(sd.inbox, "a", 0, "lx", g[6:8])                                                      # 印なし
+    added = []
+    add = r.replay.add_games
+    r.replay.add_games = lambda gs: (added.extend(gs), add(gs))[1]
+    assert r.ingest_workers() == 2
+    assert r.inbox.stats["stale_games"] == 6
+    cs = r.state["exploiter"]["curriculum"]
+    assert cs["games"] == 2 and cs["wins"] == 2 and cs["stage"] == 0
+    # 取り込んだ局は相手の手の方策を学習しない印が付く（ワーカーの印は信用しない）
+    for x in added:
+        sente = int(x["slot"]) % 2 == 0
+        assert all(not x["full"][i] for i in range(len(x["full"])) if (i % 2 == 0) != sente)
+        assert x["exploiter_result"] == 1
+    # 段が上がったら配り直す（相手は同じなので opponent.pt は書き直さない）
+    mt = (sd.weights / OPPONENT_FILE).stat().st_mtime_ns
+    write_games_file(sd.inbox, "a", 0, "lx", g[:4], exploiter={"opponent_step": 5, "opponent_sims": 1})
+    r.ingest_workers()
+    assert cs["stage"] == 1 and read_exploiter(sd.weights)["opponent_sims"] == 2 and r.loop.sims == 2
+    assert (sd.weights / OPPONENT_FILE).stat().st_mtime_ns == mt
+    assert cs["games"] == 0  # 上がった後の残りの局（前の段の読みで打った局）は新しい段に数えない
 
 
 def test_train_steps_counts_games_not_sources():

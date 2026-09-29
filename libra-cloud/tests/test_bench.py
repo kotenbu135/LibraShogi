@@ -189,6 +189,30 @@ def test_write_run_dir_and_bundle(tmp_path: Path):
     assert not any(n.startswith(("libra-engine", "third_party", ".venv", "build/")) for n in names)
 
 
+def test_write_run_dir_for_exploiter_worker(tmp_path: Path):
+    """搾取者の run の常駐ワーカー: 相手は学習側が配る weights/opponent.pt・exploiter.json から読む（束にも写しを入れる）。"""
+    net = {"d_model": 32, "n_layers": 1, "n_heads": 4, "d_ff": 64, "dropout": 0.0}
+    cfg = load_config(None)
+    cfg["net"] = net
+    cfg["run_id"] = "lx"
+    cfg["exploiter"]["main_ckpt"] = "/home/x/libra-run/lx/main.pt"
+    learner = tmp_path / "lx"
+    (learner / "checkpoints").mkdir(parents=True)
+    (learner / "weights").mkdir()
+    ck = learner / "checkpoints" / "latest.pt"
+    torch.save({"model": LibraNet(NetConfig.from_dict(net)).state_dict(), "opt": {}, "step": 9, "config": cfg}, ck)
+    (learner / "weights" / "opponent.pt").write_bytes(b"opp")
+    (learner / "weights" / "exploiter.json").write_text("{}", encoding="utf-8")
+    from libra_league.config import dump_toml
+
+    (tmp_path / "config.toml").write_text(dump_toml(cfg), encoding="utf-8")
+    run = write_run_dir(ck, tmp_path / "config.toml", tmp_path / "out", worker=True)
+    b = load_config(run / "config.toml")
+    assert b["exploiter"]["main_ckpt"] == "/root/libra/run/lx/weights/opponent.pt"
+    assert (run / "weights" / "opponent.pt").read_bytes() == b"opp" and (run / "weights" / "exploiter.json").exists()
+    assert load_config(write_run_dir(ck, tmp_path / "config.toml", tmp_path / "out2") / "config.toml")["exploiter"]["main_ckpt"] == ""
+
+
 def test_host_ssh_with_and_without_log(tmp_path: Path, monkeypatch):
     """到達確認（ログ無し）とセットアップ（ログあり）の両方で ssh を呼べる（9/14 にログ無しの経路で落ち、起動済みのホストを 2 台消した）。"""
     import importlib.util
