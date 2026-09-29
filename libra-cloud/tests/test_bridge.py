@@ -66,6 +66,32 @@ def test_bridge_pushes_weights_and_openings_when_changed(tmp_path: Path):
     assert list((host / "weights").glob("*.tmp")) == []
 
 
+def test_bridge_pushes_exploiter_opponent_and_stage(tmp_path: Path):
+    """搾取者の run: 凍結相手（opponent.pt）と相手の読み（exploiter.json）も、変わったら送る。相手を先に送る。"""
+    run = _learner(tmp_path)
+    host = tmp_path / "host"
+    sent: list[str] = []
+    t = LocalTransport(host)
+    push = t.push
+    t.push = lambda src, rel: (sent.append(rel), push(src, rel))[1]
+    b = Bridge(run, t, tmp_path / "out", log=_quiet)
+    b.cycle()
+    assert not (host / "weights" / "opponent.pt").exists() and "weights/exploiter.json" not in sent  # 無ければ送らない
+    (run / "weights" / "opponent.pt").write_bytes(b"o1")
+    (run / "weights" / "exploiter.json").write_text('{"opponent_sims": 1}', encoding="utf-8")
+    sent.clear()
+    b.cycle()
+    assert sent == ["weights/opponent.pt", "weights/exploiter.json"]
+    assert (host / "weights" / "opponent.pt").read_bytes() == b"o1"
+    j = run / "weights" / "exploiter.json"
+    j.write_text('{"opponent_sims": 2}', encoding="utf-8")
+    st = j.stat()
+    os.utime(j, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+    sent.clear()
+    b.cycle()
+    assert sent == ["weights/exploiter.json"] and json.loads((host / "weights" / "exploiter.json").read_text())["opponent_sims"] == 2
+
+
 def test_bridge_pulls_verifies_and_places_games(tmp_path: Path):
     run = _learner(tmp_path)
     host = tmp_path / "host"

@@ -46,11 +46,17 @@ class GamesFileError(ValueError):
 
 
 # ---- 対局ファイル ----
-def write_games_file(inbox: Path, worker_id: str, weights_step: int, run_id: str, games: list[dict]) -> Path:
-    """games を 1 ファイルに書く（tmp → os.replace）。書いたパスを返す。"""
+def write_games_file(inbox: Path, worker_id: str, weights_step: int, run_id: str, games: list[dict], exploiter: dict | None = None) -> Path:
+    """games を 1 ファイルに書く（tmp → os.replace）。書いたパスを返す。
+
+    exploiter: 搾取者の run のワーカーの局なら、打った相手と相手の読み（{"opponent_step": int, "opponent_sims": int | None}。
+    None は課程を終えた本番の読み）。学習側は今の相手・段と違うファイルを捨てる（read_games_file が値を検査する）。"""
     if not WORKER_ID.match(worker_id):
         raise ValueError(f"worker id must match {WORKER_ID.pattern}: {worker_id!r}")
     meta = {"format": FORMAT, "worker": worker_id, "weights_step": int(weights_step), "run_id": run_id, "created": time.time(),
+            **({"exploiter": {"opponent_step": int(exploiter["opponent_step"]),
+                              "opponent_sims": None if exploiter.get("opponent_sims") is None else int(exploiter["opponent_sims"])}}
+               if exploiter is not None else {}),
             "games": [{"slot": int(g["slot"]), "kb": int(g["kb"]), "kw": int(g["kw"]), "result": int(g["result"]), "reason": str(g["reason"]),
                        "v41": float(g["v41"]), "plies": int(g["plies"]), "sfen41": str(g["sfen41"])} for g in games]}
 
@@ -112,6 +118,12 @@ def read_games_file(path: Path, max_bytes: int = MAX_FILE_BYTES) -> tuple[dict, 
     _check(isinstance(meta.get("worker"), str) and bool(WORKER_ID.match(meta["worker"])), "meta: worker")
     _int(meta.get("weights_step"), 0, 2**62, "weights_step")
     _check(isinstance(meta.get("run_id"), str) and len(meta["run_id"]) <= 64, "meta: run_id")
+    if "exploiter" in meta:
+        ex = meta["exploiter"]
+        _check(isinstance(ex, dict) and sorted(ex) == ["opponent_sims", "opponent_step"], "meta: exploiter")
+        _int(ex["opponent_step"], 0, 2**62, "opponent_step")
+        if ex["opponent_sims"] is not None:
+            _int(ex["opponent_sims"], 1, 1 << 20, "opponent_sims")
     gm = meta.get("games")
     _check(isinstance(gm, list) and 1 <= len(gm) <= MAX_GAMES, "meta: games")
     n_moves, n_policy = arrs["n_moves"].astype(np.int64), arrs["n_policy"].astype(np.int64)
@@ -242,13 +254,48 @@ def load_weights(path: Path) -> tuple[LibraNet, int, str]:
     return m.eval(), int(w["step"]), str(w.get("run_id", ""))
 
 
+# ---- 搾取者の run: 凍結した相手と課程の段の配布 ----
+OPPONENT_FILE = "opponent.pt"    # 凍結した本体（publish_weights の形式。step は凍結相手の step）
+EXPLOITER_FILE = "exploiter.json"  # {"format", "run_id", "opponent_step", "opponent_sims"（None は本番の読み）, "opponent_prior"}
+
+
+def publish_exploiter(weights_dir: Path, opponent: LibraNet | None, opponent_step: int, net_cfg: dict, sims: int | None,
+                      opponent_prior: bool, run_id: str) -> None:
+    """学習側: 凍結相手（opponent を渡したときだけ書き直す）と、今の相手の読み（課程の段）を配る。相手を先に書き、
+    exploiter.json を後に書く（ワーカーは json の opponent_step と opponent.pt の step が揃うまで相手を替えない）。"""
+    weights_dir.mkdir(parents=True, exist_ok=True)
+    if opponent is not None:
+        publish_weights(weights_dir / OPPONENT_FILE, opponent, opponent_step, net_cfg, run_id)
+    obj = {"format": FORMAT, "run_id": run_id, "opponent_step": int(opponent_step),
+           "opponent_sims": None if sims is None else int(sims), "opponent_prior": bool(opponent_prior)}
+    tmp = weights_dir / (EXPLOITER_FILE + ".tmp")
+    tmp.write_text(json.dumps(obj), encoding="utf-8")
+    os.replace(tmp, weights_dir / EXPLOITER_FILE)
+
+
+def read_exploiter(weights_dir: Path) -> dict | None:
+    """ワーカー: exploiter.json を読む。無い・壊れている・書き換え中なら None。"""
+    try:
+        d = json.loads((weights_dir / EXPLOITER_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict) or d.get("format") != FORMAT or not isinstance(d.get("opponent_step"), int):
+        return None
+    sims = d.get("opponent_sims")
+    if sims is not None and not (isinstance(sims, int) and sims >= 1):
+        return None
+    return d
+
+
 # ---- 学習側: inbox の取り込み ----
 class Inbox:
-    def __init__(self, path: Path, run_id: str, max_lag_steps: int, log: Callable[[str], None]):
+    def __init__(self, path: Path, run_id: str, max_lag_steps: int, log: Callable[[str], None],
+                 accept: Callable[[dict], str | None] | None = None):
         self.path = path
         self.run_id = run_id
         self.max_lag_steps = max_lag_steps
         self.log = log
+        self.accept = accept  # meta を見て、使わない理由（古い相手・古い段など）を返す。None なら使う
         self.stats: dict = {"games": 0, "files": 0, "stale_games": 0, "rejected_files": 0, "by_worker": {}, "last": None}
 
     def reject(self, p: Path, why: str) -> None:
@@ -283,6 +330,11 @@ class Inbox:
             if self.max_lag_steps > 0 and lag > self.max_lag_steps:
                 self.stats["stale_games"] += len(games)
                 self.log(f"workers: dropped {len(games)} stale games from {meta['worker']} (weights step {meta['weights_step']}, {lag} steps behind)")
+                continue
+            why = self.accept(meta) if self.accept is not None else None
+            if why:
+                self.stats["stale_games"] += len(games)
+                self.log(f"workers: dropped {len(games)} stale games from {meta['worker']} ({why})")
                 continue
             out += games
             self.stats["files"] += 1
@@ -338,6 +390,10 @@ class Worker:
         self.games = 0
         self._lock_checked = 0.0
         self._learner = True
+        # 搾取者の run（[exploiter] main_ckpt あり）: 凍結相手と相手の読みは学習側が weights/ に配るもの（publish_exploiter）を使う。
+        # main_ckpt のパスは読まない（別マシンには無い）
+        self.exploiter = bool(cfg.get("exploiter", {}).get("main_ckpt"))
+        self.ex_tag: dict | None = None  # 今打っている相手と読み {"opponent_step", "opponent_sims"}
 
     def learner_running(self, force: bool = False) -> bool:
         if self.lock is None:
@@ -370,10 +426,30 @@ class Worker:
         self.step = step
         return model
 
+    def _update_exploiter(self, loop) -> bool:
+        """搾取者の run: 配られた相手・読みが今と違えば入れ替える。入れ替えたら True。相手のファイルがまだ揃っていなければ何もしない。"""
+        d = read_exploiter(self.weights.parent)
+        if d is None or d.get("run_id") != self.cfg["run_id"]:
+            return False
+        tag = {"opponent_step": int(d["opponent_step"]), "opponent_sims": d["opponent_sims"]}
+        if tag == self.ex_tag:
+            return False
+        if self.ex_tag is None or tag["opponent_step"] != self.ex_tag["opponent_step"]:
+            try:
+                model, step, run_id = load_weights(self.weights.parent / OPPONENT_FILE)
+            except (OSError, RuntimeError, KeyError, EOFError) as e:
+                self.log(f"worker {self.id}: cannot read opponent: {type(e).__name__}: {str(e)[:200]}")
+                return False
+            if step != tag["opponent_step"] or run_id != self.cfg["run_id"]:
+                return False  # json だけ先に届いた。相手が届くまで今のまま打つ
+            loop.set_opponent(model, opponent_prior=bool(d.get("opponent_prior", True)))
+        loop.set_side_sims(tag["opponent_sims"])
+        self.ex_tag = tag
+        self.log(f"worker {self.id}: opponent step {tag['opponent_step']} sims "
+                 + (str(tag["opponent_sims"]) if tag["opponent_sims"] is not None else "full"))
+        return True
+
     def run(self) -> int:
-        if self.cfg.get("exploiter", {}).get("main_ckpt"):
-            self.log(f"worker {self.id}: exploiter runs are not supported")
-            return 2
         from .selfplay import SelfPlayLoop
 
         waited = False
@@ -401,11 +477,18 @@ class Worker:
         loop = SelfPlayLoop(self.cfg["search"], self.n_games, self.threads, self.seed, self.device, sp["infer_dtype"], sp.get("compile", "none"))
         loop.set_model(model)
         del model
+        if self.exploiter:
+            while not self._update_exploiter(loop):  # 相手が配られるまで打たない（相手なしの局は搾取者の局ではない）
+                if self.stopping:
+                    loop.release()
+                    return 0
+                time.sleep(self.poll_seconds)
         self.log(f"worker {self.id}: start weights step {self.step} n_games {self.n_games} threads {self.threads} device {self.device} seed {self.seed}")
         openings = OpeningsReloader(sp, loop, self.log)
         chunk = int(self.cfg["run"]["chunk_games"])
         pending: list[dict] = []
         file_step = self.step
+        file_tag = self.ex_tag
         last_reload = time.monotonic()
         last_perf = time.monotonic()
         if self.perf_seconds > 0:
@@ -426,9 +509,10 @@ class Worker:
                 modes = loop.model.mode_used
                 self.log(f"worker {self.id}: inference {modes}")
             while len(pending) >= chunk:
-                self._flush(pending[:chunk], file_step)
+                self._flush(pending[:chunk], file_step, file_tag)
                 pending = pending[chunk:]
                 file_step = self.step
+                file_tag = self.ex_tag
             now = time.monotonic()
             if loop.timing is not None and now - last_perf >= self.perf_seconds and loop.timing.get("rounds"):
                 tm, dt = loop.timing, now - last_perf
@@ -447,15 +531,21 @@ class Worker:
                     loop.set_model(m)
                     file_step = min(int(file_step), int(self.step))  # 途中まで古い重みで打った局を含む
                     self.log(f"worker {self.id}: weights step {self.step}")
+                if self.exploiter and self._update_exploiter(loop):
+                    # 前の相手・読みで打った局は前の印で出す（学習側が今の相手・段と比べて捨てる）。打ちかけの局は新しい印で出る
+                    if pending:
+                        self._flush(pending, file_step, file_tag)
+                        pending = []
+                    file_step, file_tag = self.step, self.ex_tag
                 openings.poll()
         if pending:
-            self._flush(pending, file_step)
+            self._flush(pending, file_step, file_tag)
         self.log(f"worker {self.id}: {reason}: exit after {self.games} games in {self.files} files")
         loop.release()
         return 0
 
-    def _flush(self, games: list[dict], step: int | None) -> None:
-        write_games_file(self.inbox, self.id, int(step or 0), self.cfg["run_id"], games)
+    def _flush(self, games: list[dict], step: int | None, tag: dict | None = None) -> None:
+        write_games_file(self.inbox, self.id, int(step or 0), self.cfg["run_id"], games, exploiter=tag if self.exploiter else None)
         self.files += 1
         self.games += len(games)
 

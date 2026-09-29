@@ -394,9 +394,6 @@ def cmd_start(a: argparse.Namespace) -> int:
             print(f"run がありません: {cfg_path}")
             return 2
         cfg = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
-        if (cfg.get("exploiter") or {}).get("main_ckpt"):
-            print(f"{a.run} は搾取者の run なので、ワーカーの局を足せません")
-            return 2
         if not (cfg.get("workers") or {}).get("enabled") and not a.force:
             print(f"{cfg_path} に [workers] enabled = true がありません。書いて {a.run} を停止 → 起動してから始めてください（局を取り込めないまま課金されるため）")
             return 2

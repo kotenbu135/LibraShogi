@@ -1311,6 +1311,14 @@ $vroot.Padding = New-Object System.Windows.Forms.Padding(6, 4, 6, 2)
 [void]$vroot.RowStyles.Add((New-Object System.Windows.Forms.RowStyle("Percent", 100)))
 $vbar = New-Object System.Windows.Forms.FlowLayoutPanel
 $vbar.Dock = "Fill"; $vbar.AutoSize = $true; $vbar.WrapContents = $true
+# 局を足す先の run（lx は 2026-09-29 から。課程を早く進めるため。docs/lx-settings.md §7）
+$vbar.Controls.Add((New-Label "足す先" 4))
+$cmbVastRun = New-Object System.Windows.Forms.ComboBox
+$cmbVastRun.DropDownStyle = "DropDownList"; $cmbVastRun.Width = 48
+[void]$cmbVastRun.Items.AddRange(@("ls", "lx"))
+$cmbVastRun.SelectedIndex = 0
+$cmbVastRun.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
+$vbar.Controls.Add($cmbVastRun)
 $vbar.Controls.Add((New-Label "GPU" 4))
 $cmbGpu = New-Object System.Windows.Forms.ComboBox
 $cmbGpu.DropDownStyle = "DropDownList"; $cmbGpu.Width = 100
@@ -1339,7 +1347,8 @@ $bVastOffers = New-Button "候補を見る" { Show-VastOffers } 90
 $bVastAccount = New-Button "残高を更新" { $script:NextVastAccount = [datetime]::MinValue; $script:NextVast = [datetime]::MinValue } 90
 $bVastCleanup = New-Button "後始末" { Cleanup-Vast } 70
 foreach ($b in @($bVastStart, $bVastStop, $bVastOffers, $bVastAccount, $bVastCleanup)) { $vbar.Controls.Add($b) }
-$script:Tip.SetToolTip($bVastStart, "GPU を借りて自己対局ワーカーを起動し、ls に局を足す（準備に 5〜15 分。時間が来たら残りの局を取ってインスタンスを消す）")
+$script:Tip.SetToolTip($cmbVastRun, "局を足す run。lx（搾取者）は凍結した本体と今の課程の段で打つ")
+$script:Tip.SetToolTip($bVastStart, "GPU を借りて自己対局ワーカーを起動し、「足す先」の run に局を足す（準備に 5〜15 分。時間が来たら残りの局を取ってインスタンスを消す）")
 $script:Tip.SetToolTip($bVastStop, "ワーカーを止めて残りの局を取り、インスタンスを消す")
 $script:Tip.SetToolTip($bVastOffers, "検索したオファーを安い順に、落ちた条件と「1 つ緩めれば借りられる」値を付けて出す（借りない）")
 $script:Tip.SetToolTip($numCores, "ホストの実効コア数の下限（自己対局のスレッドは 12 まで。少ないと局/日が落ちる）")
@@ -1349,7 +1358,7 @@ $script:Tip.SetToolTip($numGhz, "CPU が遅いホストでは探索が律速し�
 $vroot.Controls.Add($vbar, 0, 0)
 $script:VastKeys = @(
     @("phase", "状態"), @("session", "セッション"), @("gpu", "GPU / ホスト"), @("time", "借りた時間 / 残り"), @("cost", "費用（見積もり）"),
-    @("bridge", "回収（ブリッジ）"), @("learner", "取り込み（ls）"), @("verify", "検査"), @("waste", "打ち切り（これまで）"),
+    @("bridge", "回収（ブリッジ）"), @("learner", "取り込み（学習側）"), @("verify", "検査"), @("waste", "打ち切り（これまで）"),
     @("credit", "残高"), @("instances", "借りているインスタンス")
 )
 $vgrid = New-Object System.Windows.Forms.TableLayoutPanel
@@ -1887,13 +1896,14 @@ function Start-Vast {
     $dph = [double]$numDph.Value; $hours = [double]$numHours.Value
     $credit = if ($null -ne $o -and $null -ne $o.account -and $null -ne $o.account.credit) { '${0:N2}' -f [double]$o.account.credit } else { "不明" }
     $rentNote = if ([string]$cmbRent.SelectedItem -eq "入札") { "入札（割り込みあり。止められたら残りの時間で自動で借り直す）" } else { "on-demand" }
-    $msg = ('{0} を{3}で最大 ${1:N2}/h（実効単価）、{2} 時間借りて、ls に自己対局の局を足します。' -f $gpu, $dph, $hours, $rentNote) + "`r`n" +
+    $vrun = [string]$cmbVastRun.SelectedItem
+    $msg = ('{0} を{3}で最大 ${1:N2}/h（実効単価）、{2} 時間借りて、{4} に自己対局の局を足します。' -f $gpu, $dph, $hours, $rentNote, $vrun) + "`r`n" +
            ('費用は最大 ${0:N2} 程度（準備の 5〜15 分を含む）。残高 {1}。' -f ($dph * ($hours + 0.25)), $credit) + "`r`n" +
            (Get-VastPast $gpu $hours) + "`r`n" +
            "時間が来たら残りの局を取ってインスタンスを消します。途中で止めるときは「停止」。よろしいですか？"
     if (-not (Confirm-Action $msg)) { return }
     try {
-        $r = Invoke-Vast (@("start", "--run", "ls", "--hours", ("{0:0.0}" -f $hours)) + (Get-VastArgs))
+        $r = Invoke-Vast (@("start", "--run", $vrun, "--hours", ("{0:0.0}" -f $hours)) + (Get-VastArgs))
         Set-Note "vast" $r.text ($r.code -ne 0) $(if ($r.code -eq 0) { 300 } else { 900 })
     } catch {
         Set-Note "vast" ("起動に失敗: " + $_.Exception.Message) $true 900
@@ -2012,8 +2022,9 @@ function Update-VastPanel {
     $v.waste.Text = Format-Vast-Waste-Short $(if ($null -ne $script:VastHist) { $script:VastHist.interrupts } else { $null })
     $v.waste.ForeColor = if ($null -ne $script:VastHist -and $null -ne $script:VastHist.interrupts -and [double]$script:VastHist.interrupts.waste_pct -ge 20) { [System.Drawing.Color]::DarkOrange } else { $black }
     $wk = $null
-    if ($script:Last.ContainsKey("ls") -and $null -ne $script:Last["ls"].status) { $wk = $script:Last["ls"].status.workers }
-    $v.learner.Text = if ($null -ne $wk) { '{0} 局（古くて捨てた {1}、不正 {2}）' -f (Format-Int $wk.games), (Format-Int $wk.stale_games), $wk.rejected_files } else { "（ls の [workers] が無効か、まだ取り込みなし）" }
+    $lrun = if ($null -ne $o -and $null -ne $o.session -and $o.session.run) { [string]$o.session.run } else { [string]$cmbVastRun.SelectedItem }
+    if ($script:Last.ContainsKey($lrun) -and $null -ne $script:Last[$lrun].status) { $wk = $script:Last[$lrun].status.workers }
+    $v.learner.Text = if ($null -ne $wk) { '{0}: {1} 局（古くて捨てた {2}、不正 {3}）' -f $lrun, (Format-Int $wk.games), (Format-Int $wk.stale_games), $wk.rejected_files } else { "（{0} の [workers] が無効か、まだ取り込みなし）" -f $lrun }
     $ac = $o.account
     if ($null -ne $ac) {
         if ($null -ne $ac.error) {
