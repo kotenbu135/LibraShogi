@@ -103,7 +103,7 @@ compile = "max-autotune"
 [workers]
 enabled = true
 ingest_seconds = 10.0
-max_lag_steps = 10000
+max_lag_steps = 30000
 
 [run]
 checkpoint_minutes = 10
