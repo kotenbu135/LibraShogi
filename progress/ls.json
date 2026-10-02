@@ -1,29 +1,29 @@
 {
  "schema": 1,
  "run": "ls",
- "generated": "2026-10-03 06:19:01",
- "t": 1790975941.6,
+ "generated": "2026-10-03 06:27:04",
+ "t": 1790976424.4,
  "process": "running",
  "flags": [],
  "now": {
-  "step": 756119,
-  "generation": 1570,
-  "games_total": 9243434,
-  "games_per_day_1h": 692545,
+  "step": 756423,
+  "generation": 1571,
+  "games_total": 9247413,
+  "games_per_day_1h": 697062,
   "window_games": 2000000,
   "active_games": 512,
-  "elapsed_h": 255.77,
+  "elapsed_h": 255.91,
   "heldout_games": 20000,
-  "status_time": "2026-10-03 06:19:01",
+  "status_time": "2026-10-03 06:27:04",
   "train": {
-   "loss": 2.041641,
-   "policy": 1.278668,
-   "value": 0.50574,
-   "v41": 0.514467,
-   "policy_acc": 0.665368,
-   "grad_norm": 1.598734,
+   "loss": 2.036428,
+   "policy": 1.275733,
+   "value": 0.504254,
+   "v41": 0.512882,
+   "policy_acc": 0.665122,
+   "grad_norm": 1.595013,
    "lr": 0.0002,
-   "steps": 209
+   "steps": 171
   },
   "gen": {
    "window": {
@@ -90,8 +90,8 @@
   "anchor_offset": 972.5,
   "best_step": 752908,
   "best_stall": 0,
-  "queue": 1,
-  "running": "reference",
+  "queue": 0,
+  "running": "anchor",
   "last_archive_games": 9200000,
   "references": [
    "ckpt_000693116.pt"
@@ -102,13 +102,6 @@
    "ckpt_000281893.pt"
   ],
   "jobs": [
-   {
-    "kind": "best",
-    "rc": 0,
-    "secs": 2202,
-    "out": "best-20261002-211851-693116-722954.json",
-    "tail": null
-   },
    {
     "kind": "split",
     "rc": 0,
@@ -156,6 +149,13 @@
     "rc": 0,
     "secs": 1686,
     "out": "split-20261003-044500-693116-752908-main.json",
+    "tail": null
+   },
+   {
+    "kind": "reference",
+    "rc": 0,
+    "secs": 483,
+    "out": "reference-20261003-044500-ckpt_000693116-752908.json",
     "tail": null
    }
   ]
@@ -1823,6 +1823,20 @@
    "ci95": [
     -9.6,
     87.9
+   ]
+  },
+  {
+   "t": 1790976424.2832763,
+   "step": 752908,
+   "games": 9247413,
+   "ref": "ckpt_000693116.pt",
+   "ref_step": 693116,
+   "n": 200,
+   "score_new": 0.5925,
+   "elo": 65.0,
+   "ci95": [
+    17.0,
+    115.7
    ]
   }
  ],
@@ -7733,44 +7747,44 @@
    "gen_heldout_fuseki_corr_v": 0.6155
   },
   {
-   "t": 1790975851.5,
-   "step": 756062,
-   "games_total": 9242599,
-   "gpd": 692180,
-   "gpd_5m": 770471,
+   "t": 1790976151.6,
+   "step": 756233,
+   "games_total": 9244961,
+   "gpd": 683712,
+   "gpd_5m": 680029,
    "window": 2000000,
-   "rss_mb": 23452,
+   "rss_mb": 23455,
    "swap_mb": 0,
    "gpu_mb": 8744,
-   "loss": 2.041641,
-   "policy": 1.278668,
-   "value": 0.50574,
-   "v41": 0.514467,
-   "policy_acc": 0.665368,
-   "grad_norm": 1.598734,
+   "loss": 2.036428,
+   "policy": 1.275733,
+   "value": 0.504254,
+   "v41": 0.512882,
+   "policy_acc": 0.665122,
+   "grad_norm": 1.595013,
    "lr": 0.0002,
-   "steps": 209,
+   "steps": 171,
    "train_avg": true,
    "target_minus_z": 0.0,
-   "v41_minus_z": -0.0631,
-   "draw_target": 0.0052,
-   "draw_actual": 0.0052,
-   "rootq_minus_z_fuseki": -0.006,
-   "rootq_minus_z_normal": -0.0733,
-   "t_train_sample": 0.14,
-   "t_train_step": 9.31,
-   "t_sp_eval": 74.77,
-   "sp_games": 24113,
-   "sp_draw": 0.0039,
+   "v41_minus_z": -0.0522,
+   "draw_target": 0.0049,
+   "draw_actual": 0.0049,
+   "rootq_minus_z_fuseki": -0.0041,
+   "rootq_minus_z_normal": -0.0807,
+   "t_train_sample": 0.13,
+   "t_train_step": 9.21,
+   "t_sp_eval": 77.28,
+   "sp_games": 26475,
+   "sp_draw": 0.0042,
    "sp_plies": 78.8,
-   "sp_sente": 0.5127,
-   "sp_sennichite": 0.002,
+   "sp_sente": 0.512,
+   "sp_sennichite": 0.0023,
    "sp_perpetual_check": 0.0,
-   "sp_max_ply": 0.0018,
-   "sp_resign": 0.8412,
-   "sp_ruling41": 0.0473,
+   "sp_max_ply": 0.0019,
+   "sp_resign": 0.8407,
+   "sp_ruling41": 0.0475,
    "sp_no_legal_move": 0.1076,
-   "sp_mate_found": 0.3202,
+   "sp_mate_found": 0.3213,
    "gen_window_corr_v": 0.5714,
    "gen_window_policy_acc": 0.5536,
    "gen_window_policy_ce": 1.3118,
@@ -7782,7 +7796,7 @@
   }
  ],
  "review": {
-  "time": "2026-10-03 06:19:01",
+  "time": "2026-10-03 06:27:04",
   "run": "ls",
   "items": [
    {
@@ -7833,7 +7847,7 @@
    {
     "name": "M4 参照 ckpt_000062426.pt",
     "verdict": "まだ無い",
-    "why": "対 ckpt_000062426.pt: もう測っていない（最後は step 281893、6,013,661 局前）",
+    "why": "対 ckpt_000062426.pt: もう測っていない（最後は step 281893、6,017,640 局前）",
     "values": {
      "last": {
       "t": 1789951881.1436996,
@@ -7850,7 +7864,7 @@
       ]
      },
      "gap_games": 410926,
-     "behind_games": 6013661,
+     "behind_games": 6017640,
      "score": 0.855
     }
    },
@@ -7874,14 +7888,14 @@
       ]
      },
      "gap_games": 485999,
-     "behind_games": 686180,
+     "behind_games": 690159,
      "score": 0.815
     }
    },
    {
     "name": "M4 参照 ckpt_000646699.pt",
     "verdict": "まだ無い",
-    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、8,004,894 局前）",
+    "why": "対 ckpt_000646699.pt: もう測っていない（最後は step 98604、8,008,873 局前）",
     "values": {
      "last": {
       "t": 1789725300.1884296,
@@ -7898,38 +7912,38 @@
       ]
      },
      "gap_games": 395416,
-     "behind_games": 8004894,
+     "behind_games": 8008873,
      "score": 0.895
     }
    },
    {
     "name": "M4 参照 ckpt_000693116.pt",
-    "verdict": "まだ無い",
-    "why": "対 ckpt_000693116.pt: +38.4 Elo（step 722954、比べる点がまだ 1 つ）",
+    "verdict": "続ける",
+    "why": "対 ckpt_000693116.pt: +38.4 → +65.0 Elo（300,206 局で +26.6）",
     "values": {
      "last": {
-      "t": 1790952330.0913131,
-      "step": 722954,
-      "games": 8947207,
+      "t": 1790976424.2832763,
+      "step": 752908,
+      "games": 9247413,
       "ref": "ckpt_000693116.pt",
       "ref_step": 693116,
       "n": 200,
-      "score_new": 0.555,
-      "elo": 38.4,
+      "score_new": 0.5925,
+      "elo": 65.0,
       "ci95": [
-       -9.6,
-       87.9
+       17.0,
+       115.7
       ]
      },
-     "gap_games": null,
-     "behind_games": 296227,
-     "score": 0.555
+     "gap_games": 300206,
+     "behind_games": 0,
+     "score": 0.5925
     }
    },
    {
     "name": "M4 参照 win1m.pt",
     "verdict": "まだ無い",
-    "why": "対 win1m.pt: もう測っていない（最後は step 281893、6,016,174 局前）",
+    "why": "対 win1m.pt: もう測っていない（最後は step 281893、6,020,153 局前）",
     "values": {
      "last": {
       "t": 1789951515.1918266,
@@ -7946,7 +7960,7 @@
       ]
      },
      "gap_games": 411144,
-     "behind_games": 6016174,
+     "behind_games": 6020153,
      "score": 0.835
     }
    },
@@ -7962,9 +7976,9 @@
    {
     "name": "局/日（1 時間平均）",
     "verdict": "続ける",
-    "why": "692,545",
+    "why": "697,062",
     "values": {
-     "gpd": 692545
+     "gpd": 697062
     }
    }
   ],
@@ -8959,6 +8973,18 @@
       "n": 200,
       "score": 0.555,
       "in_band": true
+     },
+     {
+      "step": 752908,
+      "games": 9200136,
+      "elo": 65.0,
+      "ci95": [
+       17.0,
+       115.7
+      ],
+      "n": 200,
+      "score": 0.5925,
+      "in_band": true
      }
     ],
     "intervals": [
@@ -8970,15 +8996,24 @@
       "elo_per_doubling": 572.6,
       "elo_per_1m": 96.1,
       "in_band": true
+     },
+     {
+      "games_from": 8799939,
+      "games_to": 9200136,
+      "d_elo": 26.6,
+      "doublings": 0.064,
+      "elo_per_doubling": 414.6,
+      "elo_per_1m": 66.5,
+      "in_band": true
      }
     ],
     "fit": {
-     "elo_per_doubling": 572.6,
-     "intercept": -13171.5,
-     "n": 2,
-     "rms_resid": 0.0,
+     "elo_per_doubling": 495.9,
+     "intercept": -11405.6,
+     "n": 3,
+     "rms_resid": 2.4,
      "games_from": 8400259,
-     "games_to": 8799939
+     "games_to": 9200136
     }
    }
   },
@@ -9586,7 +9621,7 @@
      1329.1,
      1397.1
     ],
-    "games": 8400,
+    "games": 8600,
     "opponents": 5,
     "step": 693116
    },
@@ -9611,12 +9646,12 @@
     "step": 74627
    },
    "step 752,908": {
-    "elo": 1392.9,
+    "elo": 1396.1,
     "ci95": [
-     1355.6,
-     1430.2
+     1359.1,
+     1433.1
     ],
-    "games": 2000,
+    "games": 2200,
     "opponents": 1,
     "step": 752908
    },
@@ -9707,7 +9742,7 @@
   },
   "converged": true,
   "iters": 1038,
-  "n_evals": 101,
+  "n_evals": 102,
   "curve": {
    "points": [
     {
@@ -10109,7 +10144,7 @@
       1329.1,
       1397.1
      ],
-     "n": 8400,
+     "n": 8600,
      "opponents": 5,
      "score": 0.5,
      "in_band": true,
@@ -10134,12 +10169,12 @@
      "step": 752908,
      "games": 9200136,
      "t": 1790970342.2,
-     "elo": 1392.9,
+     "elo": 1396.1,
      "ci95": [
-      1355.6,
-      1430.2
+      1359.1,
+      1433.1
      ],
-     "n": 2000,
+     "n": 2200,
      "opponents": 1,
      "score": 0.5,
      "in_band": true,
@@ -10393,26 +10428,26 @@
     {
      "games_from": 8799939,
      "games_to": 9200136,
-     "d_elo": 29.8,
+     "d_elo": 33.0,
      "doublings": 0.064,
-     "elo_per_doubling": 464.5,
-     "elo_per_1m": 74.5,
+     "elo_per_doubling": 514.3,
+     "elo_per_1m": 82.5,
      "in_band": true
     }
    ],
    "fit": {
     "elo_per_doubling": 140.9,
-    "intercept": -1856.4,
+    "intercept": -1857.0,
     "n": 29,
     "rms_resid": 54.8,
     "games_from": 4738,
     "games_to": 9200136
    },
    "fit_recent": {
-    "elo_per_doubling": 126.4,
-    "intercept": -1527.8,
+    "elo_per_doubling": 126.5,
+    "intercept": -1531.4,
     "n": 23,
-    "rms_resid": 18.3,
+    "rms_resid": 18.2,
     "games_from": 800281,
     "games_to": 9200136
    },
