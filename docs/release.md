@@ -6,6 +6,13 @@ v0.1 の作業は decisions.md の 2026-09-15〜16 に散らばっていて、�
 どの段でも「止める・起動する」はユーザーがコンソールで行う（CLAUDE.md §稼働中のランの扱い）。
 判断がユーザーに要るところは §8 にまとめてある。**§8 を先に聞いてから §1 に入る。**
 
+**v0.3 で v0.2 と変わること（2026-10-02 のユーザーの決定）:**
+- 引き金は**総局数 1,000 万局**（「1000万局に到達したらv0.3をリリースする」）。§0 の「局数で区切る」の形はそのまま。
+- **玉配置表（`scale.json`）を作らず、配らない**（「やめる」）。§2 は飛ばす（ls を止める約 1.5 時間・約 $3 が要らなくなる）。
+  表は学習に使っておらず、使っていたのは libra.exe の両玉の置き方・サイトの AI の先後・サイトのルールのページの釣り合う組の表の 3 か所。
+  libra.exe は表が無くても読んで置く形にした（protocol.md §2。サイトの `kings.ts` と同じ形）。`tools/package_release.sh` は表を詰めない。
+  サイトの差し替え（§7）では表を取り込まず、外す。ハンデ表（見送り中）を作るときは、そのとき `libra-scale` で表を作る。
+
 ---
 
 ## 0. いつ出すか（引き金）
@@ -117,6 +124,8 @@ bin/libra export --ckpt ~/libra-run/releases/v0.2/libra-v0.2.pt --out ~/libra-ru
 ---
 
 ## 2. 玉配置表（`scale.json`）を作り直す
+
+**v0.3 からは行わない**（冒頭の囲み。2026-10-02 のユーザーの決定）。以下は v0.2 の記録として残す。
 
 重みが変われば釣り合う組も変わるので、**版ごとに作り直す**。v0.2 の表は Release の添付にもサイトのハンデ表にもなる。
 
@@ -230,7 +239,7 @@ tools/package_release.sh v0.2 ~/libra-run/releases/v0.2 '<v0.2 の重みに到�
 ## 6. タグと Release
 
 1. `git tag -a v0.2 <§1 で控えたコミット> -m "Libra v0.2 (step <step>)"` → `git push origin v0.2`
-2. GitHub Release を作り、`dist/` の中身（zip・`.onnx`・`.pt`・`scale-v0.2.json`・自己対局の標本・`SHA256SUMS`）を添付する。
+2. GitHub Release を作り、`dist/` の中身（zip・`.onnx`・`.pt`・`scale-v0.2.json`・自己対局の標本・`SHA256SUMS`）を添付する。v0.3 からは `scale-<版>.json` が無い。
    本文は [release-notes-v0.2.md](release-notes-v0.2.md) に置いてあるので、`--notes-file` で渡す。
 
    ```bash
@@ -260,7 +269,8 @@ tools/package_release.sh v0.2 ~/libra-run/releases/v0.2 '<v0.2 の重みに到�
    （16MiB ごとに分け、`src/engine/libra/model.ts` に貼る行と `.gitignore` に足す行を出す）
 2. `src/engine/libra/model.ts` の `LIBRA_MODEL` を差し替える（`name`・`parts`・`bytes`・`sha256`・`step`）。
 3. `.gitignore` の `!public/models/…` を新しいファイル名に直し、**古い重みの行を消す**（ワイルドカードにしない。配布経路に黙って混ざらないようにするため）。
-4. 玉配置表を取り込む: `node scripts/kings/import-scale.mjs ~/libra-run/releases/v0.2/scale-v0.2.json`（§2 で写した検証済みの表）（表の step が `LIBRA_MODEL.step` と違えば止まる）。
+4. **v0.3 からは玉配置表を取り込まない。** 代わりに、v0.2 の表を写した `src/data/libra-choose.json`（AI の先後）と `src/data/libra-kings.json`（ルールのページの釣り合う組の表）を外す。AI の先後は表が無いときの道（両玉の局面を読んで決める、`controller.ts`）だけになり、ルールのページの表は消す（重みと合わない古い表を出さないため）。
+   v0.2 のときの手順: 玉配置表を取り込む: `node scripts/kings/import-scale.mjs ~/libra-run/releases/v0.2/scale-v0.2.json`（§2 で写した検証済みの表）（表の step が `LIBRA_MODEL.step` と違えば止まる）。
 5. 一致試験の局面集を作り直す: `PYTHONPATH=… libra_oracle.py <games.jsonl> 24`（tenbin-shogi-web/CLAUDE.md のコマンド）。
 6. `npm test` と `npm run e2e` を通す。
 7. **ハンデ表**（両玉の置き場所。decisions.md 2026-09-19）は v0.2 の `scale.json` から作り直してから出す。

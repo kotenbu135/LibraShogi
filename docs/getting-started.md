@@ -90,7 +90,7 @@ export LIBRA_MODEL=~/Downloads/libra-v0.2.onnx
 
 - `go` の直後に `quit` を流すと探索が止められて 1 回の評価だけで指す（`nodes 0`）ので、パイプで流すときは `sleep` を挟む。
 - CUDA が使えないときは CPU に自動で落ち、`info string ... provider cpu` と出る。
-- 天秤将棋の 1〜2 手目（両玉）に使う玉配置表は、既定で**実行ファイルの隣の `scale.json`**（v0.2 から。それより前は既定が空）。別の場所の表を使うときだけ `setoption name Scale_Table value <scale-v0.2.json の場所>` を送る。表が無くても探索で置く。
+- 天秤将棋の 1〜2 手目（両玉）は、エンジンが読んで置く（先手玉は乱数、後手玉は先手の勝率が五分にいちばん近いマス。v0.3 から。[protocol.md](protocol.md) §2）。v0.2 の玉配置表を使うときだけ `setoption name Scale_Table value <scale-v0.2.json の場所>` を送る（v0.2 の libra.exe は隣の `scale.json` を既定で読む）。
 - 局面の書き方（`position fuseki moves ...`、`choose:`、41 手目以降の SFEN）は [rules.md](rules.md) §3.5 と [protocol.md](protocol.md) §1。
 
 ## 5. GUI（tenbin-shogi-desktop）で指す

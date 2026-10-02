@@ -159,15 +159,57 @@ def test_choose_reports_winrate_on_multipv1(engine):
         assert 0.0 <= float(t[t.index("winrate") + 1]) <= 1.0, (go_args, " ".join(t))
 
 
-def test_scale_table_defaults_to_the_file_next_to_the_exe(engine):
-    """Scale_Table の既定は実行ファイルの隣の scale.json（DNN_Model と同じ扱い。docs/release.md §8-D、v0.2 から）。
+def test_scale_table_defaults_to_empty(engine):
+    """Scale_Table の既定は空（玉配置表は v0.3 から配らない。ユーザーの決定 2026-10-02）。
 
-    配布物の zip は exe の隣に scale.json を入れるので、GUI の登録で手でパスを入れなくても表が使われる。
+    v0.2 は実行ファイルの隣の scale.json を既定にしていたが、v0.2 の zip を上書きして古い表が残っても黙って使わないよう、
+    隣を見る既定もやめた。両玉は読んで置く（下の test_kings_placed_by_search_without_table）。
     """
-    declared = engine.declared["Scale_Table"]
-    assert declared.endswith("scale.json"), declared
-    assert str(BIN.resolve().parent) in declared, (declared, BIN)
-    assert "<empty>" not in declared, declared
+    assert engine.declared["Scale_Table"].split()[-1] == "<empty>", engine.declared["Scale_Table"]
+
+
+def _go_lines(engine, line: str, go_args: str, timeout: float = 120) -> list[str]:
+    engine.send(line)
+    engine.send(f"go {go_args}")
+    return engine.wait_for(lambda l: l.startswith("bestmove"), timeout)
+
+
+def test_kings_placed_by_search_without_table(engine):
+    """表が無いときの両玉は tenbin-shogi-web の kings.ts・`match --place search` と同じ形（2026-10-02）。
+
+    先手玉は六段目を除いた合法なマスから乱数。後手玉は四段目を除いた候補をすべて読み、先手の勝率が 0.5 にいちばん近いマス
+    （差が同じならマスの並びの前）。multipv 1 の winrate は指した側（後手）から見た値。
+    """
+    seen = set()
+    for _ in range(12):
+        lines = _go_lines(engine, "position fuseki", "nodes 5")
+        bm = lines[-1].split()[1]
+        assert bm.startswith("K*") and not bm.endswith("f"), bm
+        assert any("method random" in l for l in lines), lines
+        seen.add(bm)
+    assert len(seen) > 1, seen  # 27 マスから 12 回で 1 種類だけになる確率は 27^-11
+
+    lines = _go_lines(engine, "position fuseki moves K*5i", "nodes 5")
+    bm = lines[-1].split()[1]
+    rates = {t[3]: float(t[5]) for t in (l.split() for l in lines) if t[:3] == ["info", "string", "place"]}
+    pos = ls.Position()
+    pos.set_position("position fuseki moves K*5i")
+    expect = sorted(m for m in pos.legal_moves() if m.startswith("K*") and not m.endswith("d"))
+    assert sorted(rates) == expect, (sorted(rates), expect)
+    assert bm == min(rates, key=lambda m: (abs(rates[m] - 0.5), m)), (bm, rates)
+    assert any("method even" in l for l in lines), lines
+    mp1 = [l.split() for l in lines if l.startswith("info depth")][-1]
+    assert abs(float(mp1[mp1.index("winrate") + 1]) - (1 - rates[bm])) < 2e-4, (mp1, rates[bm])
+
+
+def test_kings_placed_by_search_keeps_the_clock(engine):
+    """GUI の時計の語でも、後手玉の候補を読む時間は持ち時間の中に収める（候補ごとに残りの時間を割る）。"""
+    import time
+
+    t0 = time.time()
+    lines = _go_lines(engine, "position fuseki moves K*5i", "btime 60000 wtime 60000 byoyomi 3000", 60)
+    assert time.time() - t0 < 6.0, time.time() - t0  # 予算は (3000 + 60000/30) × 0.9 = 4.5 秒
+    assert lines[-1].split()[1].startswith("K*"), lines[-1]
 
 
 def test_scale_table_answers_with_clock_words(engine, tmp_path):
@@ -204,7 +246,7 @@ def test_scale_table_places_kings(engine, tmp_path):
         bm2, _ = engine.go(f"position fuseki moves {bm}", "nodes 5", timeout=60)
         assert bm2 == {"K*5i": "K*5a", "K*4i": "K*6b"}[bm]
     assert len(seen) == 2
-    # 表に無い先手玉なら探索で置く
+    # 表に無い先手玉なら読んで置く（表が無いときと同じ）
     bm3, _ = engine.go("position fuseki moves K*1i", "nodes 5", timeout=60)
-    assert bm3.startswith("K*") and bm3 != "K*5a" or True
+    assert bm3.startswith("K*") and not bm3.endswith("d"), bm3
     engine.send("setoption name Scale_Table value <empty>")

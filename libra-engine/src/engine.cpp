@@ -33,10 +33,6 @@ static std::string env_or(const char* name, const std::string& def) {
   return v && *v ? std::string(v) : def;
 }
 
-// 玉配置表の既定の場所。DNN_Model と同じく実行ファイルの隣を見る（docs/release.md §8-D、ユーザーの決定 2026-09-21）。
-// 配布物の zip は exe の隣に scale.json を入れるので、GUI の登録で手でパスを入れなくても表が使われる。
-static std::string default_scale_path() { return exe_dir() + "/scale.json"; }
-
 Engine::Engine() {
   opts_ = {
       {"Fuseki_Mode", "tenbin"},
@@ -47,7 +43,9 @@ Engine::Engine() {
       {"DNN_Provider", env_or("LIBRA_PROVIDER", "auto")},
       {"Sims_Fuseki", "400"},
       {"Sims_Normal", "800"},
-      {"Scale_Table", default_scale_path()},
+      // 玉配置表は v0.3 から配らない（ユーザーの決定 2026-10-02）。既定は空で、両玉は読んで置く（place_kings）。
+      // v0.2 の zip を上書きして古い scale.json が隣に残っても黙って使わないよう、隣を見る既定（v0.2）もやめた
+      {"Scale_Table", ""},
       {"USI_Ponder", "false"},
       {"Declare_Win", "false"},
       {"Mate_Nodes", "2000"},
@@ -76,7 +74,7 @@ void Engine::declare_options() const {
   out("option name DNN_Provider type combo default " + opts_.at("DNN_Provider") + " var auto var cuda var dml var cpu");
   out("option name Sims_Fuseki type spin default 400 min 1 max 1000000");
   out("option name Sims_Normal type spin default 800 min 1 max 1000000");
-  out("option name Scale_Table type string default " + opts_.at("Scale_Table"));
+  out("option name Scale_Table type string default <empty>");
   out("option name USI_Ponder type check default false");
   out("option name Declare_Win type check default false");
   out("option name Mate_Nodes type spin default 2000 min 0 max 10000000");
@@ -166,9 +164,7 @@ bool Engine::load_scale(std::string* err) {
   if (path.empty()) return true;
   std::ifstream f(path, std::ios::binary);
   if (!f) {
-    // 既定の場所にファイルが無いのは普通のこと（表を同梱しない使い方）。そのまま探索で置くので黙る。
-    // 利用者が自分で入れたパスが開けないときだけ言う。
-    if (err && path != default_scale_path()) *err = "cannot open Scale_Table " + path;
+    if (err) *err = "cannot open Scale_Table " + path;
     return false;
   }
   std::string s((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -215,6 +211,92 @@ bool Engine::scale_move(const Position& pos, std::string* move) {
   auto& p = c[d(rng_)];
   int sq = pos.ply() == 0 ? p.first : p.second;
   *move = "K*" + sq_to_usi(sq);
+  return true;
+}
+
+// 1 回の探索を最後まで回す（sims 回、または stop・deadline で打ち切る）。結果は eng_->result(0)
+bool Engine::run_search(const std::string& line, long sims, double deadline, Mode mode, std::string* err) {
+  if (!eng_->set_position(0, line, int(sims), true, mode)) {
+    if (err) *err = "bad position: " + line;
+    return false;
+  }
+  while (!eng_->idle(0)) {
+    if (stop_flag || (deadline >= 0 && now_s() >= deadline)) {
+      eng_->finish_now(0);
+      if (!eng_->idle(0)) {
+        if (!evaluate(err)) return false;
+        eng_->finish_now(0);
+      }
+      break;
+    }
+    if (!evaluate(err)) return false;
+  }
+  while (!eng_->idle(0))
+    if (!evaluate(err)) return false;
+  return true;
+}
+
+// 玉配置表が無いときの 1・2 手目。tenbin-shogi-web の kings.ts と LibraShogi の `bin/libra match --place search` と同じ形
+// （玉配置表をやめた。ユーザーの決定 2026-10-02）。先手玉は合法なマスから一様に選び、後手玉は候補ごとに両玉を置いた局面を
+// 読んで、先手の勝率が 0.5 にいちばん近いマスに置く。探索に玉の手そのものを選ばせると、2 手目で後手の得を最大にし、
+// 選ぶ側に有利な片寄った組を置く（自己対局は玉を乱数で置くので、玉を置く手の方策は学習されていない。decisions 2026-09-15）。
+// 自陣の 4 段目は置かない（サイトの強さ 3 以上と同じ）。後手玉の四段目は 3 手目の桂打ちで遮断不能になり先手の勝ちが
+// ほぼ決まり（rules.md §3.4）、先手玉の六段目はどの後手玉とも釣り合わない（tenbin-shogi-web measurements.md 2026-09-28）。
+// 候補 1 つあたりの読みは、この手に充てる読み（Sims_Fuseki か nodes）か、残りの時間を残りの候補で割った時間。
+bool Engine::place_kings(const Position& pos, const MoveList& ml, long sims, double deadline, Mode mode, std::string* move,
+                         std::string* err) {
+  if (pos.phase() != PHASE_FUSEKI || pos.ply() > 1) return false;
+  const char avoid = pos.ply() == 0 ? 'f' : 'd';
+  std::vector<std::string> cands, all;
+  for (int i = 0; i < ml.n; ++i) {
+    const std::string u = move_to_usi(ml.m[i]);
+    if (u.rfind("K*", 0) != 0) continue;
+    all.push_back(u);
+    if (u.back() != avoid) cands.push_back(u);
+  }
+  if (cands.empty()) cands = all;
+  if (cands.empty()) return false;
+  if (pos.ply() == 0) {
+    std::uniform_int_distribution<int> d(0, int(cands.size()) - 1);
+    *move = cands[d(rng_)];
+    out("info depth 1 multipv 1 score cp 0 winrate 0.5000 nodes 0 time 0 pv " + *move);
+    out("info string phase fuseki ply 0 method random");
+    return true;
+  }
+  const std::string base = position_line_.find(" moves ") == std::string::npos ? position_line_ + " moves"
+                                                                                  : position_line_;
+  const double t0 = now_s();
+  std::string best;
+  double best_rate = 0.5, best_gap = 2;
+  long nodes = 0;
+  for (size_t i = 0; i < cands.size() && !stop_flag; ++i) {
+    double dl = -1;
+    if (deadline >= 0) dl = now_s() + std::max(0.0, deadline - now_s()) / double(cands.size() - i);
+    const std::string line = base + " " + cands[i];
+    if (!run_search(line, sims, dl, mode, err)) return false;
+    const SearchResult& r = eng_->result(0);
+    if (!r.ready || r.cands.empty()) continue;
+    Position p2;
+    if (!p2.set_position(line, mode)) continue;
+    const double p = (r.cands[0].q + 1) / 2;
+    const double sente = p2.turn() == BLACK ? p : 1 - p;  // 両玉を置いた局面の手番から見た勝率を、先手の勝率に直す
+    nodes += r.sims;
+    std::ostringstream s;
+    s.precision(4);
+    s << std::fixed << "info string place " << cands[i] << " sente " << sente;
+    out(s.str());
+    const double gap = std::abs(sente - 0.5);
+    if (gap < best_gap || (gap == best_gap && cands[i] < best)) best = cands[i], best_rate = sente, best_gap = gap;
+  }
+  if (best.empty()) best = cands[0];  // 1 つも読み終わらないうちに stop された
+  *move = best;
+  std::ostringstream s;
+  s.precision(4);
+  const double mine = 1 - best_rate;  // 指した側（後手）から見た勝率
+  s << std::fixed << "info depth 1 multipv 1 score cp " << winrate_to_cp(mine) << " winrate " << mine << " nodes " << nodes
+    << " time " << int((now_s() - t0) * 1000) << " pv " << best;
+  out(s.str());
+  out("info string phase fuseki ply 1 method even");
   return true;
 }
 
@@ -268,7 +350,7 @@ void Engine::go(const std::vector<std::string>& args) {
     out("bestmove resign");
     return;
   }
-  // 両玉の配置: 玉配置表（Scale_Table）があれば釣り合い集合から一様に選ぶ
+  // 両玉の配置: 玉配置表（Scale_Table）を利用者が入れたときだけ、釣り合い集合から一様に選ぶ
   if (!load_scale(&err) && !err.empty()) out("info string " + err);
   std::string sm;
   if (scale_move(pos, &sm) && pos.is_legal(move_from_usi(sm))) {
@@ -290,27 +372,20 @@ void Engine::go(const std::vector<std::string>& args) {
     double budget_ms = byo + inc + remain / 30.0;
     deadline = now_s() + std::max(0.05, budget_ms / 1000.0 * 0.9);
   }
-  if (infinite || deadline >= 0) sims = 1000000000L;
-  const double t0 = now_s();
-  if (!eng_->set_position(0, position_line_, int(sims), true, mode)) {
+  // 玉配置表が無ければ両玉は読んで置く（infinite でも候補ごとに Sims_Fuseki で読み、置いたらすぐ返す）
+  err.clear();
+  if (place_kings(pos, ml, sims, deadline, mode, &sm, &err)) {
+    out("bestmove " + sm);
+    return;
+  }
+  if (!err.empty()) {
+    out("info string inference failed: " + err);
     out("bestmove resign");
     return;
   }
-  bool fail = false;
-  while (!eng_->idle(0)) {
-    if (stop_flag || (deadline >= 0 && now_s() >= deadline)) {
-      eng_->finish_now(0);
-      if (!eng_->idle(0)) {
-        if (!evaluate(&err)) { fail = true; break; }
-        eng_->finish_now(0);
-      }
-      break;
-    }
-    if (!evaluate(&err)) { fail = true; break; }
-  }
-  while (!fail && !eng_->idle(0))
-    if (!evaluate(&err)) { fail = true; break; }
-  if (fail) {
+  if (infinite || deadline >= 0) sims = 1000000000L;
+  const double t0 = now_s();
+  if (!run_search(position_line_, sims, deadline, mode, &err)) {
     out("info string inference failed: " + err);
     out("bestmove resign");
     return;
