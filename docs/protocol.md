@@ -40,8 +40,8 @@ desktop 0.10.0（`play.ts think` / `engineChoose`）から、**`Fuseki_Mode` を
 | 選択（先後） | `position fuseki moves K*xx K*yy` ＋ `go`。時計があるときは選ぶ側の枠の残りを `btime` と `wtime` の**両方**に入れる | `multipv 1`（または multipv 無し）の `info` に `winrate`（手番＝先手の勝率）。GUI は**最後の**その値を見て 0.5 以上なら先手を持つ（§1 の勝率の優先順位で読む）。返った `bestmove` は 3 手目の候補なので GUI は指さない |
 
 - 評価の行が 1 つも来なければ GUI は同梱の両玉の表に落とす（`engineChoose` が `null` を返す）。
-- **GUI 上の天秤将棋でも Libra の `Scale_Table`（`scale.json`）が使われる。** 既定は実行ファイルの隣の `scale.json` なので、配布物の zip を展開したまま登録すれば GUI で何も入れなくてよい（v0.2 から。§3）。別の場所の表を使うときだけこのオプションにパスを入れる。表に載っていない局面でも探索で置く。
-- 時計の語（`btime/wtime/byoyomi`）が来ても、表に当たる 1〜2 手目は読まずに即座に返す（`libra-engine/tests/test_usi.py::test_scale_table_answers_with_clock_words`）。
+- **両玉は Libra が読んで置く（v0.3 から。玉配置表は配らない。ユーザーの決定 2026-10-02）。** 1 手目の先手玉は六段目を除く合法なマスから乱数で選ぶ（`info string … method random`）。2 手目の後手玉は四段目を除く候補をすべて読み、先手の勝率が 0.5 にいちばん近いマスに置く（候補ごとに `info string place K*yy sente W`、最後に `method even`）。tenbin-shogi-web の `kings.ts`・`bin/libra match --place search` と同じ形。候補 1 つの読みはその手に充てる読み（`Sims_Fuseki` か `nodes`）で、時計の語なら残りの時間を残りの候補で割る（`test_usi.py::test_kings_placed_by_search_*`）。
+- `Scale_Table` に表のパスを入れたときだけ、表に当たる 1〜2 手目は表の釣り合い集合から選び、読まずに即座に返す（`test_usi.py::test_scale_table_answers_with_clock_words`）。v0.2 は既定で隣の `scale.json` を見ていた。
 - 選択の `winrate` は `multipv 1` の行に必ず出す（同 `::test_choose_reports_winrate_on_multipv1`）。
 - ルールの版を持つエンジン（`Fuseki_Rules` を名乗るもの）には `position` より先に `setoption name Fuseki_Rules` が来る。Libra は名乗らない（§4 の 9）。
 - **計測（100 局）はこれまでどおりハーネスで行う**（GUI は非合法手を負けにしないため。§1・§4 の 4）。ハーネスの手順は上の表と同じ。
@@ -59,7 +59,7 @@ option name DNN_Provider type combo default auto var auto var cuda var dml var c
 option name DNN_Batch_Size type spin default 64 min 1 max 1024
 option name Sims_Fuseki type spin default 400 min 1 max 1000000
 option name Sims_Normal type spin default 800 min 1 max 1000000
-option name Scale_Table type string default <実行ファイルのあるディレクトリ>/scale.json
+option name Scale_Table type string default <empty>
 option name USI_Ponder type check default false
 option name Declare_Win type check default false
 option name Mate_Nodes type spin default 2000 min 0 max 10000000
@@ -74,14 +74,14 @@ usiok
   （例: CUDA 版の DLL に差し替えて cuDNN が無いと `provider cpu` の後に `provider fallback cuda: … cudnn64_9.dll …`）。
   使えない実行プロバイダ（DLL に含まれないもの）を飛ばしただけのときは出さない。
 - `Declare_Win`: 本将棋で宣言法の条件を満たしたとき `bestmove win` を出す。既定は false だが、**GUI は `Declare_Win` を名乗るエンジンに、登録の設定で値を持っていなければ本将棋の毎 `go` の前に `setoption name Declare_Win value true` を送る**（0.10.0、`play.ts` 384）。利用者が登録の設定で明示した値があればそちらが優先される。ハーネスは true にして起動する。
-- `Scale_Table`: 天秤将棋の 1〜2 手目に両玉を置く玉配置表（`scale.json`）。**既定は実行ファイルの隣の `scale.json`**（`DNN_Model` と同じ扱い。v0.2 から。それまでは空だった）。配布物の zip は隣に `scale.json` を同梱するので、展開したまま登録すれば何も入れなくてよい。**既定の場所にファイルが無いときは何も言わずに探索で置く**（表を同梱しない使い方のため）。自分で入れたパスが開けないときだけ `info string cannot open Scale_Table …` を出す。表を使いたくないときは `setoption name Scale_Table value <empty>`。
-  **計測ハーネスが使う Python 版エンジン（`libra_league/usi_engine.py`）の既定は空のままにしてある。** そちらを隣の表を見る形にすると自己評価と外部計測の玉の置き方が黙って変わり、しかも `libra rating` は `Scale_Table` を点の名前に含めない（`rating.py` の `_LIBRA_SIG_SKIP`）ので、変わったことに気付かないまま同じ点に混ざる。
+- `Scale_Table`: 天秤将棋の 1〜2 手目に両玉を置く玉配置表（`scale.json`）。**既定は空**（v0.3 から。v0.2 は実行ファイルの隣の `scale.json`、それより前は空）。v0.3 から表を配らず、両玉は読んで置く（§2）。隣を見る既定もやめたのは、v0.2 の zip を上書きして古い表が残っても黙って使わないため。入れたパスが開けないときは `info string cannot open Scale_Table …` を出して読んで置く。
+  **計測ハーネスが使う Python 版エンジン（`libra_league/usi_engine.py`）は変えていない**（既定は空、表が無ければ探索に玉の手を選ばせる）。自己評価と外部計測の玉の置き方を黙って変えないため。`libra rating` は `Scale_Table` を点の名前に含めない（`rating.py` の `_LIBRA_SIG_SKIP`）ので、置き方が変わっても同じ点に混ざる。
 - `Mate_Nodes`: 各手の根で行う df-pn 詰み探索の節点数。
 - C++ 版エンジン `libra` / `libra.exe`（`libra-engine/`、ONNX Runtime）と Python 版 `bin/libra-usi-py`（`libra_league/usi_engine.py`）がこの申告を実装している。`bin/libra-usi` は C++ 版を起動する（未ビルドなら Python 版）。desktop には
   実行ファイル `C:\Windows\System32\wsl.exe`、引数 `-d <ディストロ> -- <repo>/bin/libra-usi` で登録する（ディストロが 1 つなら `-d <ディストロ>` は省ける。例: `-d Ubuntu-24.04 -- /home/<user>/LibraShogi/bin/libra-usi`。`DNN_Model` を申告するので GPU 扱い、`Fuseki_Mode` を申告するので「布石にも対応」に自動判定される）。
 
 - `Fuseki_Mode=tenbin`: 手数 0・1 の合法手は玉打ちだけ。`fuseki`: 布石将棋（玉もいつでも打てる）。
-- `info` 行: `info depth D seldepth S multipv K score cp X winrate W nodes N nps P time T pv M ...`、末尾に `info string phase fuseki|normal ply N method mcgs|mcts|proof|scale`。
+- `info` 行: `info depth D seldepth S multipv K score cp X winrate W nodes N nps P time T pv M ...`、末尾に `info string phase fuseki|normal ply N method mcgs|mcts|proof|scale|random|even`。
 - `score cp` は `winrate` から作る: `cp = round(435 · ln(p/(1−p)) + 34)`（`p` は `[1e-6, 1−1e-6]` に丸める。`-0` は `0`）。GUI の `cpToWinrate(cp, 435, 34)` の逆関数。この換算はテストで固定する。
 - 布石の `pv` は候補の 1 手だけでよい（仕様 v0）。Libra は MCGS の主変化を続けて出してよい（GUI は次の既知キーまで読む）。
 - 40 手完了時に手番（先手）が後手玉を取れる局面での `go` → `bestmove win`。本将棋で入玉宣言の条件（docs/rules.md）を満たすときの `go` → `bestmove win`（GUI も条件を検証して裁く。§1）。
@@ -90,7 +90,7 @@ usiok
 
 1. **手数上限。** 大会の最新規定（世界コンピュータ将棋選手権 大会ルール、第 36 回用 `rule.pdf`、SHA-256 `9387db36…bed`、第 27 条 3 項）は **320 手**。「256 手」は現行規定ではない（320 手への変更は 2019 年）。→ ルール設計者の決定（2026-09-11）で **320 手・41 手目を 1 手目として数える**に揃えた。libra-sim の既定 `max_ply = 320`。
 2. **本将棋の `bestmove win`。** ~~GUI は検証せず、宣言したエンジンの投了として扱う。~~ **desktop 0.10.0（2026-09-14）で解消した。** GUI も docs/rules.md §5.3 の条件を検証し、正当なら宣言側の勝ち、不当なら負けにする。千日手・手数上限も §5 と同じに裁く。Issue の起票を待たずに desktop 側で実装されたので、2026-09-11 の「Libra 側の準備ができたら Issue を起票する。それまで GUI 対局は `Declare_Win=false`」は不要になった（GUI が毎 `go` の前に `Declare_Win=true` を送る。§1・§3）。
-3. **置く・選ぶ。** ~~GUI は外部エンジンに両玉の配置と選択を任せない。~~ **desktop 0.10.0 で解消した。** `Fuseki_Mode` を名乗るエンジンの席では GUI が 1〜2 手目と選択をエンジンに問い合わせ、Libra の `scale.json` と `winrate` が使われる（§2）。libra-local §6.2「選択そのものはハーネス（または GUI）が行う」は GUI でも満たされた。
+3. **置く・選ぶ。** ~~GUI は外部エンジンに両玉の配置と選択を任せない。~~ **desktop 0.10.0 で解消した。** `Fuseki_Mode` を名乗るエンジンの席では GUI が 1〜2 手目と選択をエンジンに問い合わせ、Libra の両玉の置き方（v0.2 は `scale.json`、v0.3 から読んで置く）と `winrate` が使われる（§2）。libra-local §6.2「選択そのものはハーネス（または GUI）が行う」は GUI でも満たされた。
 4. **非合法手の扱い。** GUI は 1 回聞き直し、2 回目で一時停止（負けにしない）。ハーネスは大会規定どおり負けにする。
 5. **`go` の語。** GUI は対局では `movetime` か `btime/wtime/byoyomi` だけを送る（布石中も）。`go nodes` は検討・対局とも来ない。想定どおり全語を受ければよい。
 6. **`Eval_Coef`。** DNN 系エンジンの目盛りは申告の `Eval_Coef`（offset 0）→ 既知名 → 600/0 の順。Libra は `winrate` を常に出すので影響しない（想定どおり）。ただし Libra の `score cp`（435/+34）と GUI に登録される既定の目盛り（600/0）は一致しないので、cp を GUI の目盛りで読み直す場面（winrate の無い行）を作らない。

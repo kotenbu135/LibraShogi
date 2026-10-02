@@ -38,6 +38,10 @@ class Engine {
   std::mt19937 rng_{std::random_device{}()};
   bool load_scale(std::string* err);
   bool scale_move(const libra::Position& pos, std::string* move);  // 1・2 手目を表から決める
+  // 表が無いときの 1・2 手目（先手玉は乱数、後手玉は読んで五分に近いマス）。置かない局面なら false
+  bool place_kings(const libra::Position& pos, const libra::MoveList& ml, long sims, double deadline, libra::Mode mode,
+                   std::string* move, std::string* err);
+  bool run_search(const std::string& line, long sims, double deadline, libra::Mode mode, std::string* err);
 
   int geti(const std::string& k) const;
   bool getb(const std::string& k) const;
