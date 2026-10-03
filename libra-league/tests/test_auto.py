@@ -595,6 +595,47 @@ def test_repair_anchor_chain_from_result_files(tmp_path):
     assert jobs.repair_anchor_chain() is False                          # 2 回目は直すものが無い
 
 
+def test_anchor_rebaseline_threshold_is_kept_on_each_row(tmp_path):
+    """置き換えのしきい値は設定から読み、行に残す（2026-10-03 に 0.85 → 0.8。得点 0.8 を超えた基準比は目盛りから
+    外すので、基準もそこで入れ替えて物差しを天井から下ろす）。"""
+    sd, jobs, state = _anchor_jobs(tmp_path, anchor_rebaseline=0.8)
+    _archive(sd, jobs, 1000, 1000.0)
+    _archive(sd, jobs, 2000, 1000.0 + 3600, elo=-270.0, score=0.18)    # 新しい世代の得点 0.82
+    rows = collect_anchor(sd)
+    assert rows[-1]["score_new"] == 0.82 and rows[-1]["rebaseline"] == 0.8
+    assert state["auto"]["anchor"]["step"] == 2000 and state["auto"]["anchor"]["offset"] == 270.0
+
+
+def test_repair_replays_old_rows_with_the_threshold_they_were_written_with(tmp_path):
+    """しきい値を下げても、起動時の数え直しは古い行（しきい値の記録が無い）を当時の 0.85 で再現する。
+    今の 0.8 で数え直すと、得点 0.828 の行で実際には起きていない置き換えを作り、後の結果が「基準でなかった相手との
+    結果」になって数え直しが止まる（値は 2026-09-17〜18 の ls の実際の結果）。"""
+    sd, jobs, state = _anchor_jobs(tmp_path, anchor_games=1000, anchor_rebaseline=0.8)
+    ev = sd.root / "eval"
+    ev.mkdir(parents=True, exist_ok=True)
+    arch = sd.checkpoints / "archive"
+    arch.mkdir(parents=True, exist_ok=True)
+    for s_ in (402, 1416, 8144, 21270):
+        (arch / f"ckpt_{s_:09d}.pt").write_bytes(b"x")
+    for ts, a, b, elo, score in (("20260917-202955", 402, 1416, -273.0, 0.172), ("20260917-220428", 402, 8144, -354.5, 0.115),
+                                 ("20260917-232228", 8144, 21270, -271.8, 0.173)):
+        (ev / f"anchor-{ts}-{a}-{b}.json").write_text(json.dumps({"a": str(arch / f"ckpt_{a:09d}.pt"), "b": str(arch / f"ckpt_{b:09d}.pt"), "n": 1000,
+                                                                  "score_a": score, "elo_a_minus_b": elo, "elo_ci95": [elo - 30, elo + 30]}))
+    rows = [{"t": 1.0, "step": 1416, "games": 1, "n": 1000, "score_new": 0.828, "anchor_step": 402, "offset": 0.0, "elo_vs_anchor": 273.0, "elo": 273.0, "ci95": [243.0, 303.0]},
+            {"t": 2.0, "step": 8144, "games": 2, "n": 1000, "score_new": 0.885, "anchor_step": 402, "offset": 0.0, "elo_vs_anchor": 354.5, "elo": 354.5, "ci95": [324.5, 384.5]},
+            {"t": 3.0, "step": 21270, "games": 3, "n": 1000, "score_new": 0.827, "anchor_step": 8144, "offset": 354.5, "elo_vs_anchor": 271.8, "elo": 626.3, "ci95": [596.3, 656.3]}]
+    (ev / "anchor.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    state.setdefault("auto", {})["anchor"] = {"file": str(arch / "ckpt_000008144.pt"), "step": 8144, "offset": 354.5, "since": 5.0}
+    assert jobs.repair_anchor_chain() is False                           # 古い行は 0.85 で数えるので、直すものは無い
+    assert state["auto"]["anchor"]["step"] == 8144 and not list(ev.glob("anchor.jsonl.bak-*"))
+    # しきい値を残した新しい行は、その値で置き換えを再現する（0.827 ≥ 0.8 で 21270 が基準になっていたはず）
+    rows[2]["rebaseline"] = 0.8
+    (ev / "anchor.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    assert jobs.repair_anchor_chain() is True
+    assert state["auto"]["anchor"]["step"] == 21270 and state["auto"]["anchor"]["offset"] == 626.3
+    assert collect_anchor(sd)[2]["rebaseline"] == 0.8
+
+
 def test_match_uses_archived_weights(tmp_path):
     """外部計測は動く別名（latest.onnx）ではなく、その節目の archive の重みで打つ（docs/restart-plan.md §7 P2）。"""
     sd = StateDir(tmp_path / "x")

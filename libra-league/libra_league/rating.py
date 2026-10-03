@@ -24,6 +24,7 @@ import re
 import numpy as np
 
 from .auto import collect_anchor, collect_best, collect_matches, collect_reference
+from .scaling import BAND
 from .state import StateDir
 
 # Elo = SCALE * ln λ
@@ -109,7 +110,14 @@ def pairs_of(sd: StateDir) -> list[dict]:
     for r in collect_best(sd):
         add(step_node(r.get("step")), step_node(r.get("best_step")), r.get("n"), r.get("score_new"), r.get("t"), "best")
     for r in collect_anchor(sd):
-        add(step_node(r.get("step")), step_node(r.get("anchor_step")), r.get("n"), r.get("score_new"), r.get("t"), "anchor")
+        # 基準に勝ちすぎた（得点が BAND の外の）結果は目盛りに入れない。勝率が天井に着くと差が開いても得点が
+        # 上がらず、Elo が縮んで最近の点を引き下げる（2026-10-03: 基準 step 117,436 に 4.9M〜9.2M 局で 0.80〜0.84 に
+        # 張り付き、4.9M→8.4M の伸びを +58 と出していた。外すと +157 で、最強比の鎖 +161・参照 +161 と合う。
+        # docs/measurements.md 同日）。参照は BAND の上端で入れ替わるので天井に着かない。最強比は互角の相手なので外さない
+        s = r.get("score_new")
+        if s is not None and not (BAND[0] <= float(s) <= BAND[1]):
+            continue
+        add(step_node(r.get("step")), step_node(r.get("anchor_step")), r.get("n"), s, r.get("t"), "anchor")
     for r in collect_reference(sd):
         ref = str(r.get("ref") or "")
         if ref:
