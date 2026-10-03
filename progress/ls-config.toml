@@ -123,6 +123,8 @@ gen_positions = 4000
 [auto]
 enabled = true
 every_games = 400000
+every_games_after = 10000000
+every_games_late = 1000000
 eval_games = 0
 eval_sims = 96
 eval_concurrent = 256
