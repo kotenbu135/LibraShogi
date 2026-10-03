@@ -22,6 +22,8 @@ from .state import StateDir, write_json_atomic
 
 _CKPT_RE = re.compile(r"ckpt_(\d+)\.(?:pt|onnx)$")  # 外部計測は archive の重みを書き出した .onnx で打つ
 JOB_FILE = "auto_job.json"  # 実行中の計測ジョブ（pid・引数）。ランナーが abort しても孤児を見つけられるように state とは別に置く
+# 基準の置き換えのしきい値を行に残す前（2026-10-03 まで）の値。起動時の数え直しが古い行をこの値で再現する
+LEGACY_ANCHOR_REBASELINE = 0.85
 
 
 def _job_alive(pid: int, out: str) -> bool:
@@ -724,15 +726,18 @@ class AutoJobs:
         step_a = ckpt_step(r.get("a", ""))
         offset = self._anchor_offset(step_a, job)
         step_b = ckpt_step(r.get("b", ""))
+        thr = float(self.acfg.get("anchor_rebaseline", 0.85))
         row = {"t": time.time(), "step": step_b, "games": self.state.get("games_total"), "n": r.get("n"), "score_new": round(1 - float(r.get("score_a", 0.5)), 4),
                "anchor_step": step_a, "offset": round(offset, 1), "elo_vs_anchor": round(elo, 1),
                "elo": round(offset + elo, 1),
-               "ci95": [round(offset + lo, 1) if lo is not None else None, round(offset + hi, 1) if hi is not None else None]}
+               "ci95": [round(offset + lo, 1) if lo is not None else None, round(offset + hi, 1) if hi is not None else None],
+               # 置き換えのしきい値を行に残す（起動時の数え直しが、その行を書いたときのしきい値で置き換えを再現するため）
+               "rebaseline": thr}
         with open(self.sd.root / "eval" / "anchor.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
         self.log(f"auto: anchor step {step_a} vs {step_b}: {elo:+.1f} Elo (total {row['elo']:+.1f}, new wins {row['score_new']:.0%})")
         # 置き換えるのは今の基準と打った結果のときだけ（積み上がった古い基準との結果では替えない）
-        if row["score_new"] >= float(self.acfg.get("anchor_rebaseline", 0.85)) and step_a == int(anc.get("step") or -1):
+        if row["score_new"] >= thr and step_a == int(anc.get("step") or -1):
             new_file = str(r.get("b", ""))
             if Path(new_file).exists():
                 st["anchor"] = {"file": new_file, "step": step_b, "offset": round(offset + elo, 1), "since": time.time()}
@@ -785,10 +790,16 @@ class AutoJobs:
             ci = r.get("elo_ci95") or [None, None]
             score_new = round(1 - float(r.get("score_a", 0.5)), 4)
             prev = by_step.get(step_b, {})
-            rows.append({"t": prev.get("t", p.stat().st_mtime), "step": step_b, "games": prev.get("games"), "n": r.get("n"), "score_new": score_new,
-                         "anchor_step": step_a, "offset": round(off, 1), "elo_vs_anchor": round(elo, 1), "elo": round(off + elo, 1),
-                         "ci95": [round(off - float(ci[1]), 1) if ci[1] is not None else None, round(off - float(ci[0]), 1) if ci[0] is not None else None]})
-            if score_new >= thr and step_a == cur["step"] and step_b > cur["step"]:
+            # 置き換えは、その行を書いたときのしきい値で再現する。しきい値を残していない行（2026-10-03 より前）は
+            # 当時の 0.85 で書いたもの。今のしきい値で過去を数え直すと、実際には起きていない置き換えを作ってしまう
+            row_thr = float(prev["rebaseline"]) if "rebaseline" in prev else (LEGACY_ANCHOR_REBASELINE if prev else thr)
+            row = {"t": prev.get("t", p.stat().st_mtime), "step": step_b, "games": prev.get("games"), "n": r.get("n"), "score_new": score_new,
+                   "anchor_step": step_a, "offset": round(off, 1), "elo_vs_anchor": round(elo, 1), "elo": round(off + elo, 1),
+                   "ci95": [round(off - float(ci[1]), 1) if ci[1] is not None else None, round(off - float(ci[0]), 1) if ci[0] is not None else None]}
+            if "rebaseline" in prev or not prev:
+                row["rebaseline"] = row_thr
+            rows.append(row)
+            if score_new >= row_thr and step_a == cur["step"] and step_b > cur["step"]:
                 cur = {"file": str(r["b"]), "step": step_b, "offset": round(off + elo, 1)}
                 offsets[step_b] = cur["offset"]
         st = self._st()

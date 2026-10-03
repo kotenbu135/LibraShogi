@@ -67,7 +67,7 @@ def test_pairs_are_read_from_every_record_and_deduplicated(tmp_path):
     _w(sd, "best.jsonl", [{"t": 100.0, "step": 1600, "best_step": 800, "n": 1000, "score_new": 0.7}])
     # 基準比が最強比の結果を写した行（同じ組・同じ局数・同じ得点）は 1 つだけ数える
     _w(sd, "anchor.jsonl", [{"t": 130.0, "step": 1600, "anchor_step": 800, "n": 1000, "score_new": 0.7},
-                            {"t": 140.0, "step": 1600, "anchor_step": 400, "n": 1000, "score_new": 0.9}])
+                            {"t": 140.0, "step": 1600, "anchor_step": 400, "n": 1000, "score_new": 0.78}])
     _w(sd, "reference.jsonl", [
         {"t": 150.0, "step": 1600, "ref": "win1m.pt", "ref_step": None, "n": 200, "score_new": 0.6},
         # この run 自身の archive を参照にした行は、step 800 の点と同じ点にまとめる
@@ -80,11 +80,30 @@ def test_pairs_are_read_from_every_record_and_deduplicated(tmp_path):
     ps = pairs_of(sd)
     got = sorted((p["a"], p["b"], p["n"], p["score_a"], p["src"]) for p in ps)
     assert got == [
-        ("step 1,600", "step 400", 1000, 0.9, "anchor"),
+        ("step 1,600", "step 400", 1000, 0.78, "anchor"),
         ("step 1,600", "step 800", 200, 0.72, "reference"),     # 参照も step 800 の点にまとまる
         ("step 1,600", "step 800", 1000, 0.7, "best"),          # anchor の写しは落ちて 1 つ
         ("step 1,600", "win1m.pt", 200, 0.6, "reference"),
         ("step 1,600", "外部エンジン", 40, 0.7, "match"),
+    ]
+
+
+def test_anchor_results_stuck_at_the_ceiling_stay_off_the_scale(tmp_path):
+    """基準に勝ちすぎた結果（得点が 0.2〜0.8 の外）は目盛りに入れない。天井では差が開いても得点が上がらず、
+    Elo が縮んで最近の点を引き下げる（2026-10-03: 基準に 0.80〜0.84 で張り付き、伸びを約 3 分の 1 に出していた）。
+    最強比と参照は得点によらず入れる（最強比は互角の相手、参照は 0.8 で入れ替わる）。"""
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    _w(sd, "best.jsonl", [{"t": 100.0, "step": 1600, "best_step": 800, "n": 1000, "score_new": 0.85}])
+    _w(sd, "anchor.jsonl", [{"t": 110.0, "step": 1200, "anchor_step": 400, "n": 1000, "score_new": 0.8},
+                            {"t": 120.0, "step": 1600, "anchor_step": 400, "n": 1000, "score_new": 0.83},
+                            {"t": 130.0, "step": 2000, "anchor_step": 400, "n": 1000, "score_new": 0.15}])
+    _w(sd, "reference.jsonl", [{"t": 140.0, "step": 1600, "ref": "win1m.pt", "ref_step": None, "n": 200, "score_new": 0.9}])
+    got = sorted((p["a"], p["b"], p["score_a"], p["src"]) for p in pairs_of(sd))
+    assert got == [
+        ("step 1,200", "step 400", 0.8, "anchor"),              # ちょうど上端は入れる
+        ("step 1,600", "step 800", 0.85, "best"),
+        ("step 1,600", "win1m.pt", 0.9, "reference"),
     ]
 
 
