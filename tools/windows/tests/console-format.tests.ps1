@@ -206,6 +206,14 @@ Check "自動計測（節目なし）" (Format-Auto-Status ([pscustomobject]@{ e
     "節目なし（[auto] every_games が 0。eval-now / match-now のときだけ測る、待ち 0 件）"
 Check "自動計測（総局数がまだ無い）" (Format-Auto-Status ([pscustomobject]@{ enabled = $true; every_games = 400000 }) ([pscustomobject]@{ running = $null }) $null 0) `
     "待機（40 万局ごと、待ち 0 件）"
+# 1,000 万局から 100 万局ごと（[auto] every_games_after / every_games_late。2026-10-03）
+$acL = [pscustomobject]@{ enabled = $true; every_games = 400000; every_games_after = 10000000; every_games_late = 1000000 }
+Check "自動計測（切り替え前）" (Format-Auto-Status $acL ([pscustomobject]@{ running = $null }) 9200150 0) `
+    "待機（次の自己評価は総局数 9,600,000、あと 399,850 局、40 万局ごと、10,000,000 局から 100 万局ごと、待ち 0 件）"
+Check "自動計測（切り替え点の直前）" (Format-Auto-Status $acL ([pscustomobject]@{ running = $null }) 9600010 0) `
+    "待機（次の自己評価は総局数 10,000,000、あと 399,990 局、40 万局ごと、10,000,000 局から 100 万局ごと、待ち 0 件）"
+Check "自動計測（切り替え後）" (Format-Auto-Status $acL ([pscustomobject]@{ running = $null }) 10000100 0) `
+    "待機（次の自己評価は総局数 11,000,000、あと 999,900 局、100 万局ごと、待ち 0 件）"
 
 # --- クラウドの打ち切り（libra-vast history --json の interrupts。libra_cloud/interrupts.py） ---
 # 入札で借りたホストを止められると、借り直しの準備代（課金されるのに局が出ない）と、次が打ち始めるまでの空白ぶんの局を損する

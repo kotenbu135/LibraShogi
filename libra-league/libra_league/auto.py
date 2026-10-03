@@ -335,6 +335,48 @@ def crossed_games_multiple(last_games: int | None, games: int, every_games: int)
     return games // every_games > int(last_games) // every_games
 
 
+def _late(acfg: dict) -> tuple[int, int]:
+    """[auto] の切り替え点 every_games_after と、その後の間隔 every_games_late（どちらかが 0 なら切り替えない）。"""
+    after, late = int(acfg.get("every_games_after", 0) or 0), int(acfg.get("every_games_late", 0) or 0)
+    return (after, late) if after > 0 and late > 0 else (0, 0)
+
+
+def milestone_index(acfg: dict, games: int) -> int:
+    """総局数 games までに越えた節目の数。every_games_after より前は every_games の倍数、
+    そこから先は切り替え点そのものと、そこから every_games_late ごと（2026-10-03 のユーザーの依頼
+    「1000 万局を超えたら自動計測は 100 万局ごと」: 40 万・80 万…960 万・1,000 万・1,100 万・1,200 万…）。"""
+    every = int(acfg.get("every_games", 0))
+    after, late = _late(acfg)
+    if not after or games < after:
+        return games // every
+    return -(-after // every) + (games - after) // late  # 切り替え点が every の倍数でなくても、そこを節目にする
+
+
+def games_interval(acfg: dict, games: int) -> int:
+    """総局数 games のときに効いている節目の間隔（every_games か every_games_late）。"""
+    after, late = _late(acfg)
+    return late if after and games >= after else int(acfg.get("every_games", 0))
+
+
+def next_milestone(acfg: dict, games: int) -> int:
+    """総局数 games の次の節目（every_games が 0 なら 0）。"""
+    every = int(acfg.get("every_games", 0))
+    if every <= 0:
+        return 0
+    after, late = _late(acfg)
+    if not after or games < after:
+        nxt = (games // every + 1) * every
+        return min(nxt, after) if after else nxt
+    return after + ((games - after) // late + 1) * late
+
+
+def crossed_milestone(acfg: dict, last_games: int | None, games: int) -> bool:
+    """前回から節目を越えたか（crossed_games_multiple に切り替え点を足したもの）。前回が無い（None・負）なら True。"""
+    if last_games is None or int(last_games) < 0:
+        return True
+    return milestone_index(acfg, games) > milestone_index(acfg, int(last_games))
+
+
 class AutoJobs:
     """eval / match を順に 1 つずつ別プロセスで回す。状態は state["auto"] に持つ（再開しても続く）。"""
 
@@ -364,11 +406,11 @@ class AutoJobs:
         return bool(self.acfg.get("enabled", False))
 
     def games_due(self, games: int) -> bool:
-        """局数区切りの run で、前回の archive から every_games の倍数を越えたか（ランナーが 10 分を待たずにチェックポイントを取る合図）。
+        """局数区切りの run で、前回の archive から節目（every_games の倍数、切り替え後は every_games_late ごと）を越えたか（ランナーが 10 分を待たずにチェックポイントを取る合図）。
         前回が無い run（最初のチェックポイントで必ず積む）と時間区切りの run では False。"""
         every_games = int(self.acfg.get("every_games", 0))
         last = self._st().get("last_archive_games")
-        return self.enabled and every_games > 0 and last is not None and crossed_games_multiple(last, games, every_games)
+        return self.enabled and every_games > 0 and last is not None and crossed_milestone(self.acfg, last, games)
 
     # -- 起票 --
     def on_checkpoint(self, ckpt: Path, now: float | None = None) -> None:
@@ -405,11 +447,12 @@ class AutoJobs:
     def _due(self, last_games: int | None, games: int) -> bool:
         """次の計測の時期か。総局数が every_games の倍数を越えたら（PC の利用状況で局/日が変わっても、
         判断に要る局数がたまったときに測る。2026-09-17 のユーザーの指示）。0 なら最初の 1 回と eval-now / match-now だけ。
+        every_games_after を越えたら every_games_late ごと（2026-10-03 のユーザーの依頼）。
         時間区切り（every_hours）は 2026-09-19 に廃止した（docs/decisions.md）。"""
         every_games = int(self.acfg.get("every_games", 0))
         if every_games <= 0:
             return False
-        return crossed_games_multiple(last_games, games, every_games)
+        return crossed_milestone(self.acfg, last_games, games)
 
     def enqueue_eval(self, a: Path, b: Path) -> None:
         ts = time.strftime("%Y%m%d-%H%M%S")

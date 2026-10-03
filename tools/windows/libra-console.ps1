@@ -757,10 +757,22 @@ function Format-Auto-Status($ac, $au, $games, [int]$queued) {
     $every = if ($null -ne $ac.every_games) { [double]$ac.every_games } else { 0 }
     if ($every -le 0) { return "節目なし（[auto] every_games が 0。eval-now / match-now のときだけ測る、待ち {0} 件）" -f $queued }
     # 40 万局は「40 万局ごと」と読みやすく出す（万で割り切れないときはそのまま局で）
-    $unit = if ($every -ge 10000 -and ($every % 10000) -eq 0) { (Format-Int ($every / 10000)) + " 万局ごと" } else { (Format-Int $every) + " 局ごと" }
+    $per = { param($n) if ($n -ge 10000 -and ($n % 10000) -eq 0) { (Format-Int ($n / 10000)) + " 万局ごと" } else { (Format-Int $n) + " 局ごと" } }
+    # 切り替え点（[auto] every_games_after）から先は every_games_late ごと（1,000 万局から 100 万局ごと。2026-10-03）
+    $after = if ($null -ne $ac.every_games_after) { [double]$ac.every_games_after } else { 0 }
+    $late = if ($null -ne $ac.every_games_late) { [double]$ac.every_games_late } else { 0 }
+    if ($after -le 0 -or $late -le 0) { $after = 0 }
+    $unit = & $per $every
+    if ($after -gt 0 -and ($null -eq $games -or [double]$games -lt $after)) {
+        $unit = "{0}、{1} 局から {2}" -f $unit, (Format-Int $after), (& $per $late)
+    } elseif ($after -gt 0) { $unit = & $per $late }
     if ($null -eq $games) { return "待機（{0}、待ち {1} 件）" -f $unit, $queued }
     $g = [double]$games
-    $next = ([math]::Floor($g / $every) + 1) * $every
+    if ($after -gt 0 -and $g -ge $after) { $next = $after + ([math]::Floor(($g - $after) / $late) + 1) * $late }
+    else {
+        $next = ([math]::Floor($g / $every) + 1) * $every
+        if ($after -gt 0 -and $next -gt $after) { $next = $after }
+    }
     return "待機（次の自己評価は総局数 {0}、あと {1} 局、{2}、待ち {3} 件）" -f (Format-Int $next), (Format-Int ($next - $g)), $unit, $queued
 }
 function Use-GamesAxis {

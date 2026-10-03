@@ -14,7 +14,7 @@ import json
 import time
 from pathlib import Path
 
-from .auto import collect_anchor, collect_best, collect_reference, load_metrics
+from .auto import collect_anchor, collect_best, collect_reference, games_interval, load_metrics
 from .scaling import BAND
 from .state import StateDir
 
@@ -31,7 +31,8 @@ DEFAULT_THRESHOLDS = {
     # **自己対局の分布を変える設定（投了・lx の布石・リーグ）を入れたら、この線を測り直す。**
     "gen_min_corr": 0.5,
     "best_stall_alert": 3,      # 最強を更新できない回数がこれ以上なら「見直し」
-    "reference_stale_games": 800000,  # 参照の最後の計測がこれ以上前なら判定しない（もう測っていない参照）
+    "reference_stale_games": 800000,  # 参照の最後の計測がこれ以上前なら判定しない（もう測っていない参照）。
+                                      # 節目の間隔の 2 倍がこれより大きければそちらを使う（1,000 万局から 100 万局ごと。2026-10-03）
     "gpd_min": 0,               # 局/日の下限（0 で見ない）
     "job_history": 8,           # 計測ジョブの失敗を見る直近の件数（1 回の節目が 6〜7 ジョブ）
 }
@@ -143,6 +144,11 @@ def review(sd: StateDir, thresholds: dict | None = None, now: float | None = Non
     # 160 万局前の -14.3 Elo で run 全体の判定が「注意」になっていた。
     refs = collect_reference(sd)
     games_now = int(st.get("games_total") or 0)
+    stale_games = int(th["reference_stale_games"])
+    if sd.config_toml.exists():
+        from .config import load_config
+
+        stale_games = max(stale_games, 2 * games_interval(load_config(sd.config_toml)["auto"], games_now))
     by_ref: dict[str, list[dict]] = {}
     for r in refs:
         by_ref.setdefault(str(r.get("ref")), []).append(r)
@@ -153,7 +159,7 @@ def review(sd: StateDir, thresholds: dict | None = None, now: float | None = Non
         gap = (int(g_last) - int(g_prev)) if (g_last is not None and g_prev is not None) else None
         score = last.get("score_new")
         values = {"last": last, "gap_games": gap, "behind_games": behind, "score": score}
-        if behind is not None and behind > int(th["reference_stale_games"]):
+        if behind is not None and behind > stale_games:
             # もう測っていない参照。古い 2 点の差で run 全体の判定を動かさない
             verdict, why = NA, f"対 {name}: もう測っていない（最後は step {last.get('step')}、{behind:,} 局前）"
         elif prev is None:

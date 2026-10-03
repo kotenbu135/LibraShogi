@@ -171,7 +171,7 @@ def snapshot(sd: StateDir, cfg: dict | None = None, points: int = 120, now: floa
                       "out": Path(str(j.get("out") or "")).name, "tail": j.get("tail")}
                      for j in (auto.get("history") or [])[-8:]],
         },
-        "auto_cfg": {k: acfg.get(k) for k in ("enabled", "every_games", "eval_games", "eval_sims", "anchor_games",
+        "auto_cfg": {k: acfg.get(k) for k in ("enabled", "every_games", "every_games_after", "every_games_late", "eval_games", "eval_sims", "anchor_games",
                                               "best_games", "split_games", "reference_games", "reference_ckpts", "reference_rotate",
                                               "reference_min", "match_games",
                                               "match_go", "match_go_opp", "match_opponent_opt", "match_libra_opt",

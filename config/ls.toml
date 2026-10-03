@@ -87,6 +87,8 @@ gen_positions = 4000
 [auto]
 enabled = true
 every_games = 400000        # 40 万局ごとに archive と計測（本番。2026-09-18 に煙テスト合格で 100000 から。総局数の倍数で区切る）
+every_games_after = 10000000  # 1,000 万局の節目から先は
+every_games_late = 1000000    # 100 万局ごと（1,100 万・1,200 万…。2026-10-03 のユーザーの依頼「1000万局を超えたら自動計測は100万局ごと」）
 eval_games = 0              # 直前比の 100 局はやめる（向きを逆に出した 9/16 の再発防止）
 chain_eval = false
 eval_sims = 96
