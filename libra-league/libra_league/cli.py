@@ -614,6 +614,7 @@ def main(argv: list[str] | None = None) -> int:
 
             _ac = _lc(sd.config_toml if sd.config_toml.exists() else None)["auto"]
             out["auto_cfg"] = {"enabled": bool(_ac.get("enabled")), "every_games": _ac.get("every_games"),
+                               "every_games_after": _ac.get("every_games_after"), "every_games_late": _ac.get("every_games_late"),
                                "eval_games": _ac.get("eval_games"), "anchor_games": _ac.get("anchor_games"),
                                "best_games": _ac.get("best_games"), "reference_games": _ac.get("reference_games"),
                                "reference_ckpts": _ac.get("reference_ckpts"), "match_games": _ac.get("match_games")}

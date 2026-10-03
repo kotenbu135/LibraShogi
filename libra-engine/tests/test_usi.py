@@ -196,7 +196,9 @@ def test_kings_placed_by_search_without_table(engine):
     pos.set_position("position fuseki moves K*5i")
     expect = sorted(m for m in pos.legal_moves() if m.startswith("K*") and not m.endswith("d"))
     assert sorted(rates) == expect, (sorted(rates), expect)
-    assert bm == min(rates, key=lambda m: (abs(rates[m] - 0.5), m)), (bm, rates)
+    # 表示は小数 4 桁に丸めてあり、エンジンは丸める前の値で比べる。丸めの誤差（各 0.00005）の 2 つ分まで許す
+    # （乱数の重みでは候補がみな 0.5 付近に並び、丸めた値で選び直すと別のマスになることがある。2026-10-03 の CI）
+    assert abs(rates[bm] - 0.5) <= min(abs(r - 0.5) for r in rates.values()) + 1e-4 + 1e-9, (bm, rates)
     assert any("method even" in l for l in lines), lines
     mp1 = [l.split() for l in lines if l.startswith("info depth")][-1]
     assert abs(float(mp1[mp1.index("winrate") + 1]) - (1 - rates[bm])) < 2e-4, (mp1, rates[bm])

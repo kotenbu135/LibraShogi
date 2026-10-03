@@ -482,6 +482,44 @@ def test_every_games_triggers_by_games_not_time(tmp_path):
     assert not jobs2.games_due(10**6)
 
 
+def test_every_games_late_after_switch_point(tmp_path):
+    """every_games_after から先は every_games_late ごと（2026-10-03 のユーザーの依頼「1000万局を超えたら自動計測は100万局ごと」）。
+    40 万局ごとの節目は 960 万・1,000 万まで今のまま、その後は 1,100 万・1,200 万…。"""
+    from libra_league.auto import crossed_milestone, games_interval, next_milestone
+
+    ac = {"every_games": 400_000, "every_games_after": 10_000_000, "every_games_late": 1_000_000}
+    assert crossed_milestone(ac, 9_200_150, 9_600_010) and not crossed_milestone(ac, 9_600_010, 9_999_999)
+    assert crossed_milestone(ac, 9_600_010, 10_000_000)
+    assert not crossed_milestone(ac, 10_000_100, 10_400_000) and not crossed_milestone(ac, 10_000_100, 10_999_999)
+    assert crossed_milestone(ac, 10_000_100, 11_000_000) and crossed_milestone(ac, 11_000_300, 12_000_001)
+    assert crossed_milestone(ac, None, 10_500_000)
+    assert [next_milestone(ac, g) for g in (9_200_000, 9_600_001, 10_000_000, 10_400_000, 11_999_999)] == \
+        [9_600_000, 10_000_000, 11_000_000, 11_000_000, 12_000_000]
+    assert games_interval(ac, 9_999_999) == 400_000 and games_interval(ac, 10_000_000) == 1_000_000
+    # 切り替え点が every_games の倍数でなくても、切り替え点そのものを節目にする
+    odd = {"every_games": 400_000, "every_games_after": 1_100_000, "every_games_late": 1_000_000}
+    assert crossed_milestone(odd, 900_000, 1_100_000) and not crossed_milestone(odd, 1_100_000, 2_000_000)
+    assert crossed_milestone(odd, 1_100_000, 2_100_000) and next_milestone(odd, 850_000) == 1_100_000
+    # どちらかが 0 なら切り替えない（これまでどおり every_games の倍数）
+    for off in ({"every_games": 400_000}, {"every_games": 400_000, "every_games_after": 10_000_000, "every_games_late": 0}):
+        assert crossed_milestone(off, 10_000_100, 10_400_000) and next_milestone(off, 10_000_100) == 10_400_000
+
+    # AutoJobs でも同じ区切り（小さい数で: 4,000 局から 2,500 局ごと）
+    sd, jobs, state = _anchor_jobs(tmp_path, anchor_games=0, best_games=100, every_games=1000,
+                                   every_games_after=4000, every_games_late=2500)
+    state["games_total"] = 3000
+    _archive(sd, jobs, 100, 1000.0, advance=0)                  # 最初は必ず
+    state["games_total"] = 4000
+    _archive(sd, jobs, 200, 1001.0, elo=-100.0, score=0.3, advance=0)  # 切り替え点で積む
+    assert len(list_archives(sd)) == 2
+    state["games_total"] = 5000
+    _archive(sd, jobs, 300, 1002.0, advance=0)                  # 1,000 局ごとなら積むが、切り替え後なので積まない
+    assert len(list_archives(sd)) == 2 and not jobs.games_due(6499) and jobs.games_due(6500)
+    state["games_total"] = 6500
+    _archive(sd, jobs, 400, 1003.0, elo=-100.0, score=0.3, advance=0)
+    assert len(list_archives(sd)) == 3 and state["auto"]["last_archive_games"] == 6500
+
+
 
 def test_anchor_reuses_best_result_when_opponent_is_the_same(tmp_path):
     """最強と基準が同じ重みで局数も同じなら、基準比は最強比の結果を写して打たない（2026-09-18 のユーザーの指示「重複を省く」）。"""

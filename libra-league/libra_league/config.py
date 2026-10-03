@@ -146,7 +146,9 @@ DEFAULTS: dict[str, Any] = {
     # 基準に対する勝率が anchor_rebaseline を超えたら基準を新しい世代に置き換え、それまでの差を offset に足す。
     # every_games: 総局数がその倍数を越えるごとに測る（判断に要る局数で区切る。2026-09-17 のユーザーの指示）。0 で無効。
     # 時間区切り（every_hours）は 2026-09-19 に廃止した。局/日が PC の利用状況で変わるので、時間では測る間隔が定まらないため
-    "auto": {"enabled": False, "every_games": 0, "eval_games": 100, "eval_sims": 96, "eval_concurrent": 64, "eval_threads": 4,
+    # every_games_after > 0 かつ every_games_late > 0 なら、総局数がその切り替え点に達した節目から先は every_games_late ごと
+    # （例: 1,000 万局から 100 万局ごと。2026-10-03 のユーザーの依頼）。どちらかが 0 なら切り替えない
+    "auto": {"enabled": False, "every_games": 0, "every_games_after": 0, "every_games_late": 0, "eval_games": 100, "eval_sims": 96, "eval_concurrent": 64, "eval_threads": 4,
              "chain_eval": True, "anchor_games": 100, "anchor_rebaseline": 0.85,
              # 最強比（docs/restart-plan.md §3 M2）: これまでで最強の保存済みと best_games 局。95% 区間の下限が 0 を超えたら最強を置き換える。
              # best_stall_alert 回続けて更新できなければログに WARNING。0 で無効
