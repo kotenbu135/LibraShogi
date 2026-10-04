@@ -1,20 +1,20 @@
 {
  "schema": 1,
  "run": "ls",
- "generated": "2026-10-04 13:40:08",
- "t": 1791088808.1,
+ "generated": "2026-10-04 15:11:03",
+ "t": 1791094263.4,
  "process": "running",
  "flags": [],
  "now": {
   "step": 827084,
-  "generation": 1748,
+  "generation": 1749,
   "games_total": 10200279,
   "games_per_day_1h": null,
   "window_games": 2000000,
   "active_games": 512,
-  "elapsed_h": 284.87,
+  "elapsed_h": 284.9,
   "heldout_games": 20000,
-  "status_time": "2026-10-04 13:40:06",
+  "status_time": "2026-10-04 15:11:01",
   "train": null,
   "gen": null
  },
@@ -7846,13 +7846,13 @@
    "gen_heldout_fuseki_corr_v": 0.6375
   },
   {
-   "t": 1791088806.5,
+   "t": 1791094261.8,
    "step": 827084,
    "games_total": 10200279,
    "gpd": null,
    "gpd_5m": null,
    "window": 2000000,
-   "rss_mb": 19619,
+   "rss_mb": 19662,
    "swap_mb": 0,
    "gpu_mb": 616,
    "loss": null,
@@ -7872,7 +7872,7 @@
    "rootq_minus_z_normal": null,
    "t_train_sample": 0.0,
    "t_train_step": 0.0,
-   "t_sp_eval": 97.74,
+   "t_sp_eval": 98.17,
    "sp_games": null,
    "sp_draw": null,
    "sp_plies": null,
@@ -7895,7 +7895,7 @@
   }
  ],
  "review": {
-  "time": "2026-10-04 13:40:08",
+  "time": "2026-10-04 15:11:03",
   "run": "ls",
   "items": [
    {
