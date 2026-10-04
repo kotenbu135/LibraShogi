@@ -228,6 +228,7 @@ PYBIND11_MODULE(_search, m) {
            },
            py::arg("slot"), py::arg("logits"), py::arg("wdl"))
       .def("idle", &SelfPlay::idle, py::arg("slot"))
+      .def("set_snapshot", &SelfPlay::set_snapshot, py::arg("slot"), py::arg("sims"))
       .def("finish_now", &SelfPlay::finish_now, py::arg("slot"))
       .def("result",
            [](const SelfPlay& s, int slot) {
@@ -250,6 +251,24 @@ PYBIND11_MODULE(_search, m) {
              py::list pv;
              for (std::uint32_t m : r.pv) pv.append(move_to_usi(Move(m)));
              d["pv"] = pv;
+             // 分析用（外部駆動）: 根のネットの値、全ての手の改善方策、set_snapshot の途中の状態
+             d["net_value"] = r.net_value;
+             auto pol = [](const std::vector<std::pair<std::uint32_t, float>>& v) {
+               py::list l;
+               for (auto& [m, p] : v) l.append(py::make_tuple(move_to_usi(Move(m)), p));
+               return l;
+             };
+             d["policy"] = pol(r.policy);
+             if (r.snap_sims > 0) {
+               py::dict sd;
+               sd["sims"] = r.snap_sims;
+               sd["best"] = move_to_usi(Move(r.snap_best));
+               sd["root_q"] = r.snap_root_q;
+               sd["policy"] = pol(r.snap_policy);
+               d["snapshot"] = sd;
+             } else {
+               d["snapshot"] = py::none();
+             }
              return d;
            },
            py::arg("slot"))

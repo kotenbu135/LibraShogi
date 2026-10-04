@@ -82,6 +82,16 @@ struct SearchResult {
   std::vector<Candidate> cands;   // 訪問数の多い順
   std::vector<std::uint32_t> pv;  // 最善手から辿った主変化
   std::uint64_t sims = 0;
+  // 以下は外部駆動の分析用（自己対局の記録には入らない）。docs/deep-read-signals-2026-10-04.md
+  float net_value = 0;  // 根のネットの値（手番側から）
+  // 改善方策 π' = softmax(log π + σ(completed Q))（自己対局の方策ターゲットと同じ式）を根の全ての手で。policy_topk で切らない
+  std::vector<std::pair<std::uint32_t, float>> policy;
+  // set_snapshot で指定した回数を読み終えた時点の状態（snap_sims 0 なら取っていない）。
+  // snap_best はその時点で読みを止めたら指す手（残った候補の g + log π + σ(q̂) の最大）
+  int snap_sims = 0;
+  std::uint32_t snap_best = 0;
+  float snap_root_q = 0;
+  std::vector<std::pair<std::uint32_t, float>> snap_policy;
 };
 
 struct MoveRecord {
@@ -164,6 +174,9 @@ class SelfPlay {
   void leaf_turns(std::int8_t* out) const;
   // 外部駆動（cfg.external）: 枠 slot に局面を与えて sims 回読む。読み終わると idle になり result が取れる
   bool set_position(int slot, const std::string& usi_line, int sims, bool full, Mode mode = MODE_TENBIN);
+  // 外部駆動: 次の set_position からの読みで、sims 回を読み終えた時点の状態を result の snap_* に残す（0 で取らない）。
+  // 読むだけで探索は変えない。外部駆動でなければ何もしない
+  void set_snapshot(int slot, int sims);
   bool idle(int slot) const;
   // 外部駆動の複数葉の同時評価: 枠 slot の葉を最大 max_leaves 個選んで特徴を書く（sq: max_leaves×81×SQ_FEATS）。
   // 評価待ちの枝には仮の負け（virtual loss）を置いて、同じ葉を選ばないようにする。戻り値は書いた数（読み終わりなら 0）。
