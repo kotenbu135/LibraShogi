@@ -132,6 +132,9 @@ class SelfPlayLoop:
         # 重みを替えるたびに捨てる（set_model・set_opponent）。搾取者モードでは両方のネットの出力を持つ（set_two_nets）。[search] eval_cache = false で切れる
         self.search_cfg = {"defer_root_proof": True, "eval_cache": True, **search_cfg}
         self.engine = librasearch.SelfPlay(self.search_cfg, n_games, seed, threads)
+        if float(self.search_cfg.get("surprise_frac", 0.0)) > 0 and "surprise_ext" not in self.engine.stats():
+            # 古い _search（C++ を作り直していない）は知らない鍵を黙って無視し、驚きの無い対局を「入れた」つもりで打ってしまう
+            raise RuntimeError("[search] surprise_frac には新しい librasearch が要る。git pull の後に cmake --build build で作り直す")
         self.n_games = n_games
         self.device = device
         self.dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[infer_dtype]

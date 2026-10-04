@@ -86,3 +86,25 @@ def test_games_per_day_is_absent_right_after_a_start(tmp_path):
     sd.status_json.write_text(json.dumps(st), encoding="utf-8")
     md = format_md(snapshot(sd))
     assert "| 局/日（1 時間平均） | - |" in md
+
+
+def test_snapshot_carries_search_allocation(tmp_path):
+    """読みの配分（全読みの割合、驚きで延ばした手の割合、1 手の平均の読み）を行の差から出す。
+    驚きを入れても全読みの割合と読みの回数が変わらないことを外から見るため（[search] surprise_frac、2026-10-05）。
+    数を持たない古い行（作り直す前の librasearch）からは出さない。"""
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    sd.write_state({"step": 3000, "games_total": 30000})
+    old = _status(1000, 10000, eng_games=10000, draws=30, sennichite=20, resign=0, plies_sum=1_200_000, sente=4985, gote=4985)
+    a = _status(2000, 20000, eng_games=20000, draws=90, sennichite=60, resign=1000, plies_sum=2_300_000, sente=9955, gote=9955)
+    a["engine"].update(full_moves=50_000, surprise_ext=20_000)
+    b = _status(3000, 30000, eng_games=30000, draws=120, sennichite=80, resign=2000, plies_sum=3_400_000, sente=14940, gote=14940)
+    b["engine"].update(full_moves=75_000, surprise_ext=32_500, sims=30000 * 100 + 21_000)
+    for st in (old, a, b):
+        append_metrics(sd, st)
+    rows = snapshot(sd)["metrics"]
+    assert rows[1].get("sp_full") is None  # 前の行が数を持たない
+    row = rows[-1]  # この 1 万局で 10 万手、うち全読み 2.5 万手（驚き 1.25 万手）、読み 102.1 万回
+    assert row["sp_full"] == 0.25 and row["sp_surprise"] == 0.125 and row["sp_sims"] == 10.2
+    md = format_md(snapshot(sd))
+    assert "読みの配分（1 手あたり）" in md and "全読み 25.0%（うち驚きで延ばした手 12.5%）" in md

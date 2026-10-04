@@ -100,7 +100,8 @@ def _mem_note(job: dict) -> str:
 
 
 METRIC_ENGINE_KEYS = ("games", "moves", "sims", "sente_wins", "draws", "gote_wins", "ruling41", "no_legal_move",
-                      "sennichite", "perpetual_check", "max_ply", "resign", "plies_sum", "mate_found", "proof_found")
+                      "sennichite", "perpetual_check", "max_ply", "resign", "plies_sum", "mate_found", "proof_found",
+                      "full_moves", "surprise_ext")  # 読みの配分（progress の「読みの配分」、2026-10-05）
 
 
 def ckpt_step(p: Path | str) -> int | None:
