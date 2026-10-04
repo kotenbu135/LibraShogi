@@ -19,6 +19,8 @@ SearchConfig config_from_dict(const py::dict& d) {
   geti("full_sims_41", c.full_sims_41);
   geti("fast_sims", c.fast_sims);
   getf("full_prob", c.full_prob);
+  getf("surprise_frac", c.surprise_frac);
+  getf("surprise_init", c.surprise_init);
   geti("gumbel_m_full", c.gumbel_m_full);
   geti("gumbel_m_fast", c.gumbel_m_fast);
   getf("c_visit", c.c_visit);
@@ -309,6 +311,9 @@ PYBIND11_MODULE(_search, m) {
         d["max_ply"] = st.max_ply;
         d["timeout"] = st.timeout;
         d["resign"] = st.resign;
+        d["full_moves"] = st.full_moves;
+        d["surprise_ext"] = st.surprise_ext;
+        d["surprise_checks"] = st.surprise_checks;
         d["plies_sum"] = st.plies_sum;
         d["mate_found"] = st.mate_found;
         d["proof_found"] = st.proof_found;

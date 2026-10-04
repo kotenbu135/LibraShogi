@@ -50,6 +50,9 @@ class Runner:
             raise ValueError("[train] full_only はランではまだ使えない（libra abtest の比較用）")
         if int(cfg["search"].get("full_sims_41", 0)) > 0:
             raise ValueError("[search] full_sims_41 はランではまだ使えない（libra eval --b-set の比較用。docs/acceleration-2026-09-27.md §3 B）")
+        if float(cfg["search"].get("surprise_frac", 0.0)) > 0:
+            # 学習データの変更（CLAUDE.md 11）。入れるかはユーザーが決め、決めたらこの行を外して docs/ls2-settings.md に行を足す
+            raise ValueError("[search] surprise_frac はランではまだ使えない（比べ用。docs/deep-read-signals-2026-10-04.md）")
         # 補助の頭（[net] opp_head・own_head と [train] opp_weight・own_weight）は学習だけで使う。頭の無いチェックポイントから
         # 続けるときは初期値の頭を足す（Trainer.load_state_dict）。幹の形と ONNX の出力（方策・形勢・V̂41）は変わらない
         self.replay = ReplayBuffer(sd.replay, sd.games, tr["window_games"], rr["chunk_games"], sr["max_ply"], sr["count_from_41"],

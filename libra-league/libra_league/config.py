@@ -18,6 +18,10 @@ DEFAULTS: dict[str, Any] = {
         # （docs/acceleration-2026-09-27.md §3 B）
         "full_sims_41": 0,
         "full_prob": 0.25,
+        # 全読みの枠のうち、くじではなく「驚き」（速読みの後の改善方策と第一感のずれ）で選ぶ割合。0 なら無効（今までと同じ棋譜）。
+        # 比べ用で、ランでは断る（docs/deep-read-signals-2026-10-04.md、docs/method-evidence.md §2.23）。surprise_init はしきい値の初期値
+        "surprise_frac": 0.0,
+        "surprise_init": 0.1,
         "gumbel_m_full": 16,
         "gumbel_m_fast": 8,
         "c_visit": 50.0,

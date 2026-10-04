@@ -22,6 +22,14 @@ struct SearchConfig {
   // （docs/acceleration-2026-09-27.md §3 B、出典なし）。速読みは変えない
   int full_sims_41 = 0;
   float full_prob = 0.25f;  // 全読みの割合（playout cap randomization）
+  // 驚きで深読みする局面を選ぶ（docs/deep-read-signals-2026-10-04.md、出典なし。比べ用で、ランでは断る）。0 なら無効（既定。
+  // 乱数の引き方も含めて今までと同じ）。正なら全読みの枠 full_prob のうち、この割合を「驚き」で選び、残り（1 − surprise_frac）は
+  // 今までどおり手の最初にくじで選ぶ。くじに外れた手は速読みで読み、読み終えた時点の驚き KL(π' ‖ π)（改善方策と第一感のずれ）が
+  // しきい値以上なら、同じ木の続きを全読みの回数まで読んで全読みの手にする。しきい値は枠ごとに対数で追いかけ、延ばす割合を
+  // full_prob · surprise_frac / (1 − full_prob · (1 − surprise_frac)) に保つ（平均の読みの回数を今と同じにする）。
+  // 合法手が 1 つ、または第一感の最大が 0.95 を超える手は延ばさない
+  float surprise_frac = 0.0f;
+  float surprise_init = 0.1f;  // しきい値の初期値（KL、nat）
   int gumbel_m_full = 16;   // Gumbel-Top-k の候補数
   int gumbel_m_fast = 8;
   float c_visit = 50.0f;    // Gumbel の σ(q) = (c_visit + max N) · c_scale · q
@@ -119,6 +127,9 @@ struct SelfPlayStats {
   std::uint64_t results[3] = {0, 0, 0};  // 先手勝ち・引き分け・後手勝ち
   std::uint64_t ruling41 = 0, no_legal = 0, sennichite = 0, perpetual = 0, max_ply = 0, timeout = 0;
   std::uint64_t resign = 0;  // 投了で終わった対局（resign_disable_prob の対局は数えない）
+  std::uint64_t full_moves = 0;      // 全読みで指した手（驚きで延ばした手を含む。外部駆動は数えない）
+  std::uint64_t surprise_ext = 0;    // そのうち驚きで延ばした手
+  std::uint64_t surprise_checks = 0; // 驚きを測った速読みの手
   double plies_sum = 0;
   void add(const SelfPlayStats& o);
 };
@@ -214,6 +225,8 @@ class SelfPlay {
   // 葉の鍵（h, aux）がキャッシュにあれば展開する。0 = 無い、1 = 展開した（次の葉へ進める）、2 = 本将棋の根を展開して証明探索の結果を待つ
   int use_cached(Game& g, std::uint64_t h, std::uint32_t aux);
   void finish_move(Game& g);
+  // 驚きで延ばすか（cfg.surprise_frac。読み終えて指す直前に呼ぶ。延ばしたら true で、探索は全読みの回数まで続く）
+  bool surprise_extend(Game& g, const SearchConfig& cfg);
   void play_forced(Game& g, Move m, float value);
   // 投了の判定。指す側の値の連続を数え、投了するなら true（指した後に Position::resign を呼ぶ）
   bool resign_check(Game& g, Color mover, float root_q);
