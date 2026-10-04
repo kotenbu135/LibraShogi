@@ -171,9 +171,12 @@ USI の申告と `info` の形式は [protocol.md](protocol.md) §3。天秤将�
 ```
 0185db1f1c968e265cfb42b8f5dd3f0d29086426cd2d00ac01e87003c7fc6c2f  libra-v0.3.pt
 e8fb1744ea6e29a24a850766b81389918f9481be643124407ed444ec95a9af2b  libra-v0.3.onnx
+bd6f41c8b09a80cb3fe6ddb5a6c629a4226489f25c8fc1f41cc9499f6a56bcf4  libra-v0.3-windows-x64.zip
+2a584efd256f13b59b483b6ed9e00cac4651e83ce305ff7837daab3aeba90da2  libra-v0.3-selfplay-sample.jsonl.gz
 ```
 
-zip と自己対局の標本のハッシュは配布物を作ってから書く。Release の `SHA256SUMS` と同じになる。
+Release の `SHA256SUMS` と同じ。**`tools/package_release.sh` を 2 回続けて回し、4 つとも同じ値になることを確かめた**（zip と標本の gzip は日時を固定して詰めるため。§9）。
+展開した `libra.exe` は Windows で `id name LibraShogi 0.3.0`・`readyok`・`provider dml` を返し、1 手目を読んで置いた（`method random`）。
 **zip の中の `MODEL-CARD.md` は、この節を埋める前の版**（zip の中身が zip 自身のハッシュを持てないため）。それ以外は同じ。
 
 ## 9. 配布物の作り方
