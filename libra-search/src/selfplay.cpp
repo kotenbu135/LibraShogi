@@ -112,6 +112,10 @@ struct SelfPlay::Game {
   int forced_budget = -1;    // 外部駆動の読みの回数
   bool forced_full = true;
   SearchResult result;
+  // 外部駆動の途中の状態（set_snapshot）。snap は finish_move で result に写す
+  int snap_at = 0;
+  bool snap_done = false;
+  SearchResult snap;
   std::vector<GameRecord> done;  // 終局した記録（gather で集める）
   SelfPlayStats st;              // この対局の統計（gather で集める）
   MateProblem mate_prob;
@@ -384,6 +388,42 @@ static void completed_q(const Node& root, const SearchConfig& cfg, std::vector<f
   for (float& q : out) q = (q - lo) / range;
 }
 
+// 改善方策 π' = softmax(log π + σ(completed Q)) を根の全ての手で（finish_move の方策ターゲットと同じ式。
+// 外部駆動の分析用で、自己対局の記録は finish_move の中で作る）
+static std::vector<std::pair<std::uint32_t, float>> improved_policy(const Node& root, const SearchConfig& cfg,
+                                                                    const std::vector<float>& cq) {
+  std::vector<std::pair<std::uint32_t, float>> out;
+  out.reserve(root.edges.size());
+  float mx = -1e30f;
+  for (size_t i = 0; i < root.edges.size(); ++i) {
+    float s = std::log(root.edges[i].prior) + sigma_q(root, cq[i], cfg);
+    out.push_back({root.edges[i].move, s});
+    mx = std::max(mx, s);
+  }
+  float z = 0;
+  for (auto& p : out) {
+    p.second = std::exp(p.second - mx);
+    z += p.second;
+  }
+  for (auto& p : out) p.second /= z;
+  return out;
+}
+
+// 今読みを止めたら指す手（残った候補の g + log π + σ(q̂) の最大。finish_move の最終選択と同じ）
+static int final_pick(const SelfPlay::Game& g, const SearchConfig& cfg, const std::vector<float>& cq) {
+  const Node& root = g.nodes[0];
+  int best = g.cand.empty() ? 0 : g.cand[0];
+  float best_s = -1e30f;
+  for (int c : g.cand) {
+    float s = g.gumbel[c] + std::log(root.edges[c].prior) + sigma_q(root, cq[c], cfg);
+    if (s > best_s) {
+      best_s = s;
+      best = c;
+    }
+  }
+  return best;
+}
+
 // 逐次半減の次の候補を選ぶ。全候補が目標に達していれば半減。終わりなら -1
 static int gumbel_pick(SelfPlay::Game& g, const SearchConfig& cfg) {
   Node& root = g.nodes[0];
@@ -472,10 +512,13 @@ void SelfPlay::finish_move(Game& g) {
     // 手は指さず、結果を残して局面待ちに戻る
     SearchResult& r = g.result;
     r = SearchResult();
+    if (g.snap_done) r = g.snap;  // snap_* だけが入っている
     r.ready = true;
     r.best = root.edges[best].move;
     r.root_q = mr.root_q;
     r.sims = g.sims;
+    r.net_value = root.net_value;
+    r.policy = improved_policy(root, cfg, cq);
     std::vector<int> order(root.edges.size());
     for (size_t i = 0; i < order.size(); ++i) order[i] = int(i);
     std::sort(order.begin(), order.end(), [&](int a, int b) {
@@ -690,6 +733,18 @@ void SelfPlay::step_game(Game& g) {
       return;
     }
     if (!g.root_ready) init_root_search(g, cfg_for(g));
+    if (cfg_.external && g.snap_at > 0 && !g.snap_done && g.sims >= g.snap_at && g.batch.empty()) {
+      // 途中の状態を読むだけ（探索の状態は変えない）
+      const SearchConfig& cfg = cfg_for(g);
+      std::vector<float> cq;
+      completed_q(g.nodes[0], cfg, cq);
+      g.snap = SearchResult();
+      g.snap.snap_sims = g.sims;
+      g.snap.snap_best = g.nodes[0].edges[final_pick(g, cfg, cq)].move;
+      g.snap.snap_root_q = g.root_q();
+      g.snap.snap_policy = improved_policy(g.nodes[0], cfg, cq);
+      g.snap_done = true;
+    }
     if (g.sims >= g.budget) {
       if (g.proof_state == 1) {
         // eval_cache で根の証明探索の結果より先に読み終えた: 指す前にここで解く（証明できれば読みを捨てて証明手）
@@ -1214,6 +1269,7 @@ bool SelfPlay::set_position(int slot, const std::string& usi_line, int sims, boo
   g.forced_budget = sims;
   g.forced_full = full;
   g.result = SearchResult();
+  g.snap_done = false;
   g.nodes.clear();
   g.table.clear();
   g.proof_cache.clear();
@@ -1224,6 +1280,10 @@ bool SelfPlay::set_position(int slot, const std::string& usi_line, int sims, boo
   g.batch.clear();
   step_game(g);
   return true;
+}
+
+void SelfPlay::set_snapshot(int slot, int sims) {
+  if (cfg_.external) games_.at(size_t(slot))->snap_at = std::max(0, sims);
 }
 
 bool SelfPlay::idle(int slot) const { return games_[slot]->idle; }

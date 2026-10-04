@@ -163,3 +163,64 @@ def test_finish_now_before_root_with_batch():
     pos = ls.Position()
     pos.set_position(LINES[0])
     assert r["ready"] and pos.is_legal(r["best"]) and len(r["cands"]) == len(pos.legal_moves())
+
+
+def _search(snap, line="position fuseki moves K*5i K*5a", sims=24, seed=5):
+    e = librasearch.SelfPlay(dict(CFG, gumbel_m_full=8), 1, seed, 2)
+    e.set_snapshot(0, snap)
+    assert e.set_position(0, line, sims, True)
+    sq = np.zeros((1, 81, ls.SQ_FEATS), np.float32)
+    gl = np.zeros((1, ls.GLOB_FEATS), np.float32)
+    while not e.idle(0):
+        e.collect(sq, gl)
+        e.apply(*fake_net(sq, gl))
+    return e.result(0)
+
+
+def test_snapshot_reads_only():
+    # 途中の状態を取っても探索は変わらない（docs/deep-read-signals-2026-10-04.md の計測で使う）
+    keys = ("best", "root_q", "sims", "cands", "pv", "net_value", "policy")
+    base = _search(0)
+    assert base["snapshot"] is None
+    for snap in (1, 12, 24):
+        r = _search(snap)
+        assert {k: r[k] for k in keys} == {k: base[k] for k in keys}
+        assert r["snapshot"]["sims"] == snap
+
+
+def test_snapshot_and_policy_shape():
+    r = _search(12)
+    pos = ls.Position()
+    pos.set_position("position fuseki moves K*5i K*5a")
+    for pol in (r["policy"], r["snapshot"]["policy"]):
+        assert len(pol) == len(pos.legal_moves())
+        assert abs(sum(p for _, p in pol) - 1.0) < 1e-4
+    # 読み終えた時点で取れば、最後の結果と同じ
+    full = _search(24)
+    assert full["snapshot"]["best"] == full["best"]
+    assert full["snapshot"]["root_q"] == full["root_q"]
+    assert full["snapshot"]["policy"] == full["policy"]
+    # 改善方策の上位は予算どおり読んだ結果で、ネットの値も入る
+    assert -1.0 <= r["net_value"] <= 1.0
+
+
+def test_snapshot_noop_in_selfplay():
+    # 自己対局（外部駆動でない）では set_snapshot は何もしない
+    cfg = {"full_sims": 16, "fast_sims": 8, "gumbel_m_full": 8, "gumbel_m_fast": 4, "max_ply": 30}
+
+    def play(snap):
+        sp = librasearch.SelfPlay(cfg, 4, 9, 2)
+        if snap:
+            for i in range(4):
+                sp.set_snapshot(i, 4)
+        sq = np.zeros((4, 81, ls.SQ_FEATS), np.float32)
+        gl = np.zeros((4, ls.GLOB_FEATS), np.float32)
+        done = []
+        for _ in range(3000):
+            sp.collect(sq, gl)
+            sp.apply(*fake_net(sq, gl))
+            done += sp.take_finished()
+        return [{k: (v.tolist() if hasattr(v, "tolist") else v) for k, v in d.items()} for d in done]
+
+    a = play(False)
+    assert a and a == play(True)
