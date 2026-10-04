@@ -68,6 +68,7 @@ def _selfplay_rates(rows: list[dict]) -> None:
             ps, pps = eng.get("plies_sum"), (prev or {})["engine"].get("plies_sum")
             d["plies"] = ((float(ps) - float(pps)) / n) if (ps is not None and pps is not None) else None
             d["games"] = int(n)
+        prev_eng = (prev or {}).get("engine")
         prev = r
         if d is None:
             continue
@@ -78,6 +79,14 @@ def _selfplay_rates(rows: list[dict]) -> None:
         r["sp_sente"] = round(d["sente_wins"] / won, 4) if won > 0 else None
         for k in ("sennichite", "perpetual_check", "max_ply", "resign", "ruling41", "no_legal_move", "mate_found"):
             r["sp_" + k] = round(d[k], 4)
+        # 1 手あたり: 全読みの手の割合、そのうち驚きで延ばした手（[search] surprise_frac）の割合、平均の読みの回数。
+        # 驚きを入れても全読みの割合と読みの回数が変わらない（1 日の局数が変わらない）ことをここで見る
+        pe = (prev_eng or {})
+        mv = float(eng.get("moves") or 0) - float(pe.get("moves") or 0)
+        if mv > 0 and eng.get("full_moves") is not None and pe.get("full_moves") is not None:
+            r["sp_full"] = round((float(eng["full_moves"]) - float(pe["full_moves"])) / mv, 4)
+            r["sp_surprise"] = round((float(eng.get("surprise_ext") or 0) - float(pe.get("surprise_ext") or 0)) / mv, 4)
+            r["sp_sims"] = round((float(eng.get("sims") or 0) - float(pe.get("sims") or 0)) / mv, 1)
 
 
 def _with_rates(rows: list[dict]) -> list[dict]:
@@ -106,7 +115,7 @@ def _metric_row(r: dict) -> dict:
         out["t_" + k] = round(float(sec.get(k) or 0.0) / w * 100, 2) if w > 0 else None
     # 自己対局の分布（_selfplay_rates が入れる）
     for k in ("sp_games", "sp_draw", "sp_plies", "sp_sente", "sp_sennichite", "sp_perpetual_check", "sp_max_ply",
-              "sp_resign", "sp_ruling41", "sp_no_legal_move", "sp_mate_found"):
+              "sp_resign", "sp_ruling41", "sp_no_legal_move", "sp_mate_found", "sp_full", "sp_surprise", "sp_sims"):
         out[k] = r.get(k)
     gen = r.get("gen") or {}
     # 価値の相関だけだと「横ばい」の読み分けができないので、方策の側と布石の側も出す
@@ -239,6 +248,9 @@ def _metric_lines(rows: list[dict]) -> list[str]:
                  f"先手の勝ち {_fmt((sp.get('sp_sente') or 0) * 100, 1)}%、千日手 {_fmt((sp.get('sp_sennichite') or 0) * 100, 2)}%、"
                  f"連続王手 {_fmt((sp.get('sp_perpetual_check') or 0) * 100, 2)}%、320 手 {_fmt((sp.get('sp_max_ply') or 0) * 100, 2)}%、"
                  f"投了 {_fmt((sp.get('sp_resign') or 0) * 100, 2)}%（{_fmt(sp.get('sp_games'))} 局） |")
+        if sp.get("sp_full") is not None:
+            L.append(f"| 読みの配分（1 手あたり） | 全読み {_fmt(sp['sp_full'] * 100, 1)}%（うち驚きで延ばした手 {_fmt((sp.get('sp_surprise') or 0) * 100, 1)}%）、"
+                     f"平均の読み {_fmt(sp.get('sp_sims'))} 回 |")
     d = _last(rows, "draw_actual")
     if d:
         L.append(f"| 布石の学習目標と結果の差 | 目標 − 結果 {_fmt(d.get('target_minus_z'), 4, plus=True)}、"

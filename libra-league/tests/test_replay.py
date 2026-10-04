@@ -284,20 +284,29 @@ def test_runner_refuses_full_sims_41(tmp_path: Path):
         Runner(sd, cfg, device=torch.device("cpu"))
 
 
-def test_runner_refuses_surprise_frac(tmp_path: Path):
-    """驚きで深読みを選ぶ形（[search] surprise_frac）は学習データの変更で、比べ用なのでランの起動で断る。"""
+def test_selfplay_loop_needs_new_engine_for_surprise(monkeypatch):
+    """[search] surprise_frac（驚きで深読みを選ぶ形）は作り直した librasearch でだけ動く。古い _search は知らない鍵を
+    黙って無視するので、数を持たない engine なら起動で断る（入れたつもりで驚きの無い対局を打たないため）。"""
     import pytest
+    import librasearch
 
-    from libra_league.config import load_config
-    from libra_league.runner import Runner
+    from libra_league.selfplay import SelfPlayLoop
 
-    cfg = load_config(None)
-    cfg["net"] = {"d_model": 32, "n_layers": 2, "n_heads": 4, "d_ff": 64, "dropout": 0.0}
-    cfg["search"]["surprise_frac"] = 0.9
-    sd = StateDir(tmp_path / "ls")
-    sd.create()
-    with pytest.raises(ValueError, match="surprise_frac"):
-        Runner(sd, cfg, device=torch.device("cpu"))
+    cfg = {"full_sims": 4, "fast_sims": 2, "max_ply": 20, "proof_nodes": 0, "mate_nodes_root": 0, "surprise_frac": 0.5}
+    loop = SelfPlayLoop(cfg, 2, 1, 0, torch.device("cpu"), "float32")
+    assert "surprise_ext" in loop.engine.stats()
+
+    class Old:
+        def __init__(self, *a):
+            pass
+
+        def stats(self):
+            return {"games": 0, "moves": 0}
+
+    monkeypatch.setattr(librasearch, "SelfPlay", Old)
+    with pytest.raises(RuntimeError, match="surprise_frac"):
+        SelfPlayLoop(cfg, 2, 1, 0, torch.device("cpu"), "float32")
+    SelfPlayLoop({**cfg, "surprise_frac": 0.0}, 2, 1, 0, torch.device("cpu"), "float32")  # 無効なら古い engine でも動く
 
 
 def _train_batch(n: int, seed: int) -> dict:
