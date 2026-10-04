@@ -92,11 +92,25 @@ def probe(a):
         print(f"{tag}: {len(out)} positions, {time.time() - t0:.0f}s", flush=True)
         return out
 
+    def phase(jobs, sims, full, snap, tag):
+        # 読み方ごとに <out>.<tag>.json に残し、やり直したときは読んだ分を使う（長い計算が途中で止まったとき用）
+        path = f"{a.out}.{tag}.json"
+        try:
+            got = {int(k): v for k, v in json.load(open(path)).items()}
+            if set(got) == set(jobs):
+                print(f"{tag}: reuse {path}", flush=True)
+                return got
+        except FileNotFoundError:
+            pass
+        got = run(jobs, sims, full, snap, tag)
+        json.dump(got, open(path, "w"))
+        return got
+
     idx = list(range(a.positions))
-    ra = run(idx, search["fast_sims"], False, a.snapshot, "a24")  # 速読み: 候補 gumbel_m_fast
-    rb = run(idx, search["full_sims"], True, a.snapshot, "b96")   # 全読み: 候補 gumbel_m_full
+    ra = phase(idx, search["fast_sims"], False, a.snapshot, "a24")  # 速読み: 候補 gumbel_m_fast
+    rb = phase(idx, search["full_sims"], True, a.snapshot, "b96")   # 全読み: 候補 gumbel_m_full
     ok = [i for i in idx if ra[i]["policy"] and rb[i]["policy"]]  # 証明済み（読まずに証明手。policy が空）を除く
-    rc = run(ok[:a.repeat], search["full_sims"], True, 0, "c96")  # 雑音の床: 別の種でもう一度 96 回
+    rc = phase(ok[:a.repeat], search["full_sims"], True, 0, "c96")  # 雑音の床: 別の種でもう一度 96 回
     with open(a.out, "w") as f:
         for i in idx:
             f.write(json.dumps(dict(positions[i], a=ra[i], b=rb[i], c=rc.get(i))) + "\n")
