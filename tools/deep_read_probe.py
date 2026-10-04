@@ -176,7 +176,8 @@ def features(rec):
         "y3": abs(b["root_q"] - a["root_q"]),      # ③ 局面の評価の差
         # 24 回までで分かる合図
         "s1": kl(pa, prior),                       # 驚き: KL(π24 || ネットの方策)
-        "s2": int(a["snapshot"]["best"] != a["best"]),  # 入れ替わり: 12 回目と 24 回目で指す手が違う
+        # 入れ替わり: 12 回目と 24 回目で指す手が違う（合法手が 1 つの局面は読まないので途中の状態が無く、0）
+        "s2": int(a["snapshot"] is not None and a["snapshot"]["best"] != a["best"]),
         "s3": abs(a["net_value"] - a["root_q"]),   # 評価の動き: |ネットの値 − 24 回後の root の値|
         "s4": int(len(top2) == 2 and qa[top2[0][0]] * qa[top2[1][0]] < 0),  # 境目: 第 1・第 2 候補の評価の符号が違う
         "s5": -sum(p * math.log(p + EPS) for p in pa.values()),  # 多様さ: π24 のエントロピー
