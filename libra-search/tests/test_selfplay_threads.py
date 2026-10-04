@@ -426,3 +426,52 @@ def test_retire_stops_a_slot_after_its_current_game_and_leaves_the_others_unchan
             assert by_slot(got, s) == by_slot(ref, s)
     with pytest.raises(IndexError):
         sp.retire(n_games)
+
+
+# 驚きで深読みする局面を選ぶ（[search] surprise_frac。docs/deep-read-signals-2026-10-04.md）
+SUR = {**CFG, "proof_nodes": 0, "mate_nodes_root": 0}
+
+
+def play_surprise(extra, threads=2, n_games=8, rounds=3000):
+    sp = librasearch.SelfPlay({**SUR, **extra}, n_games, seed=5, threads=threads)
+    sq = np.zeros((n_games, 81, ls.SQ_FEATS), np.float32)
+    glob = np.zeros((n_games, ls.GLOB_FEATS), np.float32)
+    done = []
+    for _ in range(rounds):
+        sp.collect(sq, glob)
+        sp.apply(*fake_net(sq, glob))
+        done += sp.take_finished()
+    return done, sp.stats()
+
+
+def test_surprise_off_is_unchanged():
+    """surprise_frac 0（既定）は鍵が無いときと同じ棋譜で、驚きを測らない。"""
+    ref, st_ref = play_surprise({}, rounds=1500)
+    got, st = play_surprise({"surprise_frac": 0.0, "surprise_init": 5.0}, rounds=1500)
+    assert [canon(r) for r in got] == [canon(r) for r in ref]
+    assert st == st_ref and st["surprise_checks"] == 0 and st["surprise_ext"] == 0
+    assert st["full_moves"] > 0
+
+
+@pytest.mark.parametrize("frac,init", [(0.9, 0.01), (0.9, 100.0), (0.5, 1.0)])
+def test_surprise_keeps_full_rate_and_budget(frac, init):
+    """驚きで延ばしても、全読みの手の割合は full_prob に、1 手の平均の読みは今と同じに落ち着く（しきい値の初期値が下でも上でも
+    追いつく。初期値のずれのぶんだけ最初に多め・少なめに延ばす）。延ばした手は全読みの手として方策の目標を持ち、速読みの手は持たない。"""
+    _, base = play_surprise({}, rounds=8000)
+    done, st = play_surprise({"surprise_frac": frac, "surprise_init": init}, rounds=8000)
+    assert st["surprise_checks"] > 0 and 0 < st["surprise_ext"] < st["full_moves"]
+    rate = st["full_moves"] / st["moves"]
+    assert abs(rate - base["full_moves"] / base["moves"]) < 0.05, rate
+    sims = st["sims"] / st["moves"]
+    assert abs(sims / (base["sims"] / base["moves"]) - 1) < 0.1, sims
+    for r in done:
+        off = np.asarray(r["policy_off"])
+        assert ((off[1:] - off[:-1]) > 0).tolist() == np.asarray(r["full"], bool).tolist()
+
+
+def test_surprise_does_not_depend_on_threads():
+    """驚きのしきい値は枠ごとに持つので、並列の割り当てを変えても棋譜は変わらない。"""
+    ref, st_ref = play_surprise({"surprise_frac": 0.9}, threads=1, rounds=1500)
+    got, st = play_surprise({"surprise_frac": 0.9}, threads=4, rounds=1500)
+    assert [canon(r) for r in got] == [canon(r) for r in ref] and st == st_ref
+    assert st["surprise_ext"] > 0

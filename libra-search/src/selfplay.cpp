@@ -50,6 +50,10 @@ float edge_q_vl(const Node& parent, const Edge& e) {
 
 constexpr int kCacheMoves = 3;  // eval_cache: 直近何手の探索の評価を持つか（当たりはほぼ 2 手前まで。measurements.md 2026-09-14）
 constexpr int kCacheHops = 64;  // eval_cache: 1 対局が 1 回の collect で当たりをたどる上限
+// surprise_frac: 驚きのしきい値（対数）を 1 手ごとに動かす幅。延ばした手で +η(1 − 目標)、延ばさなかった手で −η·目標 動かし、
+// 延ばす割合が目標に落ち着く（確率的な分位点の追いかけ。動いた量の和が有界なので、長い目で見た割合は目標に一致する）。
+// 0.2 は初期値が 20 倍ずれていても枠ごとに約 20 回延ばせば追いつく大きさ（出典なし。tests/test_selfplay_surprise.py で割合を確かめる）
+constexpr float kSurpriseEta = 0.2f;
 
 // eval_cache の鍵。ネットの入力（write_features）は、局面キー（盤・持ち駒・手番）と、段階・布石の手数・本将棋の手数・
 // 繰り返しの回数・モード（aux にまとめる）だけで決まる（手数の上限は対局を通して同じ）。特徴量を書かずに引けるよう、
@@ -110,6 +114,9 @@ struct SelfPlay::Game {
   bool idle = false;         // 外部駆動で局面待ち。retire した枠は終局の後もこれで止める
   bool retired = false;      // 今の対局が終わったら次を始めない（retire）
   int forced_budget = -1;    // 外部駆動の読みの回数
+  bool sur_checked = false;  // この手で驚きを測った（surprise_frac）
+  float sur_logthr = 0;      // 驚きのしきい値の対数（枠ごとに追いかける。対局をまたいで持つ）
+  bool sur_init = false;
   bool forced_full = true;
   SearchResult result;
   // 外部駆動の途中の状態（set_snapshot）。snap は finish_move で result に写す
@@ -322,7 +329,9 @@ void SelfPlay::end_game(Game& g) {
 static void init_root_search(SelfPlay::Game& g, const SearchConfig& cfg) {
   Node& root = g.nodes[0];
   std::uniform_real_distribution<float> u(0.0f, 1.0f);
-  g.full = u(g.rng) < cfg.full_prob;
+  // surprise_frac のときは全読みの枠の一部だけをくじで選ぶ（残りは速読みの後に驚きで延ばす）。0 なら今までと同じ式
+  g.full = u(g.rng) < (cfg.surprise_frac > 0.0f ? cfg.full_prob * (1.0f - cfg.surprise_frac) : cfg.full_prob);
+  g.sur_checked = false;
   g.budget = !g.full ? cfg.fast_sims : (cfg.full_sims_41 > 0 && g.pos.phase() == PHASE_NORMAL) ? cfg.full_sims_41 : cfg.full_sims;
   if (g.forced_budget >= 0) {
     g.full = g.forced_full;
@@ -452,6 +461,53 @@ static int gumbel_pick(SelfPlay::Game& g, const SearchConfig& cfg) {
   }
 }
 
+// 驚きで深読みを延ばす（cfg.surprise_frac。docs/deep-read-signals-2026-10-04.md）。速読みを読み終えた時点で
+// 驚き KL(π' ‖ π)（π' は改善方策 softmax(log π + σ(completed Q)) を根の全ての手で、π は第一感）を測り、しきい値以上なら
+// 同じ木のまま全読みの回数・候補数で逐次半減をやり直す。候補は手の最初に引いた Gumbel ノイズで並べ直すので、速読みの候補は
+// 全読みの候補に含まれる（読んだ手の訪問は残り、目標に届いている候補は飛ばされる）。延ばした手の読みの回数は全読みと同じ
+bool SelfPlay::surprise_extend(Game& g, const SearchConfig& cfg) {
+  if (cfg.surprise_frac <= 0.0f || g.full || g.sur_checked || g.forced_budget >= 0 || !g.batch.empty()) return false;
+  g.sur_checked = true;
+  Node& root = g.nodes[0];
+  if (root.edges.size() <= 1) return false;
+  float pmax = 0;
+  for (const Edge& e : root.edges) pmax = std::max(pmax, e.prior);
+  float kl = 0;  // 第一感が 0.95 を超える手は 0 として数える（延ばさないが、割合の追いかけには入れる）
+  if (pmax <= 0.95f) {
+    std::vector<float> cq;
+    completed_q(root, cfg, cq);
+    const auto pi = improved_policy(root, cfg, cq);
+    for (size_t i = 0; i < pi.size(); ++i) {
+      const float p = pi[i].second;
+      if (p > 0) kl += p * (std::log(p) - std::log(std::max(root.edges[i].prior, 1e-30f)));
+    }
+  }
+  if (!g.sur_init) {
+    g.sur_logthr = std::log(std::max(cfg.surprise_init, 1e-6f));
+    g.sur_init = true;
+  }
+  const float lot = cfg.full_prob * (1.0f - cfg.surprise_frac);
+  const float target = std::min(1.0f, cfg.full_prob * cfg.surprise_frac / std::max(1e-6f, 1.0f - lot));
+  const bool ext = pmax <= 0.95f && kl > 0 && std::log(kl) >= g.sur_logthr;
+  g.sur_logthr += kSurpriseEta * ((ext ? 1.0f : 0.0f) - target);
+  g.st.surprise_checks++;
+  if (!ext) return false;
+  g.st.surprise_ext++;
+  g.full = true;
+  g.budget = (cfg.full_sims_41 > 0 && g.pos.phase() == PHASE_NORMAL) ? cfg.full_sims_41 : cfg.full_sims;
+  const int m = std::min(cfg.gumbel_m_full, int(root.edges.size()));
+  std::vector<int> order(root.edges.size());
+  for (size_t i = 0; i < root.edges.size(); ++i) order[i] = int(i);
+  std::sort(order.begin(), order.end(), [&](int a, int b) {
+    return std::log(root.edges[a].prior) + g.gumbel[a] > std::log(root.edges[b].prior) + g.gumbel[b];
+  });
+  g.cand.assign(order.begin(), order.begin() + m);
+  g.sh_phase = 0;
+  g.sh_phases = std::max(1, int(std::ceil(std::log2(std::max(2, m)))));
+  g.sh_target = std::max(1, g.budget / (g.sh_phases * m));
+  return true;
+}
+
 // 投了の判定（AlphaGo Zero [Silver+ 2017] Methods「Resignation」）。手番側の値が −しきい値 以下だった連続を側ごとに数え、
 // resign_runs に達したら true を返す。布石（resign_min_ply 未満）では投了しない。resign_off の対局は数えるだけで投了しない
 // （誤投了の割合を測り続けるための 10% の見本）。棋譜から見積もった効き目は docs/measurements.md 2026-09-19
@@ -563,6 +619,7 @@ void SelfPlay::finish_move(Game& g) {
   g.pos.do_move(root.edges[best].move);
   g.moves_made++;
   g.st.moves++;
+  if (g.full) g.st.full_moves++;
   if (resigning && g.pos.outcome().result == ONGOING) g.pos.resign(mover);
   for (auto it = g.eval_cache.begin(); it != g.eval_cache.end();) {
     if (it->second.move_no + kCacheMoves <= g.moves_made) it = g.eval_cache.erase(it);
@@ -653,6 +710,7 @@ void SelfPlay::play_forced(Game& g, Move m, float value) {
   g.pos.do_move(m);
   g.moves_made++;
   g.st.moves++;
+  if (g.full) g.st.full_moves++;
   if (resigning && g.pos.outcome().result == ONGOING) g.pos.resign(mover);
   g.nodes.clear();
   g.table.clear();
@@ -746,6 +804,7 @@ void SelfPlay::step_game(Game& g) {
       g.snap_done = true;
     }
     if (g.sims >= g.budget) {
+      if (surprise_extend(g, cfg_for(g))) continue;
       if (g.proof_state == 1) {
         // eval_cache で根の証明探索の結果より先に読み終えた: 指す前にここで解く（証明できれば読みを捨てて証明手）
         g.proof_move = root_proof(g, g.proof_value);
@@ -897,6 +956,9 @@ void SelfPlayStats::add(const SelfPlayStats& o) {
   max_ply += o.max_ply;
   timeout += o.timeout;
   resign += o.resign;
+  full_moves += o.full_moves;
+  surprise_ext += o.surprise_ext;
+  surprise_checks += o.surprise_checks;
   plies_sum += o.plies_sum;
 }
 

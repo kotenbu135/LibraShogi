@@ -284,6 +284,22 @@ def test_runner_refuses_full_sims_41(tmp_path: Path):
         Runner(sd, cfg, device=torch.device("cpu"))
 
 
+def test_runner_refuses_surprise_frac(tmp_path: Path):
+    """驚きで深読みを選ぶ形（[search] surprise_frac）は学習データの変更で、比べ用なのでランの起動で断る。"""
+    import pytest
+
+    from libra_league.config import load_config
+    from libra_league.runner import Runner
+
+    cfg = load_config(None)
+    cfg["net"] = {"d_model": 32, "n_layers": 2, "n_heads": 4, "d_ff": 64, "dropout": 0.0}
+    cfg["search"]["surprise_frac"] = 0.9
+    sd = StateDir(tmp_path / "ls")
+    sd.create()
+    with pytest.raises(ValueError, match="surprise_frac"):
+        Runner(sd, cfg, device=torch.device("cpu"))
+
+
 def _train_batch(n: int, seed: int) -> dict:
     r = np.random.default_rng(seed)
     t = r.uniform(-1, 1, n).astype(np.float32)
